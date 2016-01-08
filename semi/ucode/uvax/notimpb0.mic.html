@@ -1,0 +1,512 @@
+.TOC 	"NOTIMPB0.MIC -- Global Labels for Assembly BASE0"
+.TOC	"Revision 8.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 08	12-Apr-84	[RMS]	Editorial changes for pass 2
+;	21-Nov-83	[RMS]	Revised dispatch for CHMx
+;	7-Oct-83	[RMS]	Revised dispatch for AOBLSS, AOBLEQ
+;	19-Sep-83	[RMS]	Revised for BECSR removal
+; 07	15-Sep-83	[RMS]	Revised for memory management changes
+;	26-Aug-83	[RMS]	Revised CMPxV start up
+;	15-Aug-83	[RMS]	Revised CHMx start up
+;	10-Jun-83	[RMS]	Eliminated duplicate IID exception dispatches
+;	6-Jun-83	[RMS]	Revised MxPR start up
+; 06	1-Jun-83	[RMS]	Removed third at/dl field
+;	5-May-83	[RMS]	Revised for separate POLYD dispatch
+;	31-Mar-83	[RMS]	Removed extraneous reservation at REMQHI.OP..+1
+; 05	13-Mar-83	[RMS]	Major code compression
+;	22-Nov-82	[RMS]	Added EMODf, POLYf
+; 04	3-Nov-82	[RMS]	Added d_floating instructions
+;	14-Oct-82	[RMS]	Added ACBf
+;				Consolidated F,G instructions
+; 03	13-Oct-82	[RMS]	Added emulation instructions
+;				Removed extraneous halts
+;				Fixed EMUL allocation problem
+;	12-Oct-82	[RMS]	Added memory error dispatch
+; 02	22-Sep-82	[RMS]	Revised for floating point dispatch
+;	5-Sep-82	[RMS]	Revised REMQUE, REMQHI, REMQTI dispatch
+;	1-Sep-82	[RMS]	Revised memory management microtraps
+;	30-Aug-82	[RMS]	Revised DIVx2 dispatch
+;	29-Aug-82	[RMS]	Revised MULx2, MULx3 dispatch
+;	23-Aug-82	[RMS]	Revised ASHL dispatch
+;	20-Aug-82	[RMS]	Revised BLBC dispatch
+;	19-Aug-82	[RMS]	Revised for complex branch dispatch
+; 01	18-Aug-82	[RMS]	First edit for MicroVAX
+.bin
+
+.TOC	"	Microtrap Dispatches"
+
+MM.CPB..A:				HALT
+
+MM.TBM..A:				HALT
+
+MM.ACV.TNV..A:				HALT
+
+MM.M0..A:				HALT
+
+IE.BUSERR.READ.VIRT..A:			HALT
+
+IE.BUSERR.READ.PHYS..A:			HALT
+
+IE.BUSERR.WRITE.VIRT..A:		HALT
+
+IE.BUSERR.WRITE.PHYS..A:		HALT
+
+IE.INTOV..A:				HALT
+
+IE.ILLOP..A:				HALT
+
+IE.BUSERR.INT.VEC..A:			HALT
+
+FP.ERR..A:				HALT
+
+.TOC	"	IID Dispatches"
+
+IID.PREFETCH.STALL..A:			HALT
+
+IID.PREFETCH.HALT..A:			HALT
+
+IID.VAX.TRACE.TRAP..A:			HALT
+
+IID.INTERRUPT..A:			HALT
+
+IID.VAX.ARITH.TRAP..A:			HALT
+
+BRB..A:					HALT
+
+BSBB..A:				HALT
+
+XFC..A:					HALT
+
+XFD..A:					HALT
+
+FPD..A:					HALT
+
+HALT..A:				HALT
+
+NOP..A:					HALT
+
+REI..A:					HALT
+
+BPT..A:					HALT
+
+RET..A:					HALT
+
+RSB..A:					HALT
+
+LDPCTX..A:				HALT
+
+SVPCTX..A:				HALT
+
+FSD.SH.LIT..A:				HALT
+
+FSD.INDEX..A:				HALT
+
+FSD.IB.STALL..A:			HALT
+
+FSD.IB.HALTED..A:			HALT
+
+FSD.IMED..A:				HALT
+
+FSD.RMODE..A:				HALT
+
+FSD.REG.DEFER..A:			HALT
+
+FSD.PC.FAULT..A:			HALT
+
+FSD.AUTODEC..A:				HALT
+
+FSD.AUTOINC..A:				HALT
+
+FSD.AUTOINC.DEFER..A:			HALT
+
+FSD.ABSOLUTE..A:			HALT
+
+FSD.BW.DISP..A:				HALT
+
+FSD.L.DISP..A:				HALT
+
+FSD.BW.DISP.DEFER..A:			HALT
+
+FSD.L.DISP.DEFER..A:			HALT
+
+
+.TOC	"	NSD Specifier Dispatch"
+
+SSD.SH.LIT..A:				HALT
+
+SSD.INDEX..A:				HALT
+
+SSD.IB.STALL..A:			HALT
+
+SSD.IB.HALTED..A:			HALT
+
+SSD.IMED..A:				HALT
+
+SSD.RMODE..A:				HALT
+
+SSD.REG.DEFER..A:			HALT
+
+SSD.PC.FAULT..A:			HALT
+
+SSD.AUTODEC..A:				HALT
+
+SSD.AUTOINC..A:				HALT
+
+SSD.AUTOINC.DEFER..A:			HALT
+
+SSD.ABSOLUTE..A:			HALT
+
+SSD.BW.DISP..A:				HALT
+
+SSD.L.DISP..A:				HALT
+
+SSD.BW.DISP.DEFER..A:			HALT
+
+SSD.L.DISP.DEFER..A:			HALT
+
+.TOC	"	NSD Execution Dispatch"
+
+;	The consecutive HALTs guarantee two consecutive words at the
+;	hardware dispatch address for those instructions that need
+;	them.  Instructions that are implemented in one microword or
+;	do not use a call or branch in the first macroinstruction
+;	require only a single HALT.
+
+CVTPS..A:		HALT	;*** xfers to common code ***
+
+INDEX..A:               HALT
+
+			HALT	;= AT INDEX..A+1
+
+PROBER..A:              HALT	;*** weak constraints ***
+
+INSQUE..A:              HALT	;*** weak constraints ***
+
+REMQUE..A:              HALT	;*** xfers to common code ***
+
+MOVX..A:		HALT	;*** weak constraints ***
+
+CLRX..A:		HALT
+
+			HALT	;= AT CLRX..A+1
+
+PUSHX..A:		HALT	;*** weak constraints ***
+
+JSB..A:                 HALT
+
+			HALT	;= AT JSB..A+1
+
+JMP..A:                 HALT	;*** weak constraints ***
+
+ASHLX..A:		HALT	;*** weak constraints ***
+
+EMULX..A:               HALT
+
+			HALT	;= AT EMULX..A+1
+
+ADDP4..A:		HALT	;*** xfers to common code ***
+
+ADDP6..A:		HALT	;*** xfers to common code ***
+
+CVTPT..A:		HALT
+
+			HALT	;= AT CVTPT..A+1
+
+MOVC3..A:               HALT
+
+			HALT	;= AT MOVC3..A+1
+
+CMPC3..A:		HALT	;*** xfers to common code ***
+
+SCANC..A:		HALT	;*** xfers to common code ***
+
+MOVC5..A:               HALT
+
+			HALT	;= AT MOVC5..A+1
+
+CMPC5..A:		HALT	;*** xfers to common code ***
+
+MOVTC..A:		HALT	;*** weak constraints ***
+
+CVTGFX..A:		HALT	;*** xfers to common code ***
+
+CVTWL..A:               HALT	;*** weak constraints ***
+
+CVTWB..A:               HALT	;*** weak constraints ***
+
+MOVP..A:		HALT
+
+			HALT	;= AT MOVP..A+1
+
+CVTPL..A:		HALT	;*** xfers to common code ***
+
+CMPP4..A:		HALT	;*** xfers to common code ***
+
+EDITPC..A:		HALT	;*** xfers to common code ***
+
+MATCHC..A:		HALT	;*** xfers to common code ***
+
+LOCC..A:		HALT	;*** xfers to common code ***
+
+ACBW..A:                HALT	;*** xfers to common code ***
+
+ADDF2..A:               HALT
+
+			HALT	;= AT ADDF2..A+1
+
+ADDF3..A:               HALT	;*** xfers to common code ***
+
+CVTFB..A:               HALT	;*** xfers to common code ***
+
+CVTBF..A:               HALT	;*** xfers to common code ***
+
+ACBF..A:		HALT	;*** xfers to common code ***
+
+MOVF..A:                HALT	;*** does immediate case ***
+
+CMPF..A:                HALT
+
+			HALT	;= AT CMPF..A+1
+
+EMODF..A:		HALT	;*** xfers to common code ***
+
+POLYF..A:		HALT	;*** xfers to common code ***
+
+CVTFD..A:		HALT	;*** xfers to common code ***
+
+ADAWI..A:               HALT	;*** weak constraints ***
+
+INSQHI..A:              HALT	;*** weak constraints ***
+
+REMQHI..A:              HALT	;*** xfers to common code ***
+
+CVTGB..A:               HALT	;*** xfers to common code ***
+
+CVTBG..A:               HALT	;*** xfers to common code ***
+
+ACBG..A:		HALT	;*** xfers to common code ***
+
+MOVG..A:                HALT	;*** does immediate case ***
+
+POLYDX..A:		HALT	;*** xfers to common code ***
+
+TSTD..A:		HALT	;*** xfers to common code ***
+
+EMODG..A:		HALT	;*** xfers to common code ***
+
+POLYG..A:		HALT	;*** xfers to common code ***
+
+CVTDF..A:		HALT	;*** xfers to common code ***
+
+ASHQ..A:                HALT	;*** weak constraints ***
+
+EDIV..A:                HALT
+
+			HALT	;= AT EDIV..A+1
+
+ADDB2..A:               HALT	;*** implemented in one microword ***
+
+ADDB3..A:               HALT	;*** implemented in one microword ***
+
+SUBB2..A:               HALT	;*** implemented in one microword ***
+
+SUBB3..A:               HALT	;*** implemented in one microword ***
+
+MULB2..A:               HALT	;*** xfers to common code ***
+
+DIVB2..A:               HALT
+
+			HALT	;= AT DIVB2..A+1
+
+DIVB3..A:               HALT
+
+			HALT	;= AT DIVB3..A+1
+
+BISB2..A:               HALT	;*** implemented in one microword ***
+
+BISB3..A:               HALT	;*** implemented in one microword ***
+
+BICB2..A:               HALT	;*** implemented in one microword ***
+
+BICB3..A:               HALT	;*** implemented in one microword ***
+
+XORB2..A:               HALT	;*** implemented in one microword ***
+
+XORB3..A:               HALT	;*** implemented in one microword ***
+
+MNEGB..A:               HALT	;*** implemented in one microword ***
+
+CASEB..A:               HALT
+
+			HALT	;= AT CASEB..A+1
+
+CMPB..A:                HALT	;*** implemented in one microword ***
+
+MCOMB..A:               HALT	;*** implemented in one microword ***
+
+BITB..A:                HALT	;*** implemented in one microword ***
+
+TSTB..A:                HALT	;*** implemented in one microword ***
+
+INCB..A:                HALT
+
+			HALT	;= AT INCB..A+1
+
+DECB..A:                HALT
+
+			HALT	;= AT DECB..A+1
+
+CVTBL..A:               HALT	;*** weak constraints ***
+
+ROTL..A:                HALT	;*** weak constraints ***
+
+ACBB..A:                HALT	;*** xfers to common code ***
+
+MULW2..A:		HALT	;*** xfers to common code ***
+
+BISPSW..A:              HALT	;*** weak constraints ***
+
+CVTFG..A:		HALT	;*** xfers to common code ***
+
+POPR..A:                HALT	;*** weak constraints ***
+
+PUSHR..A:               HALT	;*** weak constraints ***
+
+CHMK..A:                HALT	;*** weak constraints ***
+
+CHME..A:                HALT	;*** weak constraints ***
+
+CHMS..A:                HALT	;*** weak constraints ***
+
+CHMU..A:                HALT	;*** weak constraints ***
+
+MULL2..A:		HALT
+
+			HALT	;= AT MULL2..A+1
+
+ADWC..A:                HALT	;*** implemented in one microword ***
+
+SBWC..A:                HALT	;*** implemented in one microword ***
+
+MTPR..A:                HALT	;*** xfers to common code ***
+
+MFPR..A:                HALT	;*** weak constraints ***
+
+MOVPSL..A:              HALT
+
+			HALT	;= AT MOVPSL..A+1
+
+BBS..A:         	HALT	;*** xfers to free location ***
+
+BBC..A:         	HALT	;*** xfers to free location ***
+
+BLBS..A:		HALT	;*** implemented in one microword ***
+
+BLBC..A:                HALT	;*** does immediate case ***
+
+FFS..A:         	HALT	;*** xfers to CMPV ***
+
+CMPV..A:                HALT	;*** weak constraints ***
+
+INSV..A:                HALT
+
+			HALT	;= AT INSV..A+1
+
+ACBL..A:                HALT	;*** xfers to common code ***
+
+AOBLSS..A:              HALT	;*** does immediate case ***
+
+SOBGEQ..A:              HALT	;*** does immediate case ***
+
+CVTLB..A:               HALT	;*** xfers to common code ***
+
+CVTLW..A:               HALT	;*** weak constraints ***
+
+ASHP..A:		HALT	;*** weak constraints ***
+
+CVTLP..A:		HALT	;*** xfers to common code ***
+
+CALLG..A:               HALT	;*** weak constraints ***
+
+.TOC	"	NSD Optimization Dispatch"
+
+MOVX.OP..A:		HALT	;*** weak constraints ***
+
+ADDF2.OP..A:		HALT
+
+			HALT	;= AT ADDF2.OP..A+1
+
+ADDF3.OP..A:		HALT	;*** xfers to common code ***
+
+ADAWI.OP..A:		HALT	;*** implemented in one microword ***
+
+REMQHI.OP..A:		HALT	;*** weak constraints ***
+
+ADDB2.OP..A:            HALT	;*** implemented in one microword ***
+
+ADDB3.OP..A:            HALT	;*** implemented in one microword ***
+
+SUBB2.OP..A:            HALT	;*** implemented in one microword ***
+
+DIVB2.OP..A:		HALT
+
+			HALT	;= AT DIVB2.OP..A+1
+
+SUBB3.OP..A:            HALT	;*** implemented in one microword ***
+
+BISB2.OP..A:            HALT	;*** implemented in one microword ***
+
+BISB3.OP..A:            HALT	;*** implemented in one microword ***
+
+BICB2.OP..A:            HALT	;*** implemented in one microword ***
+
+BICB3.OP..A:            HALT	;*** implemented in one microword ***
+
+XORB2.OP..A:            HALT	;*** implemented in one microword ***
+
+XORB3.OP..A:            HALT	;*** implemented in one microword ***
+
+MNEGB.OP..A:		HALT	;*** implemented in one microword ***
+
+CMPB.OP..A:             HALT	;*** implemented in one microword ***
+
+MCOMB.OP..A:		HALT	;*** implemented in one microword ***
+
+BITB.OP..A:             HALT	;*** implemented in one microword ***
+
+ADWC.OP..A:		HALT	;*** implemented in one microword ***
+
+SBWC.OP..A:		HALT	;*** implemented in one microword ***
+
+BBS.OP..A:		HALT	;*** xfers to common code ***
+
+BBC.OP..A:		HALT	;*** xfers to common code ***
+
+AOBLSS.OP..A:		HALT	;*** does immediate case ***

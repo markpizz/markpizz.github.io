@@ -1,0 +1,271 @@
+VAX Processor Charts		Rev 7 15-Sep-2000
+
+1. Definitions
+
+Integer Inst =	Integer instruction group
+
+ arith/logic:	ADAWI	ADDB2	ADDB3	ADDL2	ADDL3
+		ADDB2	ADDB3	ADWC	ASHL	ASHQ
+		BICB2	BICB3	BICL2	BICL3	BICW2
+		BICW3	BISB2	BISB3	BISL2	BISL3
+		BISW2	BISW3	BITB	BITL	BITW
+		CLRB	CLRL	CLRQ	CLRW	CMPB
+		CMPL	CMPW	CVTBL	CVTBW	CVTLB
+		CVTLW	CVTWB	CVTWL	DECB	DECL
+		DECW	DIVB2	DIVB3	DIVL2	DIVL3
+		DIVW2	DIVW3	EDIV	EMUL	INCB
+		INCL	INCW	MCOMB	MCOML	MCOMW
+		MNEGB	MNEGL	MNEGW	MOVB	MOVL
+		MOVQ	MOVW	MOVZBW	MOVZBL	MOVZWL
+		MULB2	MULB3	MULL2	MULL3	MULW2
+		MULW3	PUSHL	ROTL	SBWC	SUBB2
+		SUBB3	SUBL2	SUBL3	SUBW2	SUBW3
+		TSTB	TSTL	TSTW	XORB2	XORB3
+		XORL2	XORL3	XORW2	XORW3
+
+ address:	MOVAB	MOVAL	MOVAQ	MOVAW	PUSHAB
+		PUSHAL	PUSHAQ	PUSHAW
+
+ bit field:	CMPV	CMPZV	EXTV	EXTZV	FFC
+		FFS	INSV
+
+ control:	ACBB	ACBL	ACBW	AOBLEQ	AOBLSS
+		BBC	BBCC	BBCCI	BBCS	BBS
+		BBSC	BBSS	BBSSI	BEQ	BGEQ
+		BGEQU	BGTR	BGTRU	BLBS	BLBC
+		BLEQ	BLEQU	BLSS	BLSSU	BNEQ
+		BRB	BRW	BSBB	BSBW	BVC
+		BVS	CASEB	CASEL	CASEW	JMP
+		JSB	RSB	SOBGEQ	SOBGTR
+
+ proc call:	CALLG	CALLS	RET
+
+ miscellaneous:	BICPSW	BISPSW	BPT	INDEX	MOVPSL
+		NOP	POPR	PUSHR	HALT
+
+ queue:		INSQHI	INSQTI	INSQUE	REMQHI	REMQTI
+		REMQUE
+
+ oper system:	CHMK	CHME	CHMS	CHMU	HALT
+		LDPCTX	MFPR	MTPR	PROBER	PROBEW
+		REI	SVPCTX
+
+ string:	CMPC3	CMPC5	LOCC	MOVC3	MOVC5
+		SCANC	SKPC	SPANC
+		
+F_flt =		F_floating instruction group
+
+		ADDF2	ADDF3	CMPF	CVTBF	CVTFB
+		CVTFL	CVTFW	CVTLF	CVTRFL	CVTWF
+		DIVF2	DIVF3	MNEGF	MOVF	MULF2
+		MULF3	SUBF2	SUBF3	TSTF
+
+D_flt =		D_floating instruction group
+
+		ADDD2	ADDD3	CMPD	CVTBD	CVTDB
+		CVTDF	CVTDL	CVTDW	CVTFD	CVTLD
+		CVTRDL	CVTWD	DIVD2	DIVD3	MNEGD
+		MOVD	MULD2	MULD3	SUBD2	SUBD3
+		TSTD
+
+G_flt =		G_floating instruction group
+
+		ADDG2	ADDG3	CMPG	CVTBG	CVTFG
+		CVTGB	CVTGF	CVTGL	CVTGW	CVTLG
+		CVTRGL	CVTWG	DIVG2	DIVG3	MNEGG
+		MOVG	MULG2	MULG3	SUBG2	SUBG3
+		TSTG
+
+H_flt =		H_floating instruction group
+
+		ADDH2	ADDH3	CLRH	CMPH	CVTBH
+		CVTDH	CVTFH	CVTGH	CVTHB	CVTHD
+		CVTHF	CVTHG	CVTHL	CVTHW	CVTLH
+		CVTRHL	CVTWH	DIVH2	DIVH3	MNEGH
+		MOVAH	MOVH	MOVO	MULH2	MULH3
+		PUSHAH	SUBH2	SUBH3	TSTH
+
+Decimal =	Decimal instruction group
+
+		ADDP4	ADDP6	ASHP	CMPP3	CMPP4
+		CVTLP	CVTPL	CVTPS	CVTPT	CVTSP
+		CVTTP	DIVP	MOVP	MULP	SUBP4
+		SUBP6
+
+Vectors =	Vector instruction group
+
+		IOTA	MFVP	MTVP	VGATHL	VGATHQ
+		VLDL	VLDQ	VSADDD	VSADDF	VSADDG
+		VSADDL	VSBICL	VSBISL	VSCATL	VSCATQ
+		VSCMPD	VSCMPF	VSCMPG	VSCMPL	VSDIVD
+		VSDIVF	VSDIVG	VSMERGE	VSMULD	VSMULF
+		VSMULG	VSMULL	VSSLLL	VSSRLL	VSSUBD
+		VSSUBF	VSSUBG	VSSUBL	VSTL	VSTQ
+		VSXORL	VSYNC	VVADDD	VVADDF	VVADDG
+		VVADDL	VVBICL	VVBISL	VVCMPD	VVCMPF
+		VVCMPG	VVCMPL	VVCVT	VVDIVD	VVDIVF
+		VVDIVG	VVMERGE	VVMULD	VVMULF	VVMULG
+		VVMULL	VVSLLL	VVSRLL	VVSUBD	VSSUBF
+		VSSUBG	VSSUBL	VVXORL
+		
+Emulated fp =	Emulated floating point instruction group
+
+		ACBF	ACBD	ACBG	ACBH
+		EMODF	EMODD	EMODG	EMODH
+		POLYF	POLYD	POLYG	POLYH
+
+Emulated st =	Emulated string instruction group
+
+		CRC	EDITPC	MATCHC	MOVTC	MOVTUC
+
+Compat mode =	Compatibility mode instruction group
+
+2. Processors
+
+	y	=	implemented in hardware/microcode
+	n	=	emulated in macrocode
+	opt	=	implemented in hardware/microcode as an option
+
+Processor	Shipped	Process	Integer	F_flt	D_flt	G_flt	H_flt	Decimal	Vectors	Emul'td	Emul'td Compat	Phys	Sys	TLB
+(SID)									  fp	  st	Mode	Addr	Space	Size
+
+780 = 1		1977	TTL	y	y	y	opt	opt	y	n	y [1]	y	y	30b	1gb	128,2,s
+
+750 = 2		1981	TTL GA	y	y	y	opt	opt	y	n	y [1]	y	y	24b	1gb	512,2,s
+
+730 = 3		1983	TTL	y	y	y	y	y	y	n	y	y	y	24b	1gb	128,1,s
+
+8600 = 4	1984	Mosaic1	y	y	y	y	y	y	n	y	y	y	30b	1gb	512,2,s
+
+V-11 = 5	1986	ZMOS	y	y	y	y	y	y	n	y	y	n	30b	1gb	5,f,* +
+														512,1,s
+
+8800 = 6,17	1986	Mosaic1	y	y	y	y	y	y	n	y	y	n	30b	1gb	1024,1,s
+
+uVAX I/D = 7[2]	1984	NMOS	y	y	y	n	n	n	n	y [1]	n	n	22b	1gb	512,1,s
+uVAX I/G = 7[2]	1984	NMOS	y	y	n	y	n	n	n	y [1]	n	n	22b	1gb	512,1,s
+
+uVAX II = 8	1985	ZMOS	y [3]	y	y	y	n	n	n	y [1]	n	n	30b	1gb	8,f,u
+
+CVAX = 10	1987	CMOS-1	y	y	y	y	n	n	n	y [1]	n	n	30b	1gb	28,f,u
+(CVAX+ shrink)	1988	CMOS-2
+
+Rigel = 11	1989	CMOS-2	y	y	y	y	n	n	opt	n	n	n	30b	1gb	64,f,u
+
+9000 = 14	1990	Mosaic3	y	y	y	y	y	y	opt	n	n	n	30b	1gb	1024,1,s
+
+Mariah = 18	1990	CMOS-3	y	y	y	y	n	n	opt	n	n	n	30/32b	1gb	64,f,u
+
+NVAX = 19	1991	CMOS-4	y	y	y	y	n	n	n	n	n	n	30/32b	2gb	96,f,u
+
+SOC = 20	1990	CMOS-3	y	y	y	y	n	n	n	y [1]	n	n	30b	1gb	28,f,u
+
+NVAX+ = 23	1992	CMOS-4	y	y	y	y	n	n	n	n	n	n	30/32b	2gb	96,f,u
+(NVAX++ shrink)	1994	CMOS-5
+
+Notes:
+
+[1]	Only for supported floating point data types.
+
+[2]	MicroVAX 1's were available with either D_floating or G_floating,
+	but not both.  90% of all sold implemented D_floating.
+
+[3]	CMPC3, CMPC5, LOCC, SKPC, SCANC, SPANC were emulated.
+
+Translation lookaside buffer (TLB) size is:
+number of entries, associativity, organization --
+	associativity:	1 =	direct map
+			2 =	2 way associative
+			f =	fully associative
+	organization:	s =	split (half system, half process)
+			u =	unified
+			* =	V-11 mini-TLB, 1 instruction, 4 data
+
+Processes --
+
+Mosaic1		3u ECL gate arrays
+Mosaic2		1u ECL gate arrays
+ZMOS		3u NMOS, 2 metal layers
+CMOS-1		2u CMOS, 2 metal layers
+CMOS-2		1.5 CMOS, 2 metal layers
+CMOS-3		1u CMOS, 3 metal layers
+CMOS-4		.75u CMOS, 3 metal layers
+CMOS-5		.5u CMOS, 4 metal layers
+
+3. Processors and Models
+
+Processor	Used in Models				Cycle Time	Primary		Secondary
+									Cache		Cache
+
+780		VAX-11/780, VAX-11/782			200ns		8KB		-
+
+750		VAX-11/750				320ns		4KB		-
+
+730		VAX-11/730, VAX-11/725			270ns		-		-
+
+785		VAX-11/785				133ns		32KB		-
+
+8600		VAX 8600				80ns		16KB		-
+8650		VAX 8650				55ns		16KB		-
+
+V-11		VAX 8200, VAX 8300, VAXstation 8000	200ns		8KB		-
+		VAX 8250, VAX 8350			160ns		8KB		-
+
+8800		VAX 8500, VAX 8530, VAX 8550, VAX 8700,	 45ns		64KB		-
+		 VAX 88xx
+
+uVAX I		MicroVAX I, VAXstation I		250ns		8KB		-
+
+uVAX II		MicroVAX II, MicroVAX 2000,		200ns		-		-
+		 VAXstation II, VAXstation II/GPX,
+		 VAXstation 2000
+
+CVAX		MicroVAX 3300/3400			100ns		1KB		-
+		MicroVAX 3500/3600,			 90ns		1KB		 64KB
+		 VAXstation 3200, VAXstation 3500
+		MicroVAX 3100-10/20			 90ns		1KB		-
+		VAXstation 3100-30/40			 90ns		1KB		 32KB
+		VAXstation 3520/3540			 80ns		1KB		 64KB
+		VAX 6000-2XX				 80ns		1KB		256KB
+
+CVAX+		MicroVAX 3800/3900			 60ns		1KB		 64KB
+		MicroVAX 3100-10e/20e			 60ns		1KB		 -
+		VAXstation 3100-38/48			 60ns		1KB		 32KB
+		VAX 6000-3XX	 			 60ns		1KB		256KB
+		VAXft 110, 310			 	 60ns		1KB		 32KB
+
+Rigel		VAX 4000-300				 28ns		2KB		128KB
+		VAXstation 3100-76			 28ns		2KB		128KB
+		VAX 6000-4XX				 28ns		2KB		128KB
+
+Mariah		MicroVAX 3100-80			 20ns		2KB		256KB
+		VAXstation 4000-60			 18ns		2KB		256KB
+		VAX 6000-5XX				 16ns		2KB		512KB
+
+SOC		VAX 4000-200				 35ns		6KB		-
+		MicroVAX 3100-40			 40ns		6KB		-
+		VAXstation 4000-VLC			 40ns		6KB		-
+		VAXft 410, 610				 35ns		6KB		128KB
+
+9000		VAX 9000-110,210,3XX,4XX		 16ns		8+128KB		-
+
+NVAX		VAX 4000-100				 14ns		2+8KB		128KB
+		VAX 4000-105A				 12ns		2+8KB		128KB
+		VAX 4000-400				 16ns		0+8KB		128KB
+		VAX 4000-500 and -500A			 14ns		2+8KB		128KB
+		VAX 4000-600 and -600A and -505A	 12ns		2+8KB		512KB
+		VAX 4000-700A				 10ns		2+8KB		2MB
+		VAX 4000-705A				  9ns		2+8KB		2MB
+		MicroVAX 3100-85			 16ns		0+8KB		128KB
+		MicroVAX 3100-90			 14ns		2+8KB		128KB
+		MicroVAX 3100-95			 12ns		2+8KB		512KB
+		VAXstation 4000-90			 14ns		2+8KB		256KB
+		VAXstation 4000-90A			 12ns		2+8KB		256KB
+		VAX 6000-6XX				 12ns		2+8KB		2MB
+
+NVAX+		VAX 7000-6XX, 10000-6XX			 11ns		2+8KB		4MB
+		VAXft 810				 12ns		2+8KB		512KB
+
+NVAX++		VAX 7000-7XX, 10000-7XX			  7.5ns		2+8KB		4MB
+
+Caches with separate instruction and data spaces are indicated as I+D.

@@ -1,0 +1,249 @@
+.TOC	"REV_MARIAH.MIC -- Microcode Revision Number"
+.TOC	"Revision 5.3"
+
+;	Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1986, 1987, 1988, 1989, 1990 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    3 18-Apr-90 REC	Set edit to 3;
+;			pass 3 code freeze.
+;
+;                REC	Pass 3 changes:
+;
+;	CSTRING (2)	Touch MD4 before exit in MOVC5 for srclen = dstlen = 0,
+;			and in CMPC5 for src1len = src2len = 0
+;
+;
+;    2 06-Feb-90 REC/	Set edit to 2;
+;		 JPE	pass 2 code freeze.
+;
+;                REC	Pass 2 changes:
+;
+;	  MACRO (5)	Force data length to longword on flush Macros
+;
+; MEMMGT_MARIAH (8)	Fix MM.IB.FAULT.., replace d-read with case on
+;                	probe status                                  
+;
+; INTEXC_MARIAH	(4) 	Separated Rigel and Mariah modules.
+;			Unconditionally clear STATE4 in IE.BUSERR.WRITE.DAL..
+;
+;SELFTEST_MARIAH (10)	Convert 6 spare micorwords for MM.IB.FAULT.. fix
+;		 (9)	Removed 3 spare microwords for IE.BUSERR.WRITE.DAL..
+;
+;     INTLOGADR	(4)	Flush write buffers in ADAWI.R.. to implement
+;			NUDGE and BARRIER instructions.
+;
+;
+; (5)1 17-May-89 REC	Cleared development flag, reset edit to 1;
+;			pass 1 code freeze.
+;
+;                REC	Pass 1 changes:
+;
+;	IBOX (4)	Deoptimized MUL{B,W}2 and MUL{B,W,L}3
+; 
+;	MULDIV	(4)	Deoptimize MULx2 and MULx3 and add a nop to the first
+;			cycle of both execution flows to guarantee that we
+;			get the correct value of DL for case branching.
+;
+;POWERUP_MARIAH (4)	Constrain microword to former spare uaddr 6A2 to
+;			allow a patch at SPEC.AV.REG..
+;
+;SELFTEST_MARIAH (8)	Convert 1 spare microword to SPEC.AV.REG.DISPATCH
+;
+;	SPECIFIER (3)	Add a nop to the first cycle of SPEC.AV.REG..
+;			to guarantee that we get the correct value of
+;			DL for case branching.
+;
+;    3 07-Apr-89 REC	Changes to fix HALT interrupt problem found in Rigel
+;
+;	INTEXC	(3)	Restore PC from BPC on halt interrupt
+;
+;SELFTEST_MARIAH (7)	Convert 1 spare microword to IE.BACKUP.PC
+;
+;    2 06-Mar-89 GMU	Changes to support new 30/32-bit PA mode and
+;			to remove I-stream error recovery microcode.
+;
+; DEFINE_MARIAH	(6)	Added MISC field control for 30/32-bit PA control,
+;			MBOX.STATUS microtest condition on 30/32-bit PA state,
+;			machine check code for I-stream errors.
+;		(5)	Separated Rigel and Mariah modules.
+;
+;	MACRO	(4)	Removed conditional assembly for PCB macros now that both
+;			Rigel and Mariah are back to physical PCBs.
+;
+; MEMMGT_MARIAH (7)	Separated Rigel and Mariah modules; removed I-stream
+;			error retry and replaced it with a machine check.
+;
+;  OPSYS_MARIAH (7)	Added support for ACCS<2> interface to 30/32-bit PA mode
+;			latch.
+;
+;POWERUP_MARIAH	(3)	Separated Rigel and Mariah modules; initialized
+;			30/32-bit PA mode to 30-bit on powerup, changed
+;			boot ROM address to E0040000.
+;
+;SELFTEST_MARIAH (6)	Added 7 spare microwords to Mariah.
+;		 (5)	Separated Rigel and Mariah modules.
+;
+;
+; (4)1 07-Feb-89 REC	New file: REV_MARIAH.MIC
+; 			Set development flag, reset edit to 1;
+;
+;			Mariah Pass 1 changes:
+;
+;	DEFINE	(4)	Added new SHIFT.VAL value name PTE.ROT with conditional
+;			assembly to support Mariah PTE rotate value change
+;
+;	MEMMGT	(6)	Replace explicit PTE rotate value with PTE.ROT
+;
+;    OPSYS_MARIAH (6)	New file: OPSYS_MARIAH.MIC, remove conditional assembly
+;			switches for Mariah
+;		(5)	Replace explicit PTE rotate value with PTE.ROT
+;    		(4)	Constrained microaddress on extra microword for Mariah
+;
+;
+;    2 30-Aug-88 REC	Cleared development flag, set edit to 2;
+;			pass 2 code freeze.
+;                GMU/
+;		 RMS	Pass 2 changes:
+;
+;	CTRL	(2)	Added restriction about .vx specifier operands.
+;
+;	DEFINE	(3)	Added ASTLVL comments, SID option byte for VM.
+;		(2)	Added conditional definitions for Mariah.
+;
+;	EMULATE	(3)	Added restriction about .vx specifier operands for
+;			CVTPL.
+;		(2)	Modified to use new physical mreq macros.
+;
+;	IBOX	(3)	Changed the first specifier of PROBEVMx from .rb
+;			to .rl to reflect the recent VAX ECO.
+;		(2)	Deoptimized MULL2.  The I-box does not guarantee
+;			the state of AT for an optimized execution flow and
+;			the operand transfer done at MULL2.R.. was being
+;			killed by the M-box because AT was being set to
+;			AT=A.
+;
+;	INTEXC	(2)	Modified to use new physical mreq macros.
+;
+;	INTLOGADR (3)	Changed CVTBI.R to use opcode case rather than
+;			a DL case.  This avoids using a DL case in an
+;			optimized entry point.
+;		(2)	Added restriction about .vx specifier operations.
+;
+;	MACRO	(3)	Revised SCB macros to do physical references per VAXB ECO.
+;		(2)	Added conditional macros for Mariah.
+;
+;    	MEMMGT	(5)	Replace MD.MMGT with TRAP in MM.IB.ERROR..
+;    		(4)	Insert 2 cycles at the start of MM.IB.ERROR.. to
+;			prevent PC <-- BACKUP PC violation.
+;		(3)	Corrected radix on cross-page offset, updated
+;			comments.
+;		(2)	Modified to use new physical mreq macros.
+;
+;	MULDIV	(3)	Added restriction about .vx specifier operands.
+;		(2)	Removed FPU& macro from the MULX2.R.. entry point to
+;			reflect the fact that MULL2 has been deoptimized.
+;			Only MULB2 and MULW2 enter thru MULX2.R..; MULL2
+;			always enters thru MULX2.. after passing thru the
+;			specifier flows where the second operand is transferrred
+;			to the F-chip.
+;
+;	OPSYS	(3)	Added VINTSR to list of EPRs.
+;		(2)	Modified to use new physical mreq macros.
+;
+;	POWERUP	(2)	Editorial changes for VM option.
+;
+;    	SELFTEST (4)	Removed two spare microwords for use in MM.IB.ERROR..
+;		(3)	Removed spare microword for use in VECTOR.MIC.
+;		(2)	Added conditional assembly to remove microwords
+;			for Mariah variant.
+;
+;	SPECIFIER (2)	Added notes about DL case restriction in SPEC.AV.REG
+;			flow.
+;
+;	VECTOR	(3)	Checked for vector disabled condition on exit from
+;			MFVP.  This is necessary because SYNC and MSYNC must
+;			force a vector unit disabled fault on the current
+;			instruction rather than the next if a previous
+;			vector instruction encountered an exception.
+;		 (2)	Corrected the order of the ALIGNLIST at VEC.SYNCHRONOUS.
+;			The error caused the current mode encoding to be
+;			reversed for exec and supervisor modes in memory
+;			reference instructions sent to the vector unit.
+;
+;	VFIELD	(2)	Added restriction about .vx specifier operands.
+;
+;
+; (3)1 23-Aug-87 GMU	Cleared development flag, reset edit to 1;
+;			pass 1 code freeze.
+;
+;    6 28-Jul-87 GMU	Included final vector interface.
+;    5 13-May-87 GMU	Included error recovery features.
+;    4 11-Mar-87 GMU	Included write even/odd parity functions.
+;    3 17-Dec-86 GMU	Completed code for the six new string instructions.
+;    2 14-Nov-86 GMU	Removed ACB{F,D,G}, add CMPC{3,5}, LOCC, SKPC, SCANC,
+;			SPANC, optimize MUL{B,W,L}{2,3}.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+.TOC	"	Definition for Microcode Revision Number"
+
+
+;	The constant MICROCODE.REVISION is the number returned in bits
+;	<7:0> of the SID IPR.  At present, this constant is defined as having
+;	the following fields:
+;
+;		 07 06 05 04 03 02 01
+;		+--+--+--+--+--+--+--+
+;		|DP|    Edit Number  |
+;		+--+--+--+--+--+--+--+
+;
+;	where:
+;
+;		DP		= Development/Production flag:
+;					0 = Production microcode.
+;					1 = Development microcode.
+;		Edit Number	= Edit number of the microcode.
+;
+;	For development microcode, the edit number should be incremented any
+;	time a change is made that requires a corresponding model change.
+;
+;	For production microcode, the edit number should be incremented
+;	when any change is made to the microcode.
+
+
+;	Define the two parts of the microcode revision number.
+
+.SET/MICROCODE.DP.FLAG=0		; development/production flag
+
+.SET/MICROCODE.EDIT.NUMBER=3		; microcode edit number
+
+
+;	Post-process into the final value
+
+.SET/MICROCODE.REVISION=<.OR[	<.SHIFT[<MICROCODE.DP.FLAG>,7]>,
+				<MICROCODE.EDIT.NUMBER>		]>
+
+.bin

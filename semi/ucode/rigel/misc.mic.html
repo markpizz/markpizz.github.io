@@ -1,0 +1,903 @@
+.TOC	"MISC.MIC -- Miscellaneous Instructions"
+.TOC	"Revision 3.1"
+
+;	Rick Calcagni, George Mills, Bob Supnik, Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (3)1 24-Aug-87 RMS	Saved cycles in INDEX, POPR; pass 1 code freeze.
+;
+;    5 30-Jul-87 GMU	Added optimization for INDEX multiply by 1.
+;    4 21-May-87 GMU	Added assertions about CALL on first cycle.
+;    3 29-Dec-86 RMS	Editorial changes.
+;    2 25-Sep-86 GMU	Replaced GOTO [LAST.CYCLE] with LAST CYCLE at
+;			POPR.PUSHR.EXIT now that model is fixed.
+; (2)1 12-Sep-86 RMS	Initial production microcode.
+
+.bin
+;= BEGIN MISC
+.nobin
+
+;	This module implements the miscellaneous instruction class.
+;	Instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	B9	 BICPSW mask.rw							* * * *		rsv
+;
+;	B8	 BISPSW mask.rw							* * * *		rsv
+;
+;	03	 BPT {-(KSP).w*}						0 0 0 0
+;
+;	00	 HALT {-(KSP).w*}						- - - -		prv
+;
+;	0A	 INDEX subscript.rl, low.rl, high.rl, size.rl, indexin.rl,	* * 0 0		sub
+;		 indexout.wl
+;
+;	DC	 MOVPSL dst.wl							- - - -
+;
+;	01	 NOP								- - - -
+;
+;	BA	 POPR mask.rw, {(SP)+.r*}					- - - -
+;
+;	BB	 PUSHR mask.rw, {-(SP).w*}					- - - -
+;
+;	FC	 XFC {unspecified operands}					0 0 0 0
+;
+.TOC	"	BPT, XFC"
+
+;	These instructions cause an immediate fault through a dedicated SCB vector.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	BPT		03	breakpoint fault			0	--	--	BPT	   --
+;
+;	XFC		FC	customer reserved instruction fault	0	--	--	XFC	   --
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The next microstate is IE.FAULT.COMMON.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0			[Integer overflow cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BPT operation:
+;
+;		initiate breakpoint fault
+
+BPT..:
+	;********** Hardware dispatch **********;
+	[MD.T1] <-- 000000[SCB.BPT],		; offset into SCB for BPT instruction
+	DISABLE IB PREFETCH,			; turn off prefetching
+	GOTO [IE.FAULT.COMMON]			; faults, go join intexc code
+ 						; >> no CALL during first cycle
+
+;	XFC operation:
+;
+;		initiate customer reserved instruction fault
+
+XFC..:
+	;********** Hardware dispatch **********;
+	[MD.T1] <-- 000000[SCB.XFC],		; offset into SCB for XFC instruction
+	DISABLE IB PREFETCH,			; turn off prefetching
+	GOTO [IE.FAULT.COMMON]			; faults, go join intexc code
+ 						; >> no CALL during first cycle
+
+.nobin
+.TOC	"	HALT"
+
+;	This instruction halts the processor if the current mode is kernel.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   ----
+;	HALT		00	if (curr mode neq kernel) then		0	--	--	HALT	   --
+;				   (reserved instruction fault)
+;				   else (halt restart)
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The next microstate is CONSOLE.HALT.. (kernel mode)
+;		or RSRV.INST.FLT.. (non-kernel mode).
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	HALT operation:
+;
+;		if PSL<cur_mode> is kernel, then halt processor,
+;		else initiate reserved instruction fault
+
+HALT..:
+	;********** Hardware dispatch **********;
+	CASE [PSL26-24] AT [HALT.00]		; case on PSL<cur_mode>
+ 						; >> no CALL during first cycle
+
+;= ALIGNLIST 100*	(HALT.00,	HALT.01,
+;=			 HALT.10,	HALT.11)
+
+HALT.00:
+	;---------------------------------------; psl<25:24> = 00 (kernel):
+	CONSOLE HALT [ERR.HLTINS]		; go to console halt routine
+
+HALT.01:
+	;---------------------------------------; psl<25:24> = 01 (executive):
+	RESERVED INSTRUCTION FAULT		; not in kernel mode, fault
+
+HALT.10:
+	;---------------------------------------; psl<25:24> = 10 (supervisor):
+	RESERVED INSTRUCTION FAULT		; not in kernel mode, fault
+
+HALT.11:
+	;---------------------------------------; psl<25:24> = 11 (user):
+	RESERVED INSTRUCTION FAULT		; not in kernel mode, fault
+
+.nobin
+.TOC	"	NOP"
+
+;	This instruction performs no operation.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   ----
+;	NOP		01	no operation				0	--	--	NOP	   --
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		Machine state is unchanged.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	NOP operation:
+;
+;		decode next instruction
+
+LAST.CYCLE:
+NOP..:
+	;********** Hardware dispatch **********;
+	LAST CYCLE				; decode next instruction
+ 						; >> no CALL during first cycle
+
+.nobin
+.TOC	"	INDEX"
+
+;	This instruction computes the index into a subscripted array.
+;	The indexin operand is added to the subscript operand and the sum 
+;	multiplied by the size of the operand.  The indexout operand is replaced
+;	by the result.  If the subscript operand is less than the low operand or
+;	greater than the high operand, a subscript range trap is taken.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----		--	--------   -----
+;	INDEX		0A	indexout.wl <--				6o	rrrrrw/llllll	iiii	INDEX	   --
+;					(indexin.rl+subscript.rl)*size.rl
+;					if (subscript.rl LSS lowlimit.rl) OR
+;					   (subscript.rl GTR highlimit.rl) THEN subscript range trap
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (subscript) operand
+;		MD.S2	=	second (low limit) operand
+;		MD.S3	=	third (high limit) operand
+;		MD.S4	=	fourth (size) operand
+;		MD.S5	=	fifth (indexin) operand
+;		VA	=	address of sixth (indexout) operand, if memory
+;		G.RN	=	register number of sixth specifier
+;		DL	=	data length of sixth operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;		If a subscript range trap occured, a VAX TRAP REQUEST is pending.
+;
+;	Condition codes:
+;		N <-- indexout LSS 0
+;		Z <-- indexout EQL 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Instruction data indicates that a number of INDEX instructions have
+;		size=1 (generated by Pascal, which uses INDEX to do range checks).
+;		The optimization to special-case size=1 saves about 32 cycles.
+;
+.bin
+
+;	INDEX operation:
+;
+;		indexout.wl <-- (indexin.rl+subscript.rl)*size.rl
+;		if (subscript.rl LSS lowlimit.rl) OR
+;		   (subscript.rl GTR highlimit.rl) THEN subscript range trap
+
+INDEX.R..:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [MD.S1] - [MD.S2], LONG,	; [1] compare subscript:low limit
+	CALL [INDEX.SUB],			; call main subroutine, result in Q
+		sim wbus.nzvc <-- k[0]
+
+	;---------------------------------------;
+	[G.RN] <-- [Q], LONG,			; write Q to register
+	SET PSL CC, MAP.IIII,			; set psl cc's, psl map is iiii
+	LAST CYCLE				; decode next instruction
+
+INDEX..:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [MD.S1] - [MD.S2], LONG,	; [1] compare subscript:low limit
+	CALL [INDEX.SUB],			; call main subroutine, result in Q
+		sim wbus.nzvc <-- k[0]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [Q], LONG,	; write Q to memory
+	SET PSL CC, MAP.IIII,			; set psl cc's, psl map is iiii
+	LAST CYCLE				; decode next instruction
+
+;	INDEX, continued.
+;	Common subroutine for register and memory destination flows.
+
+;	At this point,
+;		MD.S1	=	subscript
+;		MD.S3	=	high limit
+;		MD.S4	=	size
+;		MD.S5	=	index in
+;		VA	=	address of indexout operand, if memory
+;		RN	=	register number of indexout specifier
+
+INDEX.SUB:
+	;---------------------------------------;
+	[WBUS] <-- [MD.S3] - [MD.S1], LONG,	; [2] compare high limit:subscript
+		sim wbus.nzvc <-- k[0]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.S4] XOR 000000[01], LONG, ; [3] test for size = 1
+		sim wbus.nzvc <-- [index.size.0z00]
+
+	;---------------------------------------;
+	[MD.T0] <-- [MD.S5] + [MD.S1], LONG,	; [4] MD.T0 = indexin + subscript
+	CASE [WBUS.NZV] AT [INDEX.LOW.LIMIT.00]	; case on result of low limit
+						; check from [1]
+
+;= ALIGNLIST 010*	(INDEX.LOW.LIMIT.00,	INDEX.LOW.LIMIT.01,
+;=			 INDEX.LOW.LIMIT.10,	INDEX.LOW.LIMIT.11)
+
+INDEX.LOW.LIMIT.00:
+	;---------------------------------------; wbus.nv = 00:
+	[Q] <-- [MD.S4], LONG,			; [5] Q <-- size
+						; >> Q write, next cycle not mul/div
+	CASE [WBUS.NZV] AT [INDEX.HIGH.LIMIT.00], ; low limit ok, case on high limit check
+		sim wbus.nzvc <-- k[0]
+
+INDEX.LOW.LIMIT.01:
+	;---------------------------------------; wbus.nv = 01:
+	[Q] <-- [MD.S4], LONG,			; [5] Q <-- size
+						; >> Q write, next cycle not mul/div
+	GOTO [INDEX.HIGH.LIMIT.01]		; go set trap and finish instruction
+
+INDEX.LOW.LIMIT.10:
+	;---------------------------------------; wbus.nv = 10:
+	[Q] <-- [MD.S4], LONG,			; [5] Q <-- size
+						; >> Q write, next cycle not mul/div
+	GOTO [INDEX.HIGH.LIMIT.10]		; go set trap and finish instruction
+
+INDEX.LOW.LIMIT.11:
+	;---------------------------------------; wbus.nv = 11:
+	[Q] <-- [MD.S4], LONG,			; [5] Q <-- size
+						; >> Q write, next cycle not mul/div
+	CASE [WBUS.NZV] AT [INDEX.HIGH.LIMIT.00], ; low limit ok, case on high limit check
+		sim wbus.nzvc <-- k[0]
+
+;	INDEX, continued.
+;	Low limit check complete, finish high limit check.
+
+;	At this point,
+;		MD.T0	=	index in + subscript
+;		Q	=	size
+;		VA	=	address of indexout operand, if memory
+;		RN	=	register number of indexout specifier
+
+;= ALIGNLIST 010*	(INDEX.HIGH.LIMIT.00,	INDEX.HIGH.LIMIT.01,
+;=			 INDEX.HIGH.LIMIT.10,	INDEX.HIGH.LIMIT.11)
+
+INDEX.HIGH.LIMIT.00:
+	;---------------------------------------; wbus.nv = 00:
+	[MD.T1] <-- 000000[00], LONG,		; [6] clear high order multiply result
+	HOLD WBUS CC,				; preserve cc's from size
+	CASE [WBUS.NZV] AT [INT.MULT.LONG]	; case on size=1 test from [3]
+
+INDEX.HIGH.LIMIT.01:
+	;---------------------------------------; wbus.nv = 01:
+	[TRAP] <-- 000000[ARITH.TRAP.SUBRNG],	; [6] set new trap number
+	HOLD WBUS CC,				; preserve cc's from size
+	GOTO [INDEX.TRAP]			; go set trap and finish instruction
+
+INDEX.HIGH.LIMIT.10:
+	;---------------------------------------; wbus.nv = 10:
+	[TRAP] <-- 000000[ARITH.TRAP.SUBRNG],	; [6] set new trap number
+	HOLD WBUS CC,				; preserve cc's from size
+	GOTO [INDEX.TRAP]			; go set trap and finish instruction
+
+INDEX.TRAP:
+	;---------------------------------------;
+	[MD.T1] <-- S[K0], LONG,		; [7] clear high order multiply result
+	HOLD WBUS CC,				; preserve cc's from size
+	SET VAX TRAP REQUEST			; set VAX trap request
+
+	;---------------------------------------;
+	[WBUS] <-- [PC], LONG,			; [8] resynchronize with I Box
+	LOAD VIBA AND PC,			; following request for VAX trap
+	HOLD WBUS CC,				; preserve cc's from size
+	GOTO [INT.MULT.LONG]			; do multiply and return to caller
+
+INDEX.HIGH.LIMIT.11:
+	;---------------------------------------; wbus.nv = 11:
+	[MD.T1] <-- 000000[00], LONG,		; [6] clear high order multiply result
+	HOLD WBUS CC,				; preserve cc's from size
+	CASE [WBUS.NZV] AT [INT.MULT.LONG]	; case on size=1 test from [3]
+
+;	INDEX, continued.
+;	Limit checks complete, calculate indexout.
+
+;	At this point,
+;		MD.T0	=	index in + subscript
+;		MD.T1	=	0
+;		Q	=	size (not on previous cycle)
+;		VA	=	address of indexout operand, if memory
+;		RN	=	register number of indexout specifier
+;		WBUS CC's =	set from Q
+
+;= ALIGNLIST 10**	(INT.MULT.LONG,		INDEX.SIZE.EQL.1)
+;  WBUS.NZVC set from XOR or PASS.A --> V = C = 0
+
+;	If size <> 1, then this subroutine branches to INT.MULT.LONG.
+;	All parameters have been set up as required.
+;
+;	INT.MULT.LONG sets MD.T1'Q <-- MD.T0*Q + MD.T1 and returns to
+;	the original caller of INDEX.SUB.
+
+INDEX.SIZE.EQL.1:
+	;---------------------------------------; wbus.z = 1:
+	[Q] <-- [MD.T0], LONG,			; [7] result is indexin + subscript
+						; >> Q write, next cycle not mul/div
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	BICPSW, BISPSW"
+
+;	These instructions operate on the trap enable and condition code bits of the PSW.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	BISPSW		B8	psw <-- psw or src.rw			1	r/w	--	BIXPSW	   --
+;				  if (src.rw<15:8> neq 0) then (reserved operand fault)
+;
+;	BICPSW		B9	psw <-- psw and not src.rw		1	r/w	--	BIXPSW	   --
+;				  if (src.rw<15:8> neq 0) then (reserved operand fault)
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		DL	=	data length of first operand (word)
+;
+;	Exit conditions:
+;		If src<15:8> = 0, PSW<7:0> have been updated.
+;
+;	Condition codes:
+;		(BISPSW)		(BICPSW)
+;		N <-- N or src<3>	N <-- N andnot src<3>
+;		Z <-- Z or src<2>	Z <-- Z andnot src<2>
+;		V <-- V or src<1>	V <-- V andnot src<1>	[Integer overflow trap disabled by default iiip map.]
+;		C <-- C or src<0>	C <-- C andnot src<0>
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BIxPSW operation:
+;
+;		if src<15:8> = 0, then PSL<7:0> <-- PSL<7:0> or/andnot src<7:0>
+;			else initiate reserved operand fault
+
+BIXPSW..:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [MD.S1] AND 0000[0FF]00, LONG, ; test for src<15:8> eql 0
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[SC] <-- [PSL],				; save original PSL in case test fails
+						; >> PSL read, not written in prev cycle
+	CASE [OPCODE2-0] AT [BISPSW]		; case on BISPSW vs BICPSW
+
+;= ALIGNLIST **0*	(BISPSW,	BICPSW)
+;  Opcodes = B8, B9 --> opcode <2:0> = 00?
+
+BISPSW:
+	;---------------------------------------; opcode<0> = 0:
+	[PSL] <-- [PSL] OR [MD.S1],		; set bits in PSL
+						; >> PSL read, not written in prev cycle
+						; >> PSL update, must flush before decode
+	GOTO [BIXPSW.CONT]			; go flush IB
+
+BICPSW:
+	;---------------------------------------; opcode<0> = 1:
+	[PSL] <-- [PSL] ANDNOT [MD.S1],		; clear bits
+						; >> PSL read, not written in prev cycle
+						; >> PSL update, must flush before decode
+	GOTO [BIXPSW.CONT]			; go flush IB
+
+BIXPSW.CONT:
+	;---------------------------------------;
+	[WBUS] <-- [PC],			; flush IB since we may
+	LOAD VIBA AND PC,			; have changed "T" bit
+	CASE [WBUS.NZV] AT [BIXPSW.RESERVED.BITS] ; if src<15:8> neq 0, operand fault
+
+;= ALIGNLIST *0**	(BIXPSW.RESERVED.BITS,	WAIT.PC.LOAD.2)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+BIXPSW.RESERVED.BITS:
+	;---------------------------------------; wbus.z = 0:
+	[PSL] <-- [SC],				; src<15:8> neq 0, restore PSL
+						; >> PSL update, must flush before decode
+	GOTO [IE.RSVD.OPERAND]			; >> no BIU synchronization necessary
+
+;	Common microcode exit point to cause the I-box to resynchronize with
+;	an interrupt state change made by the microcode.  The dead cycle before
+;	the flush allows the interrupt section to correctly assert the interrupt
+;	signal before the I-box sees the flush.
+
+INTERRUPT.STATE.CHANGE:
+	;---------------------------------------; common exit on interrupt state change
+	CALL [FLUSH.AND.RETURN]			; delay, then flush the I-box
+
+;	Common code to wait before last cycle is done after a load PC.
+
+WAIT.PC.LOAD.2:
+	;---------------------------------------; wbus.z = 1:
+	NOP					; wait 2 cycles for PC load to happen
+
+WAIT.PC.LOAD.1:
+	;---------------------------------------;
+	NOP,					; wait 1 cycle for PC load to happen
+	GOTO [LAST.CYCLE]			; then go do last cycle
+
+.nobin
+.TOC	"	MOVPSL"
+
+;	This instruction copies the PSL to a destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	MOVPSL		DC	dst.wl <-- PSL				1	w/l	--	MOVPSL	   --
+;
+;	Entry conditions from specifier flows:
+;		VA	=	address of first (dst) operand, if memory
+;		RN	=	register number of first specifier
+;		DL	=	data length of first operand (longword)
+;
+;	Exit conditions:
+;		The PSL is stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+; 	MOVPSL operation:
+;
+;		dst.wl <-- PSL
+
+MOVPSL..:
+	;********** Hardware dispatch **********;
+	NOP,					; can't read PSL here
+	CASE [INT.RMODE] AT [MOVPSL.MEMORY]	; case on memory vs register
+
+;= ALIGNLIST 110*	(MOVPSL.MEMORY,		MOVPSL.REGISTER)
+
+MOVPSL.MEMORY:
+	;---------------------------------------; rmode = 0:
+	MEM (VA)&, [WBUS] <-- [PSL], LONG,	; write PSL to memory
+						; >> PSL read, not written in prev cycle
+	LAST CYCLE				; decode next instruction
+
+MOVPSL.REGISTER:
+	;---------------------------------------; rmode = 1:
+	[G.RN] <-- [PSL], LONG,			; write PSL to register
+						; >> PSL read, not written in prev cycle
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	POPR, PUSHR"
+;
+;	These instructions pop (push) multiple registers off (onto) the stack.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	POPR		BA	pop registers based on mask.rw		1	r/w	--	POPR	   --
+;	PUSHR		BB	push registers based on mask.rw		1	r/w	--	PUSHR	   --
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (mask) operand
+;		DL	=	data length of first operand (word)
+;
+;	Exit conditions:
+;		The specified registers have been popped (pushed).
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		Tbd.
+;
+.bin
+
+;	PUSHR, POPR common startup.
+;	Calculate offset for the last stack address to be popped (pushed).
+;	This code is common to both POPR and PUSHR.
+
+POPR.PUSHR..:
+	;********** Hardware dispatch **********;
+	[SC] <-- [MD.S1] ANDNOT 0000[80]00, LONG, ; clear mask<15>, test for mask<14:0> = 0
+		sim wbus.nzvc <-- k[0]
+
+	;---------------------------------------;
+	[MD.T1] <-- ZEXT.[SC] RSH [12.],	; get mask<14:12> into <2:0>
+	CASE [OPCODE2-0] AT [POPR.COUNT.MASK]	; get mask<11:0> onto BBUS for reg count
+
+;= ALIGNLIST *10*	(POPR.COUNT.MASK,	PUSHR.COUNT.MASK)
+;  Opcodes = BA, BB --> opcode<2:0> = 01?
+
+POPR.COUNT.MASK:
+	;---------------------------------------; opcode<2:0> = 010 (POPR):
+	[MD.T3] <-- [MASK.BITS.SET*4] - [K4],	; get # of bytes for registers 11-0
+	GOTO [POPR.PUSHR.MERGE]			; SP already pointing to the first lw
+
+PUSHR.COUNT.MASK:
+	;---------------------------------------; opcode<2:0> = 011 (PUSHR):
+	[MD.T3] <-- [MASK.BITS.SET*4],		; get # of bytes for registers 11-0
+	GOTO [POPR.PUSHR.MERGE]			; join common code
+
+POPR.PUSHR.MERGE:
+	;---------------------------------------;
+	STATE2 <-- 1,				; set state<2> to flag PUSHR/POPR
+	ACCESS B[MD.T1],			; get mask<14:12> onto BBUS for reg count
+	CASE [WBUS.NZV] AT [POPR.PUSHR.CONT],	; case on mask = 0
+		sim sc <-- register mask 11-0
+
+;= ALIGNLIST 10**	(POPR.PUSHR.CONT,	POPR.PUSHR.EXIT)
+;  WBUS.NZVC set by ANDNOT -- V = C = 0
+
+POPR.PUSHR.CONT:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T3] <-- [MASK.BITS.SET*4] + [MD.T3],; add # of bytes for registers 14-12
+	CASE [OPCODE2-0] AT [POPR.CHECK.STACK]	; go check stack access
+
+MAP.JIZJ.LAST.CYCLE:
+POPR.PUSHR.EXIT:
+	;---------------------------------------; wbus.z = 1:
+	MAP.JIZJ,				; used as a common exit to turn off INTOVF
+	LAST CYCLE				; mask = 0, decode next instruction
+
+;	POPR operation:
+;
+;		Make sure that all stack entries will be accessible.
+;		Pop general registers based on mask.rw.
+;		Use code shared with RET instruction for registers 0 - 11.
+;		Update SP.
+
+;	At this point,
+;		MD.T0	=	original mask
+;		MD.T3	=	total # of mask register bytes
+;		SC	=	mask with bits <31:15> = 0
+;		STATE<2>=	PUSHR/POPR flag
+
+;= ALIGNLIST *10*	(POPR.CHECK.STACK,	PUSHR.CHECK.STACK)
+;  Opcodes = BA, BB --> opcode<2:0> = 01?
+
+POPR.CHECK.STACK:
+	;---------------------------------------; opcode<2:0> = 010 (POPR):
+	[MD.T4] <-- MEM ([SP]),			; dummy read to MD.T4 for access
+	LONG,					; check of first stack address
+	DISABLE IB PREFETCH,			; turn off the prefetcher during
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	[MD.T1] <-- MEM ([SP] + [MD.T3]),	; read last stack address
+	LONG,					; for access and possible use
+		sim addr [pushr_popr_sp] [0]
+
+	;---------------------------------------;
+	[VA.BUS] <-- [SP],			; re-probe the first stack address
+	PROBE READ (CURMODE),			; in case its TB entry got stepped on
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	[VAP] <-- [SP],				; set VAP to current top of stack
+	CASE [SC2-0] AT [RET.POP.2.0.000],	; branch into shared RET code
+		sim vap <-- addr,
+		sim addr [sp] [0]
+
+;	POPR, continued.
+;	Return from code shared with RET.
+;	R0 - R11 popped according to mask.
+;	Pop R12 - R14 according to mask.
+
+;	At this point,
+;		MD.T0	=	original mask
+;		MD.T1	=	last stack longword, not yet touched
+;		MD.T4	=	dummy read destination, not yet touched
+;		VAP	=	next stack location for pop
+;		STATE<2> =	RET/POPR flag = 1
+
+POPR.CONT:
+	;---------------------------------------; state<2> = 1:
+	[SC] <-- ZEXT.[MD.T0] RSH [12.],	; align SC to check mask<14:12>
+	CALL [WAIT.TWO.CYCLES],			; wait for SC to settle
+		sim sc <-- register mask 14-12
+
+	;---------------------------------------;
+	ACCESS B[MD.T4],			; touch MD.T4 here!
+	CASE [SC2-0] AT [POPR.POP.14.12.000]	; case on mask bits<14:12>
+
+;	POPR, continued.
+;	Process mask bits<14:12> = SC<2:0> (R12 to R14), cases 000..011.
+;	Pop stack into MD's and load GPRs.
+
+;	At this point,
+;		MD.T1	=	last stack longword, not yet touched
+;		SC	=	mask<14:12>
+;		VAP	=	next stack location for pop
+
+;= ALIGNLIST 000*	(POPR.POP.14.12.000,	POPR.POP.14.12.001,
+;=			 POPR.POP.14.12.010,	POPR.POP.14.12.011,
+;=		         POPR.POP.14.12.100,	POPR.POP.14.12.101,
+;=			 POPR.POP.14.12.110,	POPR.POP.14.12.111)
+
+POPR.POP.14.12.000:
+	;---------------------------------------; sc<2:0> = 000:
+	[SP] <-- [VAP], LONG,			; update SP
+	ACCESS B[MD.T1],			; touch MD.T1 here!
+	ENABLE IB PREFETCH,			; turn the prefetcher back on
+	LAST CYCLE				; decode next instruction
+
+POPR.POP.14.12.001:
+	;---------------------------------------; sc<2:0> = 001:
+	[AP] <-- [MD.T1], LONG,			; load AP with last lw from stack
+	GOTO [POPR.CALC.SP]			; go update SP
+
+POPR.POP.14.12.010:
+	;---------------------------------------; sc<2:0> = 010:
+	[FP] <-- [MD.T1], LONG,			; load FP with last lw from stack
+	GOTO [POPR.CALC.SP]			; go update SP
+
+POPR.POP.14.12.011:
+	;---------------------------------------; sc<2:0> = 011:
+	[MD.T2] <-- MEM (VAP), LONG		; pop AP from stack, FP already in T1
+
+	;---------------------------------------;
+	[AP] <-- [MD.T2], LONG,			; update AP
+	GOTO [POPR.POP.14.12.010]		; go update FP
+
+POPR.CALC.SP:
+	;---------------------------------------;
+	[SP] <-- [VAP] + 4, LONG,		; update SP, account for last pop
+	ENABLE IB PREFETCH,			; turn the prefetcher back on
+	LAST CYCLE				; decode next instruction
+
+;	POPR, continued.
+;	Process mask bits<14:12> = SC<2:0> (R12 to R14), cases 100..111.
+;	Pop stack into MD's and load GPRs.
+
+;	At this point,
+;		MD.T1	=	last stack longword, not yet touched
+;		SC	=	mask<14:12>
+;		VAP	=	next stack location for pop
+
+POPR.POP.14.12.100:
+	;---------------------------------------; sc<2:0> = 100:
+	[SP] <-- [MD.T1], LONG,			; load SP with last lw from stack
+	ENABLE IB PREFETCH,			; turn the prefetcher back on
+	LAST CYCLE				; decode next instruction
+
+POPR.POP.14.12.101:
+	;---------------------------------------; sc<2:0> = 101:
+	[MD.T2] <-- MEM (VAP), LONG		; pop AP from stack, SP already in T1
+
+	;---------------------------------------;
+	[AP] <-- [MD.T2], LONG,			; update AP
+	GOTO [POPR.POP.14.12.100]		; go update SP
+
+POPR.POP.14.12.110:
+	;---------------------------------------; sc<2:0> = 110:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop FP from stack, SP already in T1
+	CASE [SC2-0] AT [POPR.LOAD.14.12.110]	; case on mask = 110 or 111
+
+;= ALIGNLIST 110*	(POPR.LOAD.14.12.110,	POPR.LOAD.14.12.111)
+
+POPR.LOAD.14.12.110:
+	;---------------------------------------; sc<2:0> = 110:
+	[FP] <-- [MD.T6], LONG,			; update FP
+	GOTO [POPR.POP.14.12.100]		; go update SP
+
+POPR.LOAD.14.12.111:
+	;---------------------------------------; sc<2:0> = 111:
+	[AP] <-- [MD.T2], LONG,			; update AP
+	GOTO [POPR.LOAD.14.12.110]		; go update FP and SP
+
+POPR.POP.14.12.111:
+	;---------------------------------------; sc<2:0> = 111:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop AP from stack
+	GOTO [POPR.POP.14.12.110]		; go pop FP, SP already in T1
+
+;	PUSHR operation:
+;
+;		Make sure that the stack will be accessible.
+;		Push general registers based on mask.rw.
+;		Use code shared with CALL instruction for registers 0 - 11.
+;		Update SP.
+
+;	At this point,
+;		MD.T0	=	original mask
+;		MD.T3	=	total # of mask register bytes
+;		SC	=	mask with bits <31:15> = 0
+;		STATE<2> =	PUSHR/POPR flag
+
+PUSHR.CHECK.STACK:
+	;---------------------------------------; opcode<2:0> = 011 (PUSHR):
+	VA.WCHK&, [WBUS] <-- [SP] - [MD.T3], 	; write check the new stack
+	LONG,					; top
+	DISABLE IB PREFETCH,			; turn off the prefetcher
+		sim addr [pushr_popr_sp] [0]
+
+	;---------------------------------------;
+	VA.WCHK&, [WBUS] <-- [SP] - 4,		; write check the next stack
+	LONG,					; location for push
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	VA.WCHK&, [WBUS] <-- [SP] - [MD.T3], 	; re-check the new SP in case
+	LONG,					; its TB entry got stepped on
+		sim addr [pushr_popr_sp] [0]
+
+	;---------------------------------------;
+	[VAP] <-- [SP] - [MD.T3],		; set VAP to new SP
+	CASE [SC2-0] AT [CALL.PUSH.2.0.000],	; branch into shared CALL code
+		sim vap <-- addr,
+		sim addr [pushr_popr_sp] [0]
+
+;	PUSHR, continued.
+;	Return from code shared with CALL.
+;	R0 - R11 pushed according to mask.
+;	Push R12 - R14 according to mask.
+
+;	At this point,
+;		MD.T0	=	original mask
+;		MD.T3	=	total # of mask register bytes
+;		VAP	=	next stack location for push
+;		STATE<2> =	CALL/PUSHR flag = 1
+
+PUSHR.CONT:
+	;---------------------------------------; state<2> = 1:
+	[SC] <-- ZEXT.[MD.T0] RSH [12.],	; align SC to check mask<14:12>
+	CALL [WAIT.TWO.CYCLES],			; wait for SC to settle
+		sim sc <-- register mask 14-12
+
+	;---------------------------------------;
+						; mm faults cannot occur from here on
+	CASE [SC2-0] AT [PUSHR.PUSH.14.12.000]	; case on mask bits<14:12>
+
+
+;	PUSHR, continued.
+;	Process mask bits<14:12> = SC<2:0> (R12 to R14).
+
+;	At this point,
+;		MD.T3	=	total # of mask register bytes
+;		SC	=	mask<14:12>
+;		VAP	=	next stack location for push
+
+;= ALIGNLIST 000*	(PUSHR.PUSH.14.12.000,	PUSHR.PUSH.14.12.001,
+;=			 PUSHR.PUSH.14.12.010,	PUSHR.PUSH.14.12.011,
+;=		         PUSHR.PUSH.14.12.100,	PUSHR.PUSH.14.12.101,
+;=			 PUSHR.PUSH.14.12.110,	PUSHR.PUSH.14.12.111)
+
+PUSHR.PUSH.14.12.000:
+	;---------------------------------------; sc<2:0> = 000:
+	[SP] <-- [SP] - [MD.T3], LONG,		; update SP
+	ENABLE IB PREFETCH,			; turn the prefetcher back on
+	LAST CYCLE				; decode next instruction
+
+PUSHR.PUSH.14.12.001:
+	;---------------------------------------; sc<2:0> = 001:
+	MEM (VAP)&, [WBUS] <-- [AP], LONG,	; push AP
+	GOTO [PUSHR.PUSH.14.12.000]		; exit
+
+PUSHR.PUSH.14.12.010:
+	;---------------------------------------; sc<2:0> = 010:
+	MEM (VAP)&, [WBUS] <-- [FP], LONG,	; push FP
+	GOTO [PUSHR.PUSH.14.12.000]		; exit
+
+PUSHR.PUSH.14.12.011:
+	;---------------------------------------; sc<2:0> = 011:
+	MEM (VAP)&, [WBUS] <-- [AP], LONG,	; push AP
+	GOTO [PUSHR.PUSH.14.12.010]		; go push FP
+
+PUSHR.PUSH.14.12.100:
+	;---------------------------------------; sc<2:0> = 100:
+	MEM (VAP)&, [WBUS] <-- [SP], LONG,	; push SP
+	GOTO [PUSHR.PUSH.14.12.000]		; exit
+
+PUSHR.PUSH.14.12.101:
+	;---------------------------------------; sc<2:0> = 101:
+	MEM (VAP)&, [WBUS] <-- [AP], LONG,	; push AP
+	GOTO [PUSHR.PUSH.14.12.100]		; go push SP
+
+PUSHR.PUSH.14.12.110:
+	;---------------------------------------; sc<2:0> = 110:
+	MEM (VAP)&, [WBUS] <-- [FP], LONG,	; push FP
+	GOTO [PUSHR.PUSH.14.12.100]		; go push SP
+
+PUSHR.PUSH.14.12.111:
+	;---------------------------------------; sc<2:0> = 111:
+	MEM (VAP)&, [WBUS] <-- [AP], LONG,	; push AP
+	GOTO [PUSHR.PUSH.14.12.110]		; go push FP and SP
+
+;= END MISC

@@ -1,0 +1,594 @@
+.TOC	"EMULATE.MIC -- Emulated Instructions"
+.TOC	"Revision 2.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 15-Feb-90 RMS	Documented PSL write restriction.
+;    1 30-Nov-89 RMS	Revised for half-bandwidth writes.
+; (2)0 16-Nov-89 RMS	Revised for simplified decoder.
+;    3 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    2 18-Jul-89 RMS	Revised to save two words.
+;    1 02-Jul-89 RMS	Revised to use one line subroutine.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 07-Apr-89 RMS	Revised to zero unused branch recipe bits.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 29-Sep-88 RMS	Initial edit for Raven.
+
+.bin
+;= BEGIN EMULATE
+.nobin
+
+;	This module provides emulation support for the emulated string and decimal instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	Instruction							N Z V C		Exceptions
+;	------	-----------							-------		----------
+;
+;	20	ADDP4  addlen.rw, addaddr.ab, sumlen.rw, sumaddr.ab		* * * 0		rsv, dov
+;	21	ADDP6  add1len.rw, add1addr.ab, add2len.rw, add2addr.ab,	* * * 0		rsv, dov
+;		       sumlen.rw, sumaddr.ab
+;
+;	F8	ASHP   cnt.rb, srclen.rw, srcaddr.ab, round.rb,			* * * 0		rsv, dov
+;		       dstlen.rw, dstaddr.ab
+;
+;	35	CMPP3  len.rw, src1addr.ab, src2addr.ab				* * 0 0
+;	37	CMPP4  src1len.rw, src1addr.ab, src2len.rw, src2addr.ab		* * 0 0
+;
+;	0B	CRC    tbl.ab, inicrc.rl, strlen.rw, stream.ab			* * 0 0
+;
+;	F9	CVTLP  src.rl, dstlen.rw, dstaddr.ab				* * * 0		rsv, dov
+;	36	CVTPL  srclen.rw, srcaddr.ab, dst.wl				* * * 0		rsv, iov
+;	08	CVTPS  srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab		* * * 0		rsv, dov
+;	24	CVTPT  srclen.rw, srcaddr.ab, tbladdr.ab,			* * * 0		rsv, dov
+;		       dstlen.rw, dstaddr.ab
+;	09	CVTSP  srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab		* * * 0		rsv, dov
+;	26	CVTTP  srclen.rw, srcaddr.ab, tbladdr.ab,			* * * 0		rsv, dov
+;		       dstlen.rw, dstaddr.ab
+;
+;	27	DIVP   divrlen.rw, divraddr.ab, divdlen.rw, divdaddr.ab,	* * * 0		rsv, dov, ddvz
+;		       quolen.rw, quoaddr.ab
+;
+;	38	EDITPC srclen.rw, srcaddr.ab, pattern.ab, dstaddr.ab		* * * *		rsv, dov
+;
+;	39	MATCHC objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab		0 * 0 0
+;
+;	34	MOVP   len.rw, srcaddr.ab, dstaddr.ab				* * 0 0
+;
+;	2E	MOVTC  srclen.rw, srcaddr.ab, fill.rb, tbladdr.ab,		* * 0 *
+;		       dstlen.rw, dstaddr.ab
+;	2F	MOVTUC srclen.rw, srcaddr.ab, esc.rb, tbladdr.ab,		* * * *
+;		       dstlen.rw, dstaddr.ab
+;
+;	25	MULP   mulrlen.rw, mulraddr.ab, muldlen.rw, muldaddr.ab,	* * * 0		rsv, dov
+;		       prodlen.rw, prodaddr.ab
+;
+;	22	SUBP4  sublen.rw, subaddr.ab, diflen.rw, difaddr.ab		* * * 0		rsv, dov
+;	23	SUBP6  sublen.rw, subaddr.ab, minlen.rw, minaddr.ab,		* * * 0		rsv, dov
+;		       diflen.rw, difaddr.ab
+;
+.TOC	"	Normal Emulation (FPD Clear)"
+
+;	These instructions invoke an emulated instruction exception.
+;
+;	Mnemonic      Opcode	Operands					Spec	AT/DL		Dispatch
+;	--------      ------	--------					----	-----		--------
+;	MOVP		34	len.rw, srcaddr.ab, dstaddr.ab			3	raa/wbb		EMULATE
+;	CMPP3		35	len.rw, src1addr.ab, src2addr.ab		3	raa/wbb		EMULATE
+;	CVTLP		F9	src.rl, dstlen.rw, dstaddr.ab			3	rra/lwb		EMULATE
+;
+;	CVTPL		36	srclen.rw, srcaddr.ab, dst.wl			3	raw/wbl		EMULATE
+;
+;	CVTPS		08	srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab	4	rara/wbwb	EMULATE
+;	CVTSP		09	srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab	4	rara/wbwb	EMULATE
+;	CRC		0B	tbl.ab, inicrc.rl, strlen.rw, stream.ab		4	arra/blwb	EMULATE
+;	ADDP4		20	addlen.rw, addaddr.ab, sumlen.rw, sumaddr.ab	4	rara/wbwb	EMULATE
+;	SUBP4		22	sublen.rw, subaddr.ab, diflen.rw, difaddr.ab	4	rara/wbwb	EMULATE
+;	CMPP4		37	src1len.rw, src1addr.ab, src2len.rw,		4	rara/wbwb	EMULATE
+;				src2addr.ab
+;	EDITPC		38	srclen.rw, srcaddr.ab, pattern..ab, dstaddr.ab	4	raaa/wbbb	EMULATE
+;	MATCHC		39	objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab	4	rara/wbwb	EMULATE
+;
+;	CVTPT		24	srclen.rw, srcaddr.ab, tbladdr.ab,		5	raara/wbbwb	EMULATE
+;				dstlen.rw, dstaddr.ab
+;	CVTTP		26	srclen.rw, srcaddr.ab, tbladdr.ab,		5	raara/wbbwb	EMULATE
+;				dstlen.rw, dstaddr.ab
+;
+;	ADDP6		21	add1len.rw, add1addr.ab, add2len.rw,		6	rarara/wbwbwb	EMULATE
+;				add2addr.ab, sumlen.rw, sumaddr.ab
+;	SUBP6		23	sublen.rw, subaddr.ab, minlen.rw, 		6	rarara/wbwbwb	EMULATE
+;				minaddr.ab, diflen.rw, difaddr.ab
+;	MULP		25	mulrlen.rw, mulraddr.ab, muldlen.rw,		6	rarara/wbwbwb	EMULATE
+;				muladdr.ab, prodlen.rw, prodaddr.ab
+;	DIVP		27	divrlen.rw, divraddr.ab, divdlen.rw,		6	rarara/wbwbwb	EMULATE
+;				divaddr.ab, quolen.rw, quoaddr.ab
+;	MOVTC		2E	srclen.rw, srcaddr.ab, fill.rb,			6	rarara/wbbbwb	EMULATE
+;				tbladdr.ab, dstlen.rw, dstaddr.ab
+;	MOVTUC		2F	srclen.rw, srcaddr.ab, esc.rb, 			6	rarara/wbbbwb	EMULATE
+;				tbladdr.ab, dstlen.rw, dstaddr.ab
+;	ASHP		F8	cnt.rb, srclen.rw, srcaddr.ab,			6	rrarra/bwbbwb	EMULATE
+;				round.rb, dstlen.rw, dstaddr.ab
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first operand
+;		W2	=	second operand
+;		W4	=	third operand
+;		W6	=	fourth operand (if 4, 5 or 6 specifiers)
+;		W3	=	fifth operand (if 5 or 6 specifiers)
+;		W1	=	sixth operand (if 6 specifiers)
+;		IB<31:24> =	opcode
+;		DL	=	data type of last operand
+;
+;	Exit conditions:
+;		The emulation stack frame is built.
+;		The PC and PSL are set up for an emulation trap.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		1) Accessibility of the specifier register number in the data path would save 1 microword.
+;		2) Accessibility of the PC on the Bbus would save 1 microword and 2 cycles.
+;		3) No provision is made for an unaligned stack.
+;
+;	Notes:
+;		1) Except for CVTPL, the last specifier in all instructions is address mode.
+;		   Thus, register references are trapped by the I Box, and no register mode
+;		   entry point is required.
+;		2) The microcode does NOT zero extend byte and word read specifiers before
+;		   writing them to the stack.  This is permitted by the SRM but has not been
+;		   tried before.  Not zero extending saves 10 microwords and 1-4 cycles.
+;
+
+;	If FPD is clear, the emulation process consists of three steps:
+;
+;	1)  Parse the operand specifiers.
+;	2)  Build the specifier stack frame.
+;	3)  Take a same mode exception to the normal emulation exception handler.
+;
+;	In greater detail:
+;
+;	1)  Parse the operand specifiers.  The operand specifiers are parsed and
+;	    accumulated in the micromachine temporary registers.
+;
+;	2)  Build the specifier stack frame.  The specifier stack frame is 12
+;	    longwords, as follows:
+;
+;	 3
+;	 1							       0
+;	+---------------------------------------------------------------+
+;	|			    opcode				|	: SP - 48
+;	+---------------------------------------------------------------+
+;	|			    old PC				|	: SP - 44
+;	+---------------------------------------------------------------+
+;	|			  argument #1				|	: SP - 40
+;	+---------------------------------------------------------------+
+;	|			  argument #2				|	: SP - 36
+;	+---------------------------------------------------------------+
+;	|			  argument #3				|	: SP - 32
+;	+---------------------------------------------------------------+
+;	|			  argument #4				|	: SP - 28
+;	+---------------------------------------------------------------+
+;	|			  argument #5				|	: SP - 24
+;	+---------------------------------------------------------------+
+;	|			  argument #6				|	: SP - 20
+;	+---------------------------------------------------------------+
+;	|			  argument #7				|	: SP - 16
+;	+---------------------------------------------------------------+
+;	|			  argument #8				|	: SP - 12
+;	+---------------------------------------------------------------+
+;	|			    new PC				|	: SP - 8
+;	+---------------------------------------------------------------+
+;	|			   saved PSL				|	: SP - 4
+;	+---------------------------------------------------------------+
+;
+;	3)  Take a same mode exception through the emulated instruction vector.
+;	    This involves clearing PSL<tp,fpd,dv,fu,iv,t,cc> and vectoring through
+;	    the specified location in the SCB.
+;
+.bin
+
+;	CVTPL and register mode.
+;	Fetch last specifier, convert to operand.
+
+CVTPL.R:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] - 000000[01],		; point at last instruction byte
+	[W5] <-- MEM (VA), BYTE,		; read last instruction byte
+	CALL [W5.RROT.VA]			; rotate byte into position
+
+	;---------------------------------------;
+	[W4] <-- [W5] AND 000000[0F], LONG	; extract register number
+
+	;---------------------------------------;
+	[W4] <-- [K0] + NOT [W4], LONG,		; save in complemented form
+	GOTO [EMULATE]				; join common instruction flow
+
+;	Normal emulation exception.
+;	Operands parsed.  Validate stack, push PC, PSL.
+
+;	At this point,
+;		W0 etc	=	specifiers 1..6
+
+;	The three specifiers (minimum) provide enough time for PSL<tp> to be testable.
+
+EMULATE:
+	;********** Hardware dispatch **********;
+	VA <-- [SCBB] + 000000[SCB.EMULATE],	; point at SCB vector
+						; >> SCBB not written in prev cycle
+	[TSPEC] <-- MEM.PHYS (VA), LONG		; read SCB vector (must be aligned)
+						; (break alloc chain to ASSEMBLE.PSL)
+
+	;---------------------------------------;
+	VA <-- [SP] - 000000[48.],		; compute addr of last entry on stack
+						; >> SP not written in prev cycle
+	[WDR] <-- MEM.WCHK (VA), BYTE,		; and check write accessibility
+	SELECT [TP.Z.DL],			; prepare to case on PSL<tp>
+	CALL [ALIGN.TSPEC.ASSEMBLE.PSL]		; align SCB vector, assemble PSL in W5
+
+	;---------------------------------------;
+	VA <-- [SP] - 4,			; decrement stack pointer
+						; >> SP not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W5], LONG,	; push PSL on stack
+	SET NORETRY,				; set disable retry flag
+	CALL [PC.TO.WDR]			; copy PC to WDR
+
+	;---------------------------------------;
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [WDR], LONG,	; push current PC on stack
+	PC <-- BACKUP PC			; restore backup PC
+						; >> backup PC not valid in first cycle
+
+	;---------------------------------------;
+	VA <-- [SP] - 000000[48.],		; create argument block on stack
+						; >> SP not written in prev cycle
+	[SP] <-- [SP] - 000000[48.], LONG	; create argument block on stack
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- ZEXT [IB] RSH [24.], ; write out zero extended opcode
+	LONG,					;
+	CALL [PC.TO.WDR]			; copy backup PC to WDR
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; compute address of next entry on stack
+	MEM (VA)&, [WDR] <-- B [WDR], LONG	; write out backup PC
+
+;	Normal emulation exception, continued.
+;	Stack validated, header and footer written, write out specifiers.
+
+;	At this point,
+;		W0 etc	=	specifiers 1..6
+;		TSPEC	=	SCB vector, longword aligned
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; compute address of next entry on stack
+	MEM (VA)&, [WDR] <-- B [W0], LONG	; write out first specifier
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; compute address of next entry on stack
+	MEM (VA)&, [WDR] <-- B [W2], LONG	; write out second pecifier
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; compute address of next entry on stack
+	MEM (VA)&, [WDR] <-- B [W4], LONG	; write out third pecifier
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; compute address of next entry on stack
+	MEM (VA)&, [WDR] <-- B [W6], LONG,	; write out fourth specifier
+	CALL [WRITE.NEXT.W3]			; write out fifth specifier
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; compute address of next entry on stack
+	MEM (VA)&, [WDR] <-- B [W1], LONG,	; write out sixth specifier
+	GOTO [EMULATE.VECTOR]			; join common flows
+
+;	One line subroutine to copy PC to WDR.
+
+PC.TO.WDR:
+	;---------------------------------------;
+	[WDR] <-- [PC], LONG,			; copy PC to dual ported temp
+	RETURN					; return to caller
+
+;	Emulation exception, continued.
+;	Stack frame written, update PSL.
+
+;	At this point,
+;		TSPEC	=	SCB vector
+
+EMULATE.VECTOR:
+	;---------------------------------------;
+	[W2] <-- [PSL] ANDNOT 000000[0FF],	; clear PSL<dv,fu,iv,t,cc>
+	LONG,					;
+	NEW PSW					; load new PSW in hardware
+						; >> no DECODE NEXT in next two cycles
+
+	;---------------------------------------;
+	[PSL] <-- [W2] ANDNOT [0D8]000000,	; clear PSL<cm,tp,mbz,fpd>
+	LONG,					;
+	NEW PSL					; load new PSL in hardware
+						; >> no DECODE NEXT in next two cycles
+
+	;---------------------------------------;
+	VA <-- [TSPEC], LONG,			; get new PC
+						; >> TSPEC not written in prev cycle
+	NEW PC,					; load new PC
+						; >> no DECODE NEXT in next two cycles
+	GOTO [WAIT.PC.READY]			; go wait for decoder, decode next
+
+.nobin
+.TOC	"	Special Emulation (FPD Set)"
+
+;       These instructions invoke a restarted emulated instruction execption.
+;
+;       If FPD is set, all instructions with opocdes in the range [00..3F,C0..FF]
+;	are dispatched to this flow, except for MOVC3, MOVC5, CMPC3, CMP5, LOCC,
+;       SKPC, SCANC, and SPANC.
+;
+;       Entry conditions:
+;               Reached from FPD flows.
+;
+;       Exit conditions:
+;               The restart emulation stack frame is built.
+;               The PC and PSL are set up for a restarted emulation trap.
+;
+;       Condition codes:
+;               N <-- 0
+;               Z <-- 0
+;               V <-- 0                 [Integer overflow trap cannot occur.]
+;               C <-- 0
+;
+
+;	If FPD is set, the emulation process consists of two steps:
+;
+;	1)  Build the exception stack frame.
+;	2)  Take a same mode exception to the special emulation exception handler.
+;
+;	In greater detail:
+;
+;	1)  Build the exception stack frame.  The exception stack frame is 2
+;	    longwords, as follows:
+;
+;	 3
+;	 1							       0
+;	+---------------------------------------------------------------+
+;	|			    old PC				|	: SP - 8
+;	+---------------------------------------------------------------+
+;	|			   saved PSL				|	: SP - 4
+;	+---------------------------------------------------------------+
+;
+;	2)  Take a same mode exception through the FPD emulated instruction vector.
+;	    This involves clearing PSL<tp,fpd,dv,fu,iv,t,cc> and vectoring through the
+;	    specified location in the SCB.
+;
+.bin
+
+;	Special emulation processor.
+;	Reached from FPD processor.  Build exception stack frame, process exception.
+
+EMULATE.FPD:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [SCBB] + 000000[SCB.EMULFPD],	; point at SCB vector
+						; >> SCBB not written in prev cycle
+	[TSPEC] <-- MEM.PHYS (VA), LONG,	; read SCB vector (must be aligned)
+	PC <-- BACKUP PC			; recover backup PC
+						; >> backup PC not valid in first cycle
+						; (break alloc chain to CSTRING)
+
+	;---------------------------------------;
+	VA <-- [SP] - 000000[08.],		; compute addr of last entry on stack
+						; >> SP not written in prev cycle
+	[WDR] <-- MEM.WCHK (VA), BYTE,		; and check write accessibility
+	SELECT [TP.Z.DL],			; prepare to case on PSL<tp>
+	CALL [ALIGN.TSPEC.ASSEMBLE.PSL]		; align SCB vector, assemble PSL in W5
+
+	;---------------------------------------;
+	VA <-- [SP] - 4,			; decrement stack pointer
+						; >> SP not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W5], LONG,	; push PSL on stack
+	SET NORETRY				; set disable retry flag
+
+	;---------------------------------------;
+	VA <-- [SP] - 000000[08.],		; update stack pointer
+						; >> SP not written in prev cycle
+	[SP] <-- [SP] - 000000[08.], LONG	; update stack pointer
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- [PC], LONG,	; push backup PC on stack
+	GOTO [EMULATE.VECTOR]			; go finish exception processing
+
+
+;	Subroutine to rotate byte into position, load SC.
+
+W5.RROT.VA:
+	;---------------------------------------;
+	SC&, [W5] <-- [W5] RROT (VA), LONG,	; rotate byte, load SC
+	RETURN					; return to caller
+
+;	Subroutines to assemble the complete PSL from microcode and hardware elements.
+;
+;	SELECT.ASSEMBLE.PSL -	returns complete PSL in W5 (TSPEC trashed) - called by
+;
+;	ALIGN.TSPEC.ASSEMBLE.PSL - returns complete PSL in W5 (TSPEC longword aligned)
+;
+;		..., SELECT [TP.Z.DL], CALL [ALIGN.TSPEC.ASSEMBLE.PSL]
+;
+;	ASSEMBLE.PSL	-	returns complete PSL in W5 - called by
+;
+;		..., SELECT [TP.Z.DL]
+;		..., SELECT [PSL.3-0], CALL CASE AT [ASSEMBLE.PSL]
+;
+;	ASSEMBLE.PSL.TP.CLEAR -	returns complete PSL in W5 with <tp> = 0 - called by
+;
+;		..., SELECT [PSL.3-0], CALL [ASSEMBLE.PSL.TP.CLEAR]
+;
+;	OR.PSW.CC	-	or's PSW condition codes into W5 - called by
+;
+;		..., SELECT [PSL.3-0]
+;		[W5] <-- [PSL], LONG, CALL CASE AT [OR.PSW.CC]
+;
+;	At exit, a case on WBUS.NZVC is selected (for BIxPSW).
+
+SELECT.ASSEMBLE.PSL:
+	;---------------------------------------;
+	NOP,					; nothing to do (for MOVPSL, console)
+	SELECT [TP.Z.DL]			; prepare to case on PSL<tp>
+
+ALIGN.TSPEC.ASSEMBLE.PSL:
+	;---------------------------------------;
+	[TSPEC] <-- [TSPEC] ANDNOT 000000[03],	; longword align SCB vector (for emulate)
+	LONG,					;
+	SELECT [PSL.3-0],			; prepare to case on condition codes
+	CASE AT [ASSEMBLE.PSL]			; case on PSL<tp>
+
+;= ALIGNLIST 0*11*	(ASSEMBLE.PSL.TP.CLEAR,	ASSEMBLE.PSL.TP.SET)
+;  z = 0
+
+ASSEMBLE.PSL:
+ASSEMBLE.PSL.TP.CLEAR:
+	;---------------------------------------; psl<30> = 0:
+	[W5] <-- [PSL], LONG,			; get software psl, tp clear
+	CASE AT [OR.PSW.CC]			; case to or in condition codes
+
+ASSEMBLE.PSL.TP.SET:
+	;---------------------------------------; psl<30> = 1:
+	[W5] <-- [PSL] OR [PSL.TP]000000, LONG,	; get software psl, tp set
+	CASE AT [OR.PSW.CC]			; case to or in condition codes
+
+;	PSL subroutines, continued.
+
+;= ALIGNLIST 0000*	(OR.PSW.CC.0000,	OR.PSW.CC.0001,
+;=			 OR.PSW.CC.0010,	OR.PSW.CC.0011,
+;= 			 OR.PSW.CC.0100,	OR.PSW.CC.0101,
+;=			 OR.PSW.CC.0110,	OR.PSW.CC.0111,
+;= 			 OR.PSW.CC.1000,	OR.PSW.CC.1001,
+;=			 OR.PSW.CC.1010,	OR.PSW.CC.1011,
+;= 			 OR.PSW.CC.1100,	OR.PSW.CC.1101,
+;=			 OR.PSW.CC.1110,	OR.PSW.CC.1111)
+
+OR.PSW.CC:
+OR.PSW.CC.0000:
+	;---------------------------------------; psl<3:0> = 0000:
+	[W5] <-- [W5] OR 000000[00], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0001:
+	;---------------------------------------; psl<3:0> = 0001:
+	[W5] <-- [W5] OR 000000[01], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0010:
+	;---------------------------------------; psl<3:0> = 0010:
+	[W5] <-- [W5] OR 000000[02], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0011:
+	;---------------------------------------; psl<3:0> = 0011:
+	[W5] <-- [W5] OR 000000[03], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0100:
+	;---------------------------------------; psl<3:0> = 0100:
+	[W5] <-- [W5] OR 000000[04], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0101:
+	;---------------------------------------; psl<3:0> = 0101:
+	[W5] <-- [W5] OR 000000[05], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0110:
+	;---------------------------------------; psl<3:0> = 0110:
+	[W5] <-- [W5] OR 000000[06], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.0111:
+	;---------------------------------------; psl<3:0> = 0111:
+	[W5] <-- [W5] OR 000000[07], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1000:
+	;---------------------------------------; psl<3:0> = 1000:
+	[W5] <-- [W5] OR 000000[08], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1001:
+	;---------------------------------------; psl<3:0> = 1001:
+	[W5] <-- [W5] OR 000000[09], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1010:
+	;---------------------------------------; psl<3:0> = 1010:
+	[W5] <-- [W5] OR 000000[0A], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1011:
+	;---------------------------------------; psl<3:0> = 1011:
+	[W5] <-- [W5] OR 000000[0B], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1100:
+	;---------------------------------------; psl<3:0> = 1100:
+	[W5] <-- [W5] OR 000000[0C], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1101:
+	;---------------------------------------; psl<3:0> = 1101:
+	[W5] <-- [W5] OR 000000[0D], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1110:
+	;---------------------------------------; psl<3:0> = 1110:
+	[W5] <-- [W5] OR 000000[0E], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+OR.PSW.CC.1111:
+	;---------------------------------------; psl<3:0> = 1111:
+	[W5] <-- [W5] OR 000000[0F], LONG,	; or in psw cc's
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	RETURN					; return to caller
+
+;= END EMULATE

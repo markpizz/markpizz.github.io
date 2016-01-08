@@ -1,0 +1,494 @@
+.TOC	"FPOINT.MIC -- Floating Point Instructions"
+.TOC	"Revision 2.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989 BY				    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (2)0 15-Nov-89 RMS	Revised for simplified decoder.
+;    3 06-Nov-89 RMS	Revised for microcode handling of PSL<fu>.
+;    2 17-Jul-89 RMS	Revised to pad fpu reads with nops.
+;    1 02-Jul-89 RMS	Editorial changes.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 07-Apr-89 RMS	Revised to zero unused branch recipe bits.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 02-Nov-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN FPOINT
+.nobin
+
+;	This module implements the floating point instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	60	 ADDD2 add.rd, sum.md						* * 0 0		rsv, fov, fuv
+;	40	 ADDF2 add.rf, sum.mf						* * 0 0		rsv, fov, fuv
+;	40FD	 ADDG2 add.rg, sum.mg						* * 0 0		rsv, fov, fuv
+;
+;	61	 ADDD3 add1.rd, add2.rd, sum.wd					* * 0 0		rsv, fov, fuv
+;	41	 ADDF3 add1.rf, add2.rf, sum.wf					* * 0 0		rsv, fov, fuv
+;	41FD	 ADDG3 add1.rg, add2.rg, sum.wg					* * 0 0		rsv, fov, fuv
+;
+;	71	 CMPD src1.rd, src2.rd						* * 0 0		rsv
+;	51	 CMPF src1.rf, src2.rf						* * 0 0		rsv
+;	51FD	 CMPG src1.rg, src2.rg						* * 0 0		rsv
+;
+;	6C	 CVTBD src.rb, dst.wd						* * 0 0
+;	4C	 CVTBF src.rb, dst.wf						* * 0 0
+;	4CFD	 CVTBG src.rb, dst.wg						* * 0 0
+;	68	 CVTDB src.rd, dst.wb						* * * 0		rsv, iov
+;	76	 CVTDF src.rd, dst.wf						* * 0 0		rsv, fov
+;	6A	 CVTDL src.rd, dst.wl						* * * 0		rsv, iov
+;	69	 CVTDW src.rd, dst.ww						* * * 0		rsv, iov
+;	48	 CVTFB src.rf, dst.wb						* * * 0		rsv, iov
+;	56	 CVTFD src.rf, dst.wd						* * 0 0		rsv
+;	99FD	 CVTFG src.rf, dst.wg						* * 0 0		rsv
+;	4A	 CVTFL src.rf, dst.wl						* * * 0		rsv, iov
+;	49	 CVTFW src.rf, dst.ww						* * * 0		rsv, iov
+;	48FD	 CVTGB src.rg, dst.wb						* * * 0		rsv, iov
+;	33FD	 CVTGF src.rg, dst.wf						* * 0 0		rsv, fov, fuv
+;	4AFD	 CVTGL src.rg, dst.wl						* * * 0		rsv, iov
+;	49FD	 CVTGW src.rg, dst.ww						* * * 0		rsv, iov
+;	6E	 CVTLD src.rl, dst.wd						* * 0 0
+;	4E	 CVTLF src.rl, dst.wf						* * 0 0
+;	4EFD	 CVTLG src.rl, dst.wg						* * 0 0
+;	6D	 CVTWD src.rw, dst.wd						* * 0 0
+;	4D	 CVTWF src.rw, dst.wf						* * 0 0
+;	4DFD	 CVTWG src.rw, dst.wg						* * 0 0
+;
+;	6B	 CVTRDL src.rd, dst.wl						* * * 0		rsv, iov
+;	4B	 CVTRFL src.rf, dst.wl						* * * 0		rsv, iov
+;	4BFD	 CVTRGL src.rg, dst.wl						* * * 0		rsv, iov
+;
+;	66	 DIVD2 divr.rd, quo.md						* * 0 0		rsv, fov, fuv, fdvz
+;	46	 DIVF2 divr.rf, quo.mf						* * 0 0		rsv, fov, fuv, fdvz
+;	46FD	 DIVG2 divr.rg, quo.mg						* * 0 0		rsv, fov, fuv, fdvz
+;
+;	67	 DIVD3 divr.rd, divd.rd, quo.wd					* * 0 0		rsv, fov, fuv, fdvz
+;	47	 DIVF3 divr.rf, divd.rf, quo.wf					* * 0 0		rsv, fov, fuv, fdvz
+;	47FD	 DIVG3 divr.rg, divd.rg, quo.wg					* * 0 0		rsv, fov, fuv, fdvz
+;
+;	72	 MNEGD src.rd, dst.wd						* * 0 0		rsv
+;	52	 MNEGF src.rf, dst.wf						* * 0 0		rsv
+;	52FD	 MNEGG src.rg, dst.wg						* * 0 0		rsv
+;
+;	70	 MOVD src.rd, dst.wd						* * 0 -		rsv
+;	50	 MOVF src.rf, dst.wf						* * 0 -		rsv
+;	50FD	 MOVG src.rg, dst.wg						* * 0 -		rsv
+;
+;	64	 MULD2 mulr.rd, prod.md						* * 0 0		rsv, fov, fuv
+;	44	 MULF2 mulr.rf, prod.mf						* * 0 0		rsv, fov, fuv
+;	44FD	 MULG2 mulr.rg, prod.mg						* * 0 0		rsv, fov, fuv
+;
+;	65	 MULD3 mulr.rd, muld.rd, prod.wd				* * 0 0		rsv, fov, fuv
+;	45	 MULF3 mulr.rf, muld.rf, prod.wf				* * 0 0		rsv, fov, fuv
+;	45FD	 MULG3 mulr.rg, muld.rg, prod.wg				* * 0 0		rsv, fov, fuv
+;
+;	62	 SUBD2 sub.rd, dif.md						* * 0 0		rsv, fov, fuv
+;	42	 SUBF2 sub.rf, dif.mf						* * 0 0		rsv, fov, fuv
+;	42FD	 SUBG2 sub.rg, dif.mg						* * 0 0		rsv, fov, fuv
+;
+;	63	 SUBD3 sub.rd, min.rd, dif.wd					* * 0 0		rsv, fov, fuv
+;	43	 SUBF3 sub.rf, min.rf, dif.wf					* * 0 0		rsv, fov, fuv
+;	43FD	 SUBG3 sub.rg, min.rg, dif.wg					* * 0 0		rsv, fov, fuv
+;
+;	73	 TSTD src.rd							* * 0 0		rsv
+;	53	 TSTF src.rf							* * 0 0		rsv
+;	53FD	 TSTG src.rg							* * 0 0		rsv
+
+.TOC	"	MOVf"
+
+;	These instructions move an F-, D-, or G-floating datum from source to destination.  They are separated
+;	from the generic floating point instructions because of different PSL condition code treatment.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MOVF		50	dst.wf <-- src.rf			2	rw/ff	iiip	MOVF		--
+;	MOVD		70	dst.wd <-- src.rd			2	rw/dd	iiip	MOVDG		--
+;	MOVG		50FD	dst.wg <-- src.rg			2	rw/gg	iiip	MOVDG		--
+;
+;	Entry conditions from specifier flows:
+;		W0 (W1'W0) =	operand, broadcast to F chip
+;		VA	=	destination address, if memory
+;		RN	=	register number of result specifier
+;		DL	=	data length of second operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The source has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- dst LSS 0
+;		Z <-- dst EQL 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Fbox instructions are not optimized for trailing register specifiers.
+;		2) Floating underflow cannot occur.
+;
+.bin
+
+;	MOVf operation:
+;
+;		dst.wx <-- src.rx
+
+MOVF:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; insert a nop
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- FPU RESULT 1, LONG,; get result from fpu, write to memory
+	SET PSL CC (IIIP),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+MOVF.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; insert a nop
+
+	;---------------------------------------;
+	[Rrn] <-- FPU RESULT 1, LONG,		; get result from fpu, write to reg
+	SET PSL CC (IIIP),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+MOVDG:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; insert a nop
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- FPU RESULT 1,	; get result from fpu, write to memory
+	LEN(DL),				;
+	SET PSL CC (IIIP),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	GOTO [FP.RESULT.QW]			; go get second longword of result
+
+MOVDG.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; insert a nop
+
+	;---------------------------------------;
+	[Rrn] <-- FPU RESULT 1, LONG,		; get result from fpu, write to reg
+	SET PSL CC (IIIP),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	GOTO [FP.RESULT.REG.QW]			; go get second longword of result
+
+.nobin
+.TOC	"	CMPf, TSTf"
+
+;	These instructions compare a floating point operand against zero (TSTf) or another operand (CMPf).
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CMPF		51	src1.rf - src2.rf			 2	rr/ff	iiii	CMPF		--
+;	CMPD		71	src1.rd - src2.rd			 2	rr/dd	iiii	CMPF		--
+;	CMPG		51FD	src1.rg - src2.rg			 2	rr/gg	iiii	CMPF		--
+;
+;	TSTF		53	src.rf - 0				 1	r/f	iiii	CMPF		--
+;	TSTD		73	src.rd - 0				 1	r/d	iiii	CMPF		--
+;	TSTG		53FD	src.rg - 0				 1	r/g	iiii	CMPF		--
+;
+;	Entry conditions from specifier flows:
+;		W0 (W1'W0) =	first operand, broadcast to F chip
+;		W2 (W3'W2) =	second operand (CMPf only), broadcast to F chip
+;		DL	=	data length of last operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- dst LSS 0
+;		Z <-- dst EQL 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Fbox instructions are not optimized for trailing register specifiers.
+;		2) Floating underflow cannot occur.
+;
+.bin
+
+;	TSTf operation:
+;
+;		src.rx - 0
+;
+;	CMPf operation:
+;
+;		src1.rx - src2.rx
+
+CMPF:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; insert a nop
+
+	;---------------------------------------;
+	[W0] <-- FPU RESULT 1, LONG,		; retrieve and discard first result
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	LAST CYCLE				; decode next instruction
+
+CMPF.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; insert a nop
+
+	;---------------------------------------;
+	[W0] <-- FPU RESULT 1, LONG,		; retrieve and discard first result
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	Other Floating Point Instructions"
+
+;	These instructions perform the specified function, then store a byte, word, longword, or quadword result to
+;	memory or register.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ADDF2		40	dst.mf <-- src.rf + dst.mf		 2	rm/ff	iiii	FP		--
+;	ADDF3		41	dst.wf <-- src1.rf + src2.rf		 3	rrw/fff	iiii	FP		--
+;	SUBF2		42	dst.mf <-- dst.mf - src.rf		 2	rm/ff	iiii	FP		--
+;	SUBF3		43	dst.wf <-- src2.rf - src1.rf		 3	rrw/fff	iiii	FP		--
+;	MULF2		44	dst.mf <-- src.rf * dst.mf		 2	rm/ff	iiii	FP		--
+;	MULF3		45	dst.wf <-- src1.rf * src2.rf		 3	rrw/fff	iiii	FP		--
+;	DIVF2		46	dst.mf <-- dst.mf / src.rf		 2	rm/ff	iiii	FP		--
+;	DIVF3		47	dst.wf <-- src2.rf / src1.rf		 3	rrw/fff	iiii	FP		--
+;
+;	ADDD2		60	dst.md <-- src.rd + dst.md		 2	rm/dd	iiii	FP.QM		--
+;	ADDD3		61	dst.wd <-- src1.rd + src2.rd		 3	rrw/ddd	iiii	FP		--
+;	SUBD2		62	dst.md <-- dst.md - src.rd		 2	rm/dd	iiii	FP.QM		--
+;	SUBD3		63	dst.wd <-- src2.rd - src1.rd		 3	rrw/ddd	iiii	FP		--
+;	MULD2		64	dst.md <-- src.rd * dst.md		 2	rm/dd	iiii	FP.QM		--
+;	MULD3		65	dst.wd <-- src1.rd * src2.rd		 3	rrw/ddd	iiii	FP		--
+;	DIVD2		66	dst.md <-- dst.md / src.rd		 2	rm/dd	iiii	FP.QM		--
+;	DIVD3		67	dst.wd <-- src2.rd / src1.rd		 3	rrw/ddd	iiii	FP		--
+;
+;	ADDG2		40FD	dst.mg <-- src.rg + dst.mg		 2	rm/gg	iiii	FP.QM		--
+;	ADDG3		41FD	dst.wg <-- src1.rg + src2.rg		 3	rrw/ggg	iiii	FP		--
+;	SUBG2		42FD	dst.mg <-- dst.mg - src.rg		 2	rm/gg	iiii	FP.QM		--
+;	SUBG3		43FD	dst.wg <-- src2.rg - src1.rg		 3	rrw/ggg	iiii	FP		--
+;	MULG2		44FD	dst.mg <-- src.rg * dst.mg		 2	rm/gg	iiii	FP.QM		--
+;	MULG3		45FD	dst.wg <-- src1.rg * src2.rg		 3	rrw/ggg	iiii	FP		--
+;	DIVG2		46FD	dst.mg <-- dst.mg / src.rg		 2	rm/gg	iiii	FP.QM		--
+;	DIVG3		47FD	dst.wg <-- src2.rg / src1.rg		 3	rrw/ggg	iiii	FP		--
+;
+;	CVTBF		4C	dst.wf <-- src.rb			 2	rw/bf	iiii	FP		--
+;	CVTWF		4D	dst.wf <-- src.rw			 2	rw/wf	iiii	FP		--
+;	CVTLF		4E	dst.wf <-- src.rl			 2	rw/lf	iiii	FP		--
+;	CVTDF		76	dst.wf <-- src.rd			 2	rw/df	iiii	FP		--
+;	CVTGF		33FD	dst.wf <-- src.rg			 2	rw/gf	iiii	FP		--
+;
+;	CVTBD		6C	dst.wd <-- src.rb			 2	rw/bd	iiii	FP		--
+;	CVTWD		6D	dst.wd <-- src.rw			 2	rw/wd	iiii	FP		--
+;	CVTLD		6E	dst.wd <-- src.rl			 2	rw/ld	iiii	FP		--
+;	CVTFD		56	dst.wd <-- src.rf			 2	rw/fd	iiii	FP		--
+;
+;	CVTBG		4CFD	dst.wg <-- src.rb			 2	rw/bg	iiii	FP		--
+;	CVTWG		4DFD	dst.wg <-- src.rw			 2	rw/wg	iiii	FP		--
+;	CVTLG		4EFD	dst.wg <-- src.rl			 2	rw/lg	iiii	FP		--
+;	CVTFG		99FD	dst.wg <-- src.rf			 2	rw/fg	iiii	FP		--
+;
+;	CVTFB		48	dst.wb <-- src.rf			 2	rm/fb	iiii	FP		--
+;	CVTFW		49	dst.ww <-- src.rf			 2	rm/fw	iiii	FP		--
+;	CVTFL		4A	dst.wl <-- src.rf			 2	rw/fl	iiii	FP		--
+;	CVTRFL		4B	dst.wl <-- src.rf			 2	rw/fl	iiii	FP		--
+;
+;	CVTDB		68	dst.wb <-- src.rd			 2	rm/db	iiii	FP		--
+;	CVTDW		69	dst.ww <-- src.rd			 2	rm/dw	iiii	FP		--
+;	CVTDL		6A	dst.wl <-- src.rd			 2	rw/dl	iiii	FP		--
+;	CVTRDL		6B	dst.wl <-- src.rd			 2	rw/dl	iiii	FP		--
+;
+;	CVTGB		48FD	dst.wb <-- src.rg			 2	rm/gb	iiii	FP		--
+;	CVTGW		49FD	dst.ww <-- src.rg			 2	rm/gw	iiii	FP		--
+;	CVTGL		4AFD	dst.wl <-- src.rg			 2	rw/gl	iiii	FP		--
+;	CVTRGL		4BFD	dst.wl <-- src.rg			 2	rw/gl	iiii	FP		--
+;
+;	Entry conditions from specifier flows:
+;		W0 (W1'W0) =	first operand, broadcast to F chip
+;		W2 (W3'W2) =	second operand if read or modify, broadcast to F chip
+;		VA	=	destination address, if memory (+4 if quad modify destination)
+;		RN	=	register number of last specifier
+;		DL	=	data length of last operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The specified function has been performed and the result has been stored in the destination memory
+;			location or register.
+;
+;	Condition codes:
+;		N <-- dst LSS 0
+;		Z <-- dst EQL 0
+;		V <-- integer overflow		[Integer overflow trap enabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;	Notes:
+;		1) Fbox instructions are not optimized for trailing register specifiers.
+;
+.bin
+
+;	Floating point instructions with a quadword modify last specifier.
+;	VA is off by 4 from specifier flows, compensate.
+
+FP.QM:
+	;********** Hardware dispatch **********;
+	VA <-- [VA] - 4, LONG,			; quad modify, fix up VA
+	GOTO [FP]				; go read result, write to memory
+
+FP.QM.R:
+	;********** Hardware dispatch **********;
+	NOP,					; nothing to do...
+	GOTO [FP.R]				; go read result, write to register
+
+;	Other floating point instructions.
+
+FP:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [TP.Z.DL]			; prepare to case on data length
+
+	;---------------------------------------;
+	NOP,					; insert another nop
+	CASE AT [FP.RESULT.BYTE]		; case on data length of result
+
+FP.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [TP.Z.DL]			; prepare to case on data length
+
+	;---------------------------------------;
+	NOP,					; insert another nop
+	STATE.0 <-- 1,				; flag register mode destination
+	CASE AT [FP.RESULT.REG.BYTE]		; case on data length of result
+
+;	Exit for floating point stores, destination is memory.
+
+;	At this point,
+;		W2	=	longword surround if destination is byte or word length
+;		VA	=	address of destination
+;		STATE<0> =	0
+
+;= ALIGNLIST 1*00*	(FP.RESULT.BYTE,	FP.RESULT.WORD,
+;=			 FP.RESULT.LONG,	FP.RESULT.QUAD)
+;  z = 0
+
+FP.RESULT.BYTE:
+	;---------------------------------------; dl = byte:
+	[W2] <-- FPU RESULT 1, LEN(DL),		; insert result into surrounding longword
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	GOTO [WRITE.MEM.W2]			; go write complete longword to memory
+
+FP.RESULT.WORD:
+	;---------------------------------------; dl = word:
+	[W2] <-- FPU RESULT 1, LEN(DL),		; insert result into surrounding longword
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	GOTO [WRITE.MEM.W2]			; go write complete longword to memory
+
+FP.RESULT.LONG:
+	;---------------------------------------; dl = long:
+	MEM (VA)&, [WDR] <-- FPU RESULT 1, LONG,; get result, write to memory
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE ENABLE OVERFLOW		; decode next, enable int overflow
+
+FP.RESULT.QUAD:
+	;---------------------------------------; dl = quad:
+	MEM (VA)&, [WDR] <-- FPU RESULT 1,	; get result, write to memory
+	LEN(DL),				;
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY				; set disable retry flag
+
+FP.RESULT.QW:
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; point at second longword
+	MEM (VA)&, [WDR] <-- FPU RESULT 2,	; get result, write to memory
+	LONG,					; no integer overflow on quad result
+	LAST CYCLE				; decode next instruction
+
+;	Exit for floating point stores, destination is register.
+
+;	At this point,
+;		W2	=	longword surround if destination is byte or word length
+;		RN	=	register number of last specifier
+;		STATE<0> =	1
+
+;= ALIGNLIST 1*00*	(FP.RESULT.REG.BYTE,	FP.RESULT.REG.WORD,
+;=			 FP.RESULT.REG.LONG,	FP.RESULT.REG.QUAD)
+;  z = 0
+
+FP.RESULT.REG.BYTE:
+	;---------------------------------------; dl = byte:
+	[Rrn] <-- FPU RESULT 1, LEN(DL),	; insert result into register
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE ENABLE OVERFLOW		; decode next, enable int overflow
+
+FP.RESULT.REG.WORD:
+	;---------------------------------------; dl = word:
+	[Rrn] <-- FPU RESULT 1, LEN(DL),	; insert result into register
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE ENABLE OVERFLOW		; decode next, enable int overflow
+
+FP.RESULT.REG.LONG:
+	;---------------------------------------; dl = long:
+	[Rrn] <-- FPU RESULT 1, LONG,		; store in register
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE ENABLE OVERFLOW		; decode next, enable int overflow
+
+FP.RESULT.REG.QUAD:
+	;---------------------------------------; dl = quad:
+	[Rrn] <-- FPU RESULT 1, LONG,		; store in register
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY				; set disable retry flag
+
+FP.RESULT.REG.QW:
+	;---------------------------------------;
+	[Rrn+1] <-- FPU RESULT 2, LONG,		; store second result in next register
+						; no integer overflow on quad result
+	LAST CYCLE				; decode next instruction
+
+;= END FPOINT

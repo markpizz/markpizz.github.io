@@ -1,0 +1,853 @@
+.TOC    "SPECIFIER.MIC -- Specifier Flows"
+.TOC    "Revision 2.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989 BY				    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC 	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (2)0 15-Nov-89 RMS	Revised for simplified decoder.
+;    4 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    3 09-Oct-89 RMS	Fixed VA stalls in indexed flows.
+;    2 06-Oct-89 RMS	Fixed VA stalls in deferred flows.
+;    1 02-Jul-89 RMS	Editorial changes.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    4 12-Apr-89 RMS	Revised to eliminate stalls in certain index flows.
+;    3 30-Mar-89 RMS	Revised for hardware generated first cycles.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 05-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN SPECIFIER
+.nobin
+
+;	Specifier decoding chart.
+;
+;                                               DECODE NEXT
+;                                                    |
+;                                                    |
+;	+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;     index    short     reg   reg defer autodec  autoinc   immed   autoinc  absolute  displ    displ   PC rel   PC rel
+;       |       lit       |        |        |        |        |      defer      |        |      defer      |      defer
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        +--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+
+;       |                                            |
+;       |                                            |
+;  DECODE NEXT                                  DECODE NEXT
+;       |
+;       |
+;	+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+--------+
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;     index    short     reg   reg defer autodec  autoinc   immed   autoinc  absolute  displ    displ   PC rel   PC rel
+;       |       lit       |        |        |        |        |      defer      |        |      defer      |      defer
+;	|        |        |        |        |        |        |        |        |        |        |        |        |
+;	|        |        |        |        |        |        |        |        |      fault      |        |        |
+;     fault    fault    fault      +--------+--------+--------+--------+--------+-----------------+--------+--------+
+;                                                    |
+;                                                    |
+;                                               DECODE NEXT
+
+;	The specifier decode flows are entered to parse all specifiers in an
+;	instruction before the instruction is executed.  They are entered via
+;	the DECODE NEXT micro-order from the previous macro instruction
+;	execution flow, or from the previous specifier flow.
+;
+;	There are four copies of each specifier flow, as follows:
+;
+;		AT = RM,   Not indexed
+;		AT = AW,   Not indexed
+;		AT = RM,   Indexed
+;		AT = AW,   Indexed
+;
+;	There are 13 major entry points for each copy of the specifier flows,
+;	as follows:
+;
+;		Short literal
+;		Index
+;		Register
+;		Register deferred
+;		Autodecrement
+;		Autoincrement
+;		Immediate
+;		Autoincrement deferred
+;		Absolute
+;		Displacement
+;		Displacement deferred
+;		Relative
+;		Relative deferred
+;
+;	For two special cases -- the register vfield flows and the second
+;	longword of quadword immediate flows -- the I Box provides special
+;	dispatch addresses to the microsequencer.
+;
+;	For flows which begin by using Rrn as an input to the VA adder,
+;	the I Box checks for data forwarding conflicts and creates a
+;	one cycle stall, if required.  To avoid forwarding conflicts in
+;	the execution flows, specifier flows must not write a GPR during
+;	their last cycle.
+
+;	Entry conditions:
+;		IB	=	short literal: 0<31:8>'specifier<7:0>
+;				immediate: immediate data
+;				absolute: absolute address
+;				displacement or relative: sign extended displacement
+;				all others: undefined
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		PC	=	PC after adjustment for the current specifier and extension
+;
+;	A case on [TP.Z.DL] is selected.
+;
+;	Exit conditions:
+;		VA	=	memory address for at = aw
+;		Wsn	=	operand for at = rm and dl = bwl
+;		Wsn+1'Wsn =	operand for at = rm and dl = q
+;		Rn	=	register number of the specifier
+;		STATE<2> =	1 if the specifier was a .vx register specifier, 0 otherwise
+;		DL	=	data length of the specifier
+;		WDR	=	shifted value of the logical index for an indexed specifier
+;
+;	A case on [TP.Z.DL] is selected.
+
+.bin
+.TOC	"	Short Literal (Modes 0-3)"
+
+;	For this mode, the short literal is copied to a working register.
+;
+;	Note that at = m generates a reserved addressing mode dispatch.
+;
+;	At this point,
+;		IB	=	0<31:8>'specifier<7:0>
+;		Sn	=	register file address to use for this specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.SLIT:
+	;********** Hardware dispatch **********;
+	[Wsn] <-- B [IB], LONG,			; copy short literal to working register
+	XMIT FPU LW (ENABLE),			; transmit 32b to fpu
+	DECODE NEXT IF BWL,			; exit if bwl
+	ELSE [SPEC.RM.SLIT.1]			; otherwise, zero second longword
+
+SPEC.RM.SLIT.1:
+	;---------------------------------------;
+	[Wsn+1] <-- 000000[00], LONG,		; second longword is zero
+	XMIT FPU LW (ENABLE),			; transmit 32b to fpu
+	DECODE NEXT				; exit
+
+SPEC.AW.SLIT:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+SPEC.RM.SLIT.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+SPEC.AW.SLIT.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Index (Mode 4)"
+
+;	For this mode, the contents of the index register shifted left by the
+;	amount indicated by DL is saved in WDR.  The saved value is then added
+;	to the base address at the end of the indexed specifier flows.
+;
+;	Note that Rn = PC generates a reserved addressing mode dispatch.
+;
+
+;	At this point,
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.INDEX:
+	;********** Hardware dispatch **********;
+	[WDR] <-- [Rrn] LSH (DL), LONG,		; convert logical to byte index
+	DECODE NEXT				; do base specifier
+
+SPEC.AW.INDEX:
+	;********** Hardware dispatch **********;
+	[WDR] <-- [Rrn] LSH (DL), LONG,		; convert logical to byte index
+	DECODE NEXT				; do base specifier
+
+SPEC.RM.INDEX.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+SPEC.AW.INDEX.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Register (Mode 5)"
+
+;	For this mode, the register data is copied to a working register.
+;
+;	Note that at = a generates a reserved addressing mode dispatch.
+;
+;	At this point,
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.REG:
+	;********** Hardware dispatch **********;
+	[Wsn] <-- [Rrn], LONG,			; copy general register to working register
+	XMIT FPU LW (ENABLE),			; transmit 32b to fpu
+	DECODE NEXT IF BWL,			; exit if bwl
+	ELSE [SPEC.RM.REG.1]			; otherwise, copy second longword
+
+SPEC.RM.REG.1:
+	;---------------------------------------;
+	[Wsn+1] <-- [Rrn+1], LONG,		; copy next general register to working reg
+	XMIT FPU LW (ENABLE),			; transmit 32b to fpu
+	DECODE NEXT				; exit
+
+SPEC.AW.REG:
+	;********** Hardware dispatch **********;
+	[Wsn] <-- [Rrn], LONG,			; copy general register to working register
+	DECODE NEXT				; exit
+
+SPEC.RM.REG.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+SPEC.AW.REG.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Register Deferred (Mode 6)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	At this point,
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.REG.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; operand address is register
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.REG.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; operand address is register
+	[Wsn] <-- [Rrn], LONG,			; operand address is register
+	DECODE NEXT				; exit
+
+SPEC.RM.REG.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn], LONG,			; base address is register
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.REG.DEF.I.1]		; go read operand
+
+SPEC.RM.REG.DEF.I.1:
+	;---------------------------------------;
+	VA <-- [VA] + [WDR],			; operand address is base address + index
+						; >> WDR not written in prev cycle
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.REG.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn], LONG,			; base address is register
+	GOTO [SPEC.AW.REG.DEF.I.1]		; go calculate address
+
+SPEC.AW.REG.DEF.I.1:
+	;---------------------------------------;
+	VA <-- [VA] + [WDR],			; operand address is base address + index
+						; >> WDR not written in prev cycle
+	[Wsn] <-- [VA] + [WDR], LONG,		; operand address is base address + index
+	DECODE NEXT				; exit
+.TOC	"	Autodecrement (Mode 7)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	As this mode causes a change to the specified register, the change
+;	must be recorded in RLOG.
+;
+;	At this point,
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.AUTO.DEC:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] - [KDL],			; do autodecrement
+	[Rrn] <-- [Rrn] - [KDL], LONG,		; do autodecrement
+	RLOG,					; record in RLOG
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.AUTO.DEC.1]		; go read operand
+
+SPEC.RM.AUTO.DEC.1:
+	;---------------------------------------;
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.AUTO.DEC:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] - [KDL],			; do autodecrement
+	[Rrn] <-- [Rrn] - [KDL], LONG,		; do autodecrement
+	RLOG,					; record in RLOG
+	GOTO [SPEC.AW.AUTO.DEC.1]		; go finish address calculation
+	
+SPEC.AW.AUTO.DEC.1:
+	;---------------------------------------;
+	[Wsn] <-- [VA], LONG,			; operand address is register
+	DECODE NEXT				; exit
+
+;	Autodecrement, continued.
+
+SPEC.RM.AUTO.DEC.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] - [KDL],			; base address is register - length
+	[Rrn] <-- [Rrn] - [KDL], LONG,		; do autodecrement
+	RLOG,					; record in RLOG
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.REG.DEF.I.1]		; go read operand
+
+SPEC.AW.AUTO.DEC.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] - [KDL],			; base address is register - length
+	[Rrn] <-- [Rrn] - [KDL], LONG,		; do autodecrement
+	RLOG,					; record in RLOG
+	GOTO [SPEC.AW.REG.DEF.I.1]		; go finish address calculation
+.TOC	"	Autoincrement (Mode 8)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	As this mode causes a change to the specified register, the change
+;	must be recorded in RLOG.
+;
+;	At this point,
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.AUTO.INC:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; operand address is register
+	[Rrn] <-- [Rrn] + [KDL], LONG,		; do autoincrement
+	RLOG,					; record in RLOG
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.AUTO.DEC.1]		; go finish autoincrement
+
+SPEC.AW.AUTO.INC:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; operand address is register
+	[Rrn] <-- [Rrn] + [KDL], LONG,		; do autoincrement
+	RLOG,					; record in RLOG
+	GOTO [SPEC.AW.AUTO.DEC.1]		; go finish autoincrement
+
+SPEC.RM.AUTO.INC.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; base address is register
+	[Rrn] <-- [Rrn] + [KDL], LONG,		; do autoincrement
+	RLOG,					; record in RLOG
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.REG.DEF.I.1]		; go finish autoincrement
+	
+SPEC.AW.AUTO.INC.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; base address is register
+	[Rrn] <-- [Rrn] + [KDL], LONG,		; do autoincrement
+	RLOG,					; record in RLOG
+	GOTO [SPEC.AW.REG.DEF.I.1]		; go finish autoincrement
+.TOC	"	Immediate (Mode 8 with Rn = PC)"
+
+;	As Rn = PC, the I Box has already read the immediate data from the I steam
+;	Note that for at = a or v, the correct result is the address of the bytes
+;	(which is PC backed up by the data length).
+;
+;	For quadword operands, the I Box only supplies the first longword of data.
+;	The second longword is obtained after DECODE NEXT in a special flow.
+;
+;	At this point,
+;		IB	=	immediate data
+;		Sn	=	register file address to use for this specifier
+;		DL	=	data length of the specifier
+;		PC	=	PC after adjustment for the current specifier and extension
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.IMM:
+	;********** Hardware dispatch **********;
+	[Wsn] <-- B [IB], LONG,			; copy data to working register
+	XMIT FPU LW (ENABLE),			; transmit 32b to fpu
+	DECODE NEXT				; exit
+
+;	If the data length is quadword, the I Box generates a second dispatch.
+
+SPEC.RM.IMM.QW.SECOND:
+	;********** Hardware dispatch **********;
+	[Wsn+1] <-- B [IB], LONG,		; store second quadword of immediate
+	XMIT FPU LW (ENABLE),			; transmit high 32b to fpu
+	DECODE NEXT				; exit
+
+SPEC.AW.IMM:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] - [KDL],			; calculate address of operand
+	[Wsn] <-- [PC] - [KDL], LONG,		; calculate address of operand
+	DECODE NEXT				; exit
+
+;	If the data length is quadword, the I Box generates a second dispatch.
+
+SPEC.AW.IMM.QW.SECOND:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] - [KDL],			; calculate address of operand
+	[Wsn] <-- [PC] - [KDL], LONG,		; calculate address of operand
+	DECODE NEXT				; exit
+
+SPEC.RM.IMM.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+SPEC.AW.IMM.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Autoincrement Deferred (Mode 9)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	Since this mode causes a change to the specified register, the change
+;	must be recorded in RLOG.
+;
+;	At this point,
+;		Sn	=	register address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.AI.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; deferred address is register
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	CALL [SPEC.AI.DEF.1]			; do autoincrement, record in RLOG
+
+SPEC.RM.AI.DEF.2:
+	;---------------------------------------;
+	VA <-- [TSPEC],				; operand address is deferred address
+						; >> TSPEC not written in prev cycle
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.AI.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; deferred address is register
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	CALL [SPEC.AI.DEF.1]			; do autoincrement, record in RLOG
+
+SPEC.AW.AI.DEF.2:
+	;---------------------------------------;
+	VA <-- [TSPEC],				; copy address to VA
+						; >> TSPEC not written in prev cycle
+	[Wsn] <-- [TSPEC], LONG,		; copy address to destination
+	DECODE NEXT				; exit
+
+;	Autoincrement deferred, continued.
+
+SPEC.RM.AI.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; deferred address is register
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	CALL [SPEC.AI.DEF.1]			; do autoincrement, record in RLOG
+
+SPEC.RM.AI.DEF.I.2:
+	;---------------------------------------;
+	VA <-- [TSPEC] + [WDR],			; operand address is base + index
+						; >> TSPEC, WDR not written in prev cycle
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.AI.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn],				; deferred address is register
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	CALL [SPEC.AI.DEF.1]			; do autoincrement, record in RLOG
+
+SPEC.AW.AI.DEF.I.2:
+	;---------------------------------------;
+	VA <-- [TSPEC] + [WDR],			; operand address is base + index
+						; >> TSPEC, WDR not written in prev cycle
+	[Wsn] <-- [TSPEC] + [WDR], LONG,	; operand address is base + index
+	DECODE NEXT				; exit
+
+;	One line subroutine to autoincrement Rrn.
+
+SPEC.AI.DEF.1:
+	;---------------------------------------;
+	[Rrn] <-- [Rrn] + 000000[04], LONG,	; do autoincrement
+	RLOG,					; record in RLOG
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	RETURN					; return to caller
+
+.TOC	"	Absolute (Mode 9 with Rn = PC)"
+
+;	Since Rn = PC, the I Box has already read the datum address from the I stream.
+;
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	At this point,
+;		IB	=	absolute address
+;		Sn	=	register file address to use for this specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.ABS:
+	;********** Hardware dispatch **********;
+	VA <-- B [IB],				; operand address is I stream longword
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.ABS:
+	;********** Hardware dispatch **********;
+	VA <-- B [IB],				; operand address is I stream longword
+	[Wsn] <-- B [IB], LONG,			; operand address is I stream longword
+	DECODE NEXT				; exit
+
+SPEC.RM.ABS.I:
+	;********** Hardware dispatch **********;
+	VA <-- B [IB], LONG,			; base address is I stream longword
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.REG.DEF.I.1]		; go read operand
+
+SPEC.AW.ABS.I:
+	;********** Hardware dispatch **********;
+	VA <-- B [IB], LONG,			; base address is I stream longword
+	GOTO [SPEC.AW.REG.DEF.I.1]		; go finish address calculation
+.TOC	"	Displacement (Modes 10, 12, 14)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	operation, depending on the access type.
+;
+;	At this point,
+;		IB	=	sign-extended displacement
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.DISPL:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB],			; operand address is register + displacement
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.DISPL:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB],			; operand address is register + displacement
+	[Wsn] <-- [Rrn] + [IB], LONG,		; operand address is register + displacement
+	DECODE NEXT				; exit
+
+SPEC.RM.DISPL.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB], LONG,		; base address is register + displacement
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.REG.DEF.I.1]		; go read operand
+
+SPEC.AW.DISPL.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB], LONG,		; base address is register + displacement
+	GOTO [SPEC.AW.REG.DEF.I.1]		; go finish address calculation
+.TOC	"	Displacement Deferred (Modes 11, 13, 15)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	The autoincrement deferred flows and relative deferred flows all merge
+;	here to complete processing.
+;
+;	At this point,
+;		IB	=	sign-extended displacement
+;		Sn	=	register file address to use for this specifier
+;		Rn	=	register number of the specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.DISPL.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.RM.DISPL.DEF.1]		; go read operand
+
+SPEC.RM.DISPL.DEF.1:
+	;---------------------------------------;
+	NOP,					; wait for ADR data forwarding
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.AI.DEF.2]			; join common deferred flow
+
+SPEC.AW.DISPL.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.AW.DISPL.DEF.1]		; go finish address calculation
+
+SPEC.AW.DISPL.DEF.1:
+	;---------------------------------------;
+	NOP,					; wait for ADR data forwarding
+	GOTO [SPEC.AW.AI.DEF.2]			; join common deferred flow
+
+;	Displacement deferred, continued.
+
+SPEC.RM.DISPL.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.RM.DISPL.DEF.I.1]		; go read operand
+
+SPEC.RM.DISPL.DEF.I.1:
+	;---------------------------------------;
+	NOP,					; wait for ADR data forwarding
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.AI.DEF.I.2]		; join commmon deferred indexed flow
+
+SPEC.AW.DISPL.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [Rrn] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.AW.DISPL.DEF.I.1]		; go finish address calculation
+
+SPEC.AW.DISPL.DEF.I.1:
+	;---------------------------------------;
+	NOP,					; wait for ADR data forwarding
+	GOTO [SPEC.AW.AI.DEF.I.2]		; join commmon deferred indexed flow
+.TOC	"	Relative (Modes 10, 12, 14 with Rn = PC)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	operation, depending on the access type.
+;
+;	At this point,
+;		IB	=	sign-extended displacement
+;		Sn	=	register file address to use for this specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		PC	=	PC after adjustment for the current specifier and extension
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.REL:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB],			; operand address is PC + displacement
+	[Wsn] <-- MEM.AT (VA), LEN(DL),		; read operand
+	XMIT FPU LW (ENABLE),			; xmit 32b to fpu if long or quad
+	DECODE NEXT IF LONG,			; exit if long operand
+	ELSE CASE AT [SPEC.RM.BYTE.WORD]	; else finish up operand processing
+
+SPEC.AW.REL:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB],			; operand address is PC + displacement
+	[Wsn] <-- [PC] + [IB], LONG,		; operand address is PC + displacement
+	DECODE NEXT				; exit
+
+SPEC.RM.REL.I:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB], LONG,		; base address is PC + displacement
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [SPEC.RM.REG.DEF.I.1]		; go read operand
+
+SPEC.AW.REL.I:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB], LONG,		; base address is PC + displacement
+	GOTO [SPEC.AW.REG.DEF.I.1]		; go finish address calculation
+.TOC	"	Relative Deferred (Modes 11, 13, 15 with Rn = PC)"
+
+;	For at = r or m, the memory request issued is either a read or modify,
+;	depending on the access type.
+;
+;	At this point,
+;		IB	=	sign-extended displacement
+;		Sn	=	register file address to use for this specifier
+;		AT	=	access type of the specifier
+;		DL	=	data length of the specifier
+;		PC	=	PC after adjustment for the current specifier and extension
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.RM.REL.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.RM.DISPL.DEF.1]		; go read operand
+
+SPEC.AW.REL.DEF:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.AW.DISPL.DEF.1]		; go finish address calculation
+
+SPEC.RM.REL.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.RM.DISPL.DEF.I.1]		; go read operand
+
+SPEC.AW.REL.DEF.I:
+	;********** Hardware dispatch **********;
+	VA <-- [PC] + [IB],			; deferred addr is register + displacement
+	[TSPEC] <-- MEM (VA), LONG,		; read deferred address
+	GOTO [SPEC.AW.DISPL.DEF.I.1]		; go finish address calculation
+
+.nobin
+.TOC	"	Special Flow For Register Vfield"
+
+;	This special flow is reached for the third specifier of certain variable length
+;	bit field instructions (FFx, CMPxV, EXTxV), and EDIV, which require special
+;	specifier support.
+;
+;	For the field instructions, the SRM says that
+;
+;		EXTV #0, #32, R0, (R0)+
+;
+;	must extract the value from R0 BEFORE the autoincrement.  As all the
+;	specifiers are processed before the execution flow, that flow sees the
+;	autoincremented value of R0.  To compensate, the special register vfield
+;	flow copies the values from the general registers addressed by Rn and Rn+1
+;	to the working registers so that the execution flow has access to the
+;	unmodified value of the general registers.
+;
+;	EDIV has two write destinations.  In this case, we treat the next-to-last
+;	write specifier as a vfield specifier so that the potential memory address
+;	is left in the working register.  If that specifier is register mode, we
+;	store the register number (Rn) into Wsn+1 so that the execution flow has
+;	access to the register number to which to store the result.
+;
+;	The register vfield code assumes that it is processing a field instruction
+;	and copies the general register addressed by Rn to the working register.
+;	It then cases on DL for the specifier.  By pure chance (or clever layout
+;	of the specifiers, your choice), all field instruction have dl = byte and
+;	EDIV has dl = long for .vx specifiers.  This allows the microcode to case
+;	on one bit of DL.  For field instructions, Rrn+1 is copied to Wsn+1.
+;	For EDIV, the last specifier byte is read into Wsn+1.
+;
+;	Note that is does not matter if the case is on the CURRENT specifier's length
+;	or the PREVIOUS specifier's length.  For field instructions, the previous
+;	specifier is always position.rb, so the case selects the byte path.  For EDIV
+;	the previous specifier is quo.rw, so the case selects the long/quad path.
+
+.bin
+
+;	At this point,
+;		Sn	=	register file address to use for this specifier (W4)
+;		Rn	=	register number of the specifier
+;		DL	=	data length of the specifier
+;		PC	=	PC after adjustment for the current specifier and extension
+;		WDR	=	if indexed, shifted logical index
+
+SPEC.VF.REG:
+	;********** Hardware dispatch **********;
+	[Wsn] <-- [Rrn], LONG,			; copy general register to working register
+	CASE AT [SPEC.VF.REG.VFIELD]		; break out Vfield from EDIV
+
+;= ALIGNLIST 1*01*	(SPEC.VF.REG.VFIELD,	SPEC.VF.REG.EDIV)
+;  z = 0
+
+SPEC.VF.REG.VFIELD:
+	;---------------------------------------; dl = 0x => dl = b (or w):
+	[Wsn+1] <-- [Rrn+1], LONG,		; copy next general register to working reg
+	STATE.2 <-- 1,				; set state<2> to flag vfield reg specifier
+	DECODE NEXT				; exit
+
+SPEC.VF.REG.EDIV:
+	;---------------------------------------; dl = 1x => dl = l (or q):
+	VA <-- [PC] - 000000[01],		; point at current specifier byte
+	[WDR] <-- MEM (VA), BYTE,		; read current specifier byte
+	STATE.2 <-- 1				; set state<2> to flag vfield reg specifier
+
+	;---------------------------------------;
+	[Wsn+1] <-- [WDR] RROT (VA), LONG,	; rotate byte into position
+	DECODE NEXT				; exit
+
+SPEC.VF.REG.I:
+	;********** Hardware dispatch **********;
+	RESERVED ADDRESSING MODE		; fault
+.TOC	"	Special Flows For Byte, Word, Quadword Memory Operand"
+
+;	These flows are reached to finish processing of a byte, word, or quadword
+;	memory operand.
+;
+;	Byte and word operands must be right justified.
+;	Quadword operands require a second memory cycle to read the second 32b.
+;
+;	At this point,
+;		VA	=	address of operand
+;		WDR	=	byte or word memory operand just read in
+;
+;	Note that on MEM.AT reads to Wsn, the hardware automatically overrides
+;	Wsn to WDR if the effective data length is byte or word.
+
+;= ALIGNLIST 1*01*	(SPEC.RM.BYTE.WORD,	SPEC.RM.QUAD)
+;  z = 0
+
+SPEC.RM.BYTE.WORD:
+	;---------------------------------------; dl = 0x = byte, word:
+	[Wsn] <-- [WDR] RROT (VA), LONG,	; rotate operand into position
+	XMIT FPU LW (ENABLE),			; transmit operand to fpu
+	DECODE NEXT				; exit
+
+SPEC.RM.QUAD:
+	;---------------------------------------; dl = 1x = quad:
+	VA <-- [VA] + 4,			; point at second longword of operand
+	[Wsn+1] <-- MEM.AT (VA), LONG,		; read second longword of operand
+	XMIT FPU LW (ENABLE),			; transmit second longword to fpu
+	DECODE NEXT				; exit
+
+;= END SPECIFIER

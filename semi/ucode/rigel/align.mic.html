@@ -1,0 +1,528 @@
+.TOC 	"ALIGN.MIC -- Alignment Tables for Rigel Hardware Dispatches"
+.TOC	"Revision 3.2"
+
+;	Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 08-May-89 REC	Deoptimize MULX2, MULX3 and add MULX2.CONT,
+;			MULX3.CONT for bug fix.
+; (3)1 23-Aug-87 GMU	Optimized INDEX; pass 1 code freeze.
+;
+;    8 30-Jul-87 GMU	Constrained CONSOLE.HALT.. and MACHINE.CHECK..
+;    7 09-Jun-87 GMU	Changed BIU trap order and moved POWERUP.. to BIU
+;			trap vector.
+;    6 13-May-87 GMU	Re-ordered special dispatches to add MM.IB.ERROR..
+;    5 31-Dec-86 GMU	Added entry points for VAX vector and virtual VAX
+;			instructions.
+;    4 29-Dec-86 RMS	Combined WRITE.MEM.SET.PSL.CC wth MOVx.
+;    3 14-Nov-86 GMU	Optimized MUL{B,W,L}{2,3} and EMUL.
+;    2 07-Oct-86 GMU	Added entry points for CMPC3, CMPC5, LOCC, SKPC, SCANC,
+;			SPANC; removed entry points for ACBF, ACBD, ACBG.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+.TOC	"	Alignment Summary"
+
+
+;	The Rigel microcode contains a number of fixed entry points which define the
+;	start of a new microflow.  These entry points can be divided into two
+;	broad categories, as follows:
+;
+;		- I-box issued entry points
+;		- Microtrap entry points
+;
+;	The I-box issued entry points are those to which the I-box dispatches the E-box
+;	as the result of a DECODER NEXT micro-order.  In this case the I-box supplies
+;	bits <9:1> of the address and the microsequencer defaults bits <10,0> to zero.
+;
+;	Microtrap entry points are those to which a microtrap dispatches the E-box.
+;	The logic which generates the microtrap supplies bits <6:5> of the address,
+;	which determines the microtrap class, and drives the microtest bus with
+;	bits <3:1> to specify the type of microtrap within the class.  The
+;	microsequencer defaults bit <7> to 1 and bits <10:8,3:1> to 0.
+;
+;	The I-box issued entry points can be further divided into three sub-classes,
+;	as follows:
+;
+;		- Specifier flow entry points
+;		- IID dispatch entry points
+;		- Execution dispatch entry points
+;
+;	The specifier flow entry points direct the E-box to parse the next instruction
+;	specifier under the direction of the I-box.
+;
+;	The IID dispatch entry points include the I-box generated special condition
+;	entry points such as stall, IB fault, etc., plus all the execution dispatch
+;	entry points for those instruction which have zero specifiers or a single
+;	branch displacement pseudo-specifier.
+;
+;	The execution dispatch entry points are used for instruction execution
+;	for all instructions not included in the IID dispatch entry points.
+.TOC	"	Specifier Decode Dispatches"
+
+
+;	Specifier dispatch entry points are allocated in page 0 of the control
+;	store.  The address is constructed by concatenating several terms supplied
+;	by the I-box:
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  0 |  0 |  0 |  0 |     Spec type     | AT | Idx|  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Spec type:	0000:	Short literal
+;				0100:	Index
+;				0101:	Register
+;				0110:	Register deferred
+;				0111:	Auto decrement
+;				1000:	Auto increment
+;				1001:	Auto increment deferred
+;				1010:	Displacement
+;				1011:	Displacement deferred
+;				1100:	Immediate
+;				1101:	Absolute
+;
+;		AT:		0:	Access type = read, modify, or write (.rx, .mx, .wx)
+;				1:	Access type = address or vfield (.ax, .vx)
+
+;		Idx:		0:	Base specifier not indexed
+;				1:	Base specifier indexed
+
+.bin
+
+;= AT 000
+;= ALIGNLIST 00000*			(
+;=	SPEC.RMW.SLIT..,	SPEC.RMW.SLIT.I..,	; 0000'0000'A'I'0
+;=	SPEC.AV.SLIT..,		SPEC.AV.SLIT.I..,
+;=			,			,	; 0000'0001'A'I'0
+;=			,			,
+;=			,			,	; 0000'0010'A'I'0
+;=			,			,
+;=			,			,	; 0000'0011'A'I'0
+;=			,			,
+;=	SPEC.RMW.INDEX..,	SPEC.RMW.INDEX.I..,	; 0000'0100'A'I'0
+;=	SPEC.AV.INDEX..,	SPEC.AV.INDEX.I..,
+;=	SPEC.RMW.REG..,		SPEC.RMW.REG.I..,	; 0000'0101'A'I'0
+;=	SPEC.AV.REG..,		SPEC.AV.REG.I..,
+;=	SPEC.RMW.REG.DEF..,	SPEC.RMW.REG.DEF.I..,	; 0000'0110'A'I'0
+;=	SPEC.AV.REG.DEF..,	SPEC.AV.REG.DEF.I..,
+;=	SPEC.RMW.AUTO.DEC..,	SPEC.RMW.AUTO.DEC.I..,	; 0000'0111'A'I'0
+;=	SPEC.AV.AUTO.DEC..,	SPEC.AV.AUTO.DEC.I..)
+
+;= AT 040
+;= ALIGNLIST 00000*			(
+;=	SPEC.RMW.AUTO.INC..,	SPEC.RMW.AUTO.INC.I..,	; 0000'1000'A'I'0
+;=	SPEC.AV.AUTO.INC..,	SPEC.AV.AUTO.INC.I..,
+;=	SPEC.RMW.AI.DEF..,	SPEC.RMW.AI.DEF.I..,	; 0000'1001'A'I'0
+;=	SPEC.AV.AI.DEF..,	SPEC.AV.AI.DEF.I..,
+;=	SPEC.RMW.DISPL..,	SPEC.RMW.DISPL.I..,	; 0000'1010'A'I'0
+;=	SPEC.AV.DISPL..,	SPEC.AV.DISPL.I..,
+;=	SPEC.RMW.DISPL.DEF..,	SPEC.RMW.DISPL.DEF.I..,	; 0000'1011'A'I'0
+;=	SPEC.AV.DISPL.DEF..,	SPEC.AV.DISPL.DEF.I..,
+;=	SPEC.RMW.IMM..,		SPEC.RMW.IMM.I..,	; 0000'1100'A'I'0
+;=	SPEC.AV.IMM..,		SPEC.AV.IMM.I..,
+;=	SPEC.RMW.ABS..,		SPEC.RMW.ABS.I..,	; 0000'1101'A'I'0
+;=	SPEC.AV.ABS..,		SPEC.AV.ABS.I..,
+;=			,			,	; 0000'1110'A'I'0
+;=			,			,
+;=			,			,	; 0000'1111'A'I'0
+;=			,			)
+
+.nobin
+.TOC	"	Microtrap Dispatches"
+
+
+;	Microtrap dispatch entry points are allocated in page 1 of the control
+;	store.  The address is constructed by concatenating several terms supplied
+;	by the logic which requests the microtrap:
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  0 |  0 |  0 |  1 |  Trap class  |  Trap type   |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Trap class:	000:	Memory management trap
+;				001:	E-box integer overflow
+;				010:	I-box exceptions
+;				011:	BIU errors
+;				100:	F-chip errors
+
+;		Trap type:	nnn:	Trap type within the trap class
+
+
+.bin
+
+;	Memory management trap class.
+;
+;		80	TB miss
+;		82	Unused
+;		84	Unused
+;		86	ACV/TNV
+;		88	Unused 
+;		8A	Modify bit clear condition
+;		8C	Taken conditional branch
+;		8E	Cross page
+
+;= AT 080						; Memory management class
+;= ALIGNLIST 000*		(
+;=	MM.TBM..,		,			; 0001'000'000'0
+;=		,		MM.TNV.ACV..,		; 0001'000'011'0
+;=		,		MM.M.EQL.0..,		; 0001'000'101'0
+;=	MM.COND.FLUSH..,	MM.CPB..	)	; 0001'000'11x'0
+
+
+;	E-box integer overflow trap class.
+;
+;		90	Integer overflow
+;		92-9E	Unused
+
+;= AT 090
+;= ALIGNLIST 0*			(
+;=	IE.INTOV..,				)	; 0001'001'00x'0
+
+
+;	I-box exception trap class.
+;
+;		A0	I-box error
+;		A2	Reserved opcode
+;		A4	Reserved addressing mode
+;		A6	Reserved opcode + reserved addressing mode
+;				 (reserved opcode takes precedence)
+;		A8-AE	Unused
+
+;= AT 0A0
+;= ALIGNLIST 00*		(
+;=	IE.IBOX.ERROR..,	IE.RSVD.OPCODE..,	; 0001'010'00x'0
+;=	IE.RSVD.ADDR.MODE..,	IE.RSVD.OP.ADDR.MODE.. ); 0001'010'01x'0
+
+;	BIU error trap class.
+;
+;		B0	P-cache read error
+;		B2	DAL write or clear write buffer error
+;		B4	DAL read error
+;		B6	Unused
+;		B8	EPR read error
+;		BA	F-chip result parity error
+;		BC	Read interrupt vector error
+;		BE	Powerup
+
+;= AT 0B0
+;= ALIGNLIST 000*		(
+;=	IE.BUSERR.READ.PCACHE.., IE.BUSERR.WRITE.DAL..,	; 0001'011'00x'0
+;=	IE.BUSERR.READ.DAL..,	IE.BUSERR.UNKNOWN..,	; 0001'011'01x'0
+;=	IE.BUSERR.READ.EPR..,	IE.BUSERR.FP.RESULT..,	; 0001'011'10x'0
+;=	IE.BUSERR.READ.INTVEC..,POWERUP..)		; 0001'011'11x'0
+
+
+;	F-chip error trap class.
+;
+;		C0	Protocol error
+;		C2	Illegal opcode
+;		C4	Floating point reserved operand
+;		C6	Divide by zero
+;		C8	Floating point overflow
+;		CA	Floating point underflow
+;		CC	Operand parity error
+;		CE	Unknown status
+
+;= AT 0C0
+;= ALIGNLIST 000*		(
+;=	FP.PROTOCOL.ERROR..,	FP.ILLEGAL.OPCODE..,	; 0001'100'00x'0
+;=	FP.RSVD.OPERAND..,	FP.DIVIDE.BY.ZERO..,	; 0001'100'01x'0
+;=	FP.OVERFLOW..,		FP.UNDERFLOW.., 	; 0001'100'10x'0
+;=	FP.OPERAND.PARITY..,	FP.UNKNOWN.STATUS..)	; 0001'100'11x'0
+
+.nobin
+.TOC	"	IID Execution Dispatches"
+
+
+;	IID execution dispatch entry points are allocated in pages 2 and 3 of the
+;	control store.  The address is constructed by concatenating several terms
+;	supplied by the I-box:
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  0 |  0 |  1 |    IID dispatch   |  0 |  0 |  0 |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		IID dispatch:	0001:	NOP instruction
+;				0010:	REI instruction
+;				0011:	BPT instruction
+;				0100:	RET instruction
+;				0101:	RSB instruction
+;				0110:	LDPCTX instruction
+;				0111:	SVPCTX instruction
+;				1000:	HALT instruction
+;				1001:	XFC instruction
+;				1010:	PSL CC conditional branch instructions
+;				1011:	BSBx instructions
+;				1100:	Unconditional branch instructions
+
+.bin
+
+;= AT 110
+;= ALIGNLIST 0*	(NOP..,		)			; 001'0001'0000
+
+;= AT 120
+;= ALIGNLIST 0*	(REI..,		)			; 001'0010'0000
+
+;= AT 130
+;= ALIGNLIST 0*	(BPT..,		)			; 001'0011'0000
+
+;= AT 140
+;= ALIGNLIST 0*	(RET..,		)			; 001'0100'0000
+
+;= AT 150
+;= ALIGNLIST 0*	(RSB..,		)			; 001'0101'0000
+
+;= AT 160
+;= ALIGNLIST 0*	(LDPCTX..,	)			; 001'0110'0000
+
+;= AT 170
+;= ALIGNLIST 0*	(SVPCTX..,	)			; 001'0111'0000
+
+;= AT 180
+;= ALIGNLIST 0*	(HALT..,	)			; 001'1000'0000
+
+;= AT 190
+;= ALIGNLIST 0*	(XFC..,		)			; 001'1001'0000
+
+;= AT 1A0
+;= ALIGNLIST 0*	(BXX..,		)			; 001'1010'0000
+
+;= AT 1B0
+;= ALIGNLIST 0*	(BSBX..,	)			; 001'1011'0000
+
+;= AT 1C0
+;= ALIGNLIST 0*	(BRX..,		)			; 001'1100'0000
+
+.nobin
+.TOC	"	IID Special Dispatches"
+
+
+;	IID special dispatch entry points are allocated in pages 2 and 3 of the
+;	control store.  The address is constructed by concatenating several terms
+;	supplied by the I-box:
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  0 |  0 |  1 |         Special condition        |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Special condition:
+;				0000000: IB stall
+;				0000001: F-chip instruction with no F-chip
+;				0000011: FPD
+;				0000111: Istream TB fault
+;				0001111: Istream error
+;				0011111: Trace pending
+;				0111111: Interrupt pending
+;				1111111: VAX trap request
+
+.bin
+
+;= AT 100
+;= ALIGNLIST 0*	(IB.STALL..,		)		; 001'0000000'0
+
+;= AT 102
+;= ALIGNLIST 0	(NO.FPU..,		)		; 001'0000001'0
+
+;= AT 106
+;= ALIGNLIST 0	(FPD..,			)		; 001'0000011'0
+
+;= AT 10E
+;= ALIGNLIST 0	(MM.IB.FAULT..,		)		; 001'0000111'0
+
+;= AT 11E
+;= ALIGNLIST 0	(MM.IB.ERROR..,		)		; 001'0001111'0
+
+;= AT 13E
+;= ALIGNLIST 0	(TRACE.TRAP..,		)		; 001'0011111'0
+
+;= AT 17E
+;= ALIGNLIST 0	(INTERRUPT..,		)		; 001'0111111'0
+
+;= AT 1FE
+;= ALIGNLIST 0	(VAX.TRAP.REQ..,	)		; 001'1111111'0
+
+.nobin
+.TOC	"	Instruction Execution Dispatches"
+
+
+;	Instruction dispatch addresses are allocated in pages 4-7 of the control
+;	store.  The address is constructed by concatenating several terms supplied
+;	by the I-box:
+;
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  0 |  1 |         Execution offset         | Rm |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Execution offset:
+;				nnnnnnn: 7 bit instruction execution offset from the
+;					 IPLA.
+;
+;		Rm		0:	 Last specifier for the instruction wasn't
+;					 register mode.
+;				1:	 Last specifier for the instruction was
+;					 register mode.
+;
+;	The Rm bit is never asserted for instruction which have less than two
+;	specifiers.  Also, it can be disabled by turning off the rmode.enable
+;	bit for the instruction in the IPLA.
+;
+;	THESE ADDRESSES ARE BUILT INTO THE IPLA.  DO NOT CHANGE THE ORDERING OF
+;	THESE LABELS WITHOUT CONSIDERING THE IMPACT ON THE IPLA.
+
+.bin
+
+;	Page 4 - Entry points with no constraints.
+;
+;	The reserved opcode entry point must be at location 200 of the control
+;	store.  The I-box depends on this.
+
+;= AT 200
+;= ALIGNLIST 000000*	(
+;=	RSVDOP..,	,			,		,
+;=	MNEGX..,	MNEGX.R..,	MCOMX..,	MCOMX.R..,
+;=	ADDI2..,	ADDI2.R..,	ADDI3..,	ADDI3.R..,
+;=	SUBI2..,	SUBI2.R..,	SUBI3..,	SUBI3.R..,
+;=	BISX2..,	BISX2.R..,	BISX3..,	BISX3.R..,
+;=	BICX2..,	BICX2.R..,	BICX3..,	BICX3.R..,
+;=	XORX2..,	XORX2.R..,	XORX3..,	XORX3.R..,
+;=	CMPI..,		CMPI.R..,	BITX..,		BITX.R..,
+;=	TSTX..,		,		ADAWI..,	ADAWI.R..,
+;=	ADWC..,		ADWC.R..,	SBWC..,		SBWC.R..,
+;=	DIVX2..,	DIVX2.R..,	DIVX3..,	DIVX3.R..,
+;=	CVTBI..,	CVTBI.R..,	CVTWL..,	CVTWL.R..,
+;=	CVTIB..,	CVTIB.R..,	CVTLW..,	CVTLW.R..,
+;=	ASHX..,		ASHX.R..,	,		,
+;=	ROTL..,		ROTL.R..,	PUSHX..,	,
+;=	EMULATE..,	EMULATE.R..,	,		)
+
+
+;	Page 5 - Entry points with no constraints.
+
+;= AT 280
+;= ALIGNLIST 000000*	(
+;=	LOCC.SKPC..,	,		SCANC.SPANC..,	,
+;=	MOVF..,		,		MOVDG..,	,
+;=	FPU.1R.MSPC..,	,		FPU.1R.WSPC..,	,
+;=	FPU.2R.MSPC..,	,		FPU.2R.WSPC..,	,
+;=	CMPF..,		,		CMPCX..,	,
+;=	CALLX..,	,		POPR.PUSHR..,	,
+;=	CASEX..,	,		PROBEX..,	,
+;=	JMP..,		,		JSB..,		,
+;=	BBX..,		,		BLBX..,		,
+;=	INDEX..,	INDEX.R..,	MOVCX..,	,
+;=	MTPR..,		MTPR.R..,	MFPR..,		MFPR.R..,
+;=	CHMK..,		,		CHME..,		,
+;=	CHMS..,		,		CHMU..,		,
+;=	INSQUE..,	,		REMQUE..,	,
+;=	INSQXI..,	,		REMQXI..,	,
+;=	,		,		,		)
+
+;	Page 6 - Entry points with case constraints.
+;
+;	Note that MOVX.. and MOVX.R.. must be in the same page as the
+;	MULxy dispatches and must be constrainted as 110* and 111*,
+;	respectively.
+
+;= AT 300
+;= ALIGNLIST 000000*	(
+;=	INSV..,		INSV.R..,	FIELDX..,	FIELDX.R..,
+;=	SOBGXX..,	,		AOBLXX..,	,
+;=	EDIV..,		,		PROBEVMX..,	,
+;=	BIXPSW..,	,		MULX2..,	MULX2.CONT,
+;=	MULX3..,	MULX3.CONT,	,		,
+;=	,		,		MOVX..,		MOVX.R..,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		)
+
+
+;	Page 7 - Entry points with constraints to store routines.
+
+;= AT 380
+;= ALIGNLIST 000000*	(
+;=	INCX..,		,		DECX..,		,
+;=	CLRX..,		,		MOVPSL..,	,
+;=	ACBI..,		,		VEC.VV..,	,
+;=	VEC.MFVP..,	,		VEC.VS.Q..,	,
+;=	VEC.VS.L..,	,		VEC.LDST..,	,
+;=	VEC.GASC..,	,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		,
+;=	,		,		,		)
+.TOC	"	Special Routine Constraints"
+
+
+;	Certain routine entry points are constrained to fixed addresses
+;	to aid in debugging.  There are no hardware requirements for
+;	these constraints, so they are arbitrarily allocated to page
+;	8 of the control store.
+;
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  1 |  0 |  0 |  0 |   Special Routine Offset    |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+
+
+;	Error handlers.
+;
+;		400	Console halt
+;		402	Machine check
+
+;= AT 400
+;= ALIGNLIST 0*		(
+;=	CONSOLE.HALT..,		MACHINE.CHECK..)	; 1000'00000x'0

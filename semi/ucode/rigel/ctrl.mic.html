@@ -1,0 +1,1084 @@
+.TOC	"CTRL.MIC -- Control Instructions"
+.TOC	"Revision 3.2"
+
+;	Mike Uhler, George Mills
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 28-Dec-87 GMU	Added restriction about .vx specifier operands.
+; (3)1 21-Aug-87 RMS	Editorial changes; pass 1 code freeze.
+;
+;    3 21-May-87 GMU	Added warning about CALL during first cycle.
+;    2 29-Dec-86 RMS	Editorial changes.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+
+.bin
+;= BEGIN CTRL
+.nobin
+
+;	This module implements the control class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	9D	 ACBB limit.rb, add.rb, index.mb, displ.bw			* * * -		iov
+;	F1	 ACBL limit.rl, add.rl, index.ml, displ.bw			* * * -		iov
+;	3D	 ACBW limit.rw, add.rw, index.mw, displ.bw			* * * -		iov
+;
+;	F3	 AOBLEQ limit.rl, index.ml, displ.bb				* * * -		iov
+;	F2	 AOBLSS limit.rl, index.ml, displ.bb				* * * -		iov
+;
+;	1E	 BCC{=BGEQU} displ.bb						- - - -
+;	1F	 BCS{=BLSSU} displ.bb						- - - -
+;	13	 BEQL{=BEQLU} displ.bb						- - - -
+;	18	 BGEQ displ.bb							- - - -
+;	14	 BGTR displ.bb							- - - -
+;	1A	 BGTRU displ.bb							- - - -
+;	15	 BLEQ displ.bb							- - - -
+;	1B	 BLEQU displ.bb							- - - -
+;	19	 BLSS displ.bb							- - - -
+;	12	 BNEQ{=BNEQU} displ.bb						- - - -
+;	1C	 BVC displ.bb							- - - -
+;	1D	 BVS displ.bb							- - - -
+;
+;	E1	 BBC pos.rl, base.vb, displ.bb, {field.rv}			- - - -		rsv
+;	E0	 BBS pos.rl, base.vb, displ.bb, {field.rv}			- - - -		rsv
+;
+;	E5	 BBCC pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E3	 BBCS pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E4	 BBSC pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E2	 BBSS pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;
+;	E7	 BBCCI pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E6	 BBSSI pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;
+;	E9	 BLBC src.rl, displ.bb						- - - -
+;	E8	 BLBS src.rl, displ.bb						- - - -
+;
+;	11	 BRB displ.bb							- - - -
+;	31	 BRW displ.bw							- - - -
+;
+;	10	 BSBB displ.bb, {-(SP).wl}					- - - -
+;	30	 BSBW displ.bw, {-(SP).wl}					- - - -
+;
+;	8F	 CASEB selector.rb, base.rb, limit.rb, displ.bw-list		* * 0 *
+;	CF	 CASEL selector.rl, base.rl, limit.rl, displ.bw-list		* * 0 *
+;	AF	 CASEW selector.rw, base.rw, limit.rw, displ.bw-list		* * 0 *
+;
+;	17	 JMP dst.ab							- - - -
+;
+;	16	 JSB dst.ab, {-(SP).wl}						- - - -
+;
+;	05	 RSB {(SP)+.rl}							- - - -
+;
+;	F4	 SOBGEQ index.ml, displ.bb					* * * -		iov
+;	F5	 SOBGTR index.ml, displ.bb					* * * -		iov
+;
+.TOC	"	BRx, BCC, JMP"
+
+;	The branch instructions perform unconditional or conditional branches.
+;	The JMP instruction performs an unconditional JMP.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BRB		11	PC <-- PC + sext(displ.bb)		0	--	--	BRX..		--
+;	BRW		31	PC <-- PC + sext(displ.bw)		0	--	--	BRX..		--
+;
+;	BNEQ, BNEQU	12	if Z eql 0, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.~Z
+;	BEQL, BEQLU	13	if Z eql 1, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.Z
+;	BGTR		14	if {N or Z} eql 0,			0	--	--	BXX..		PSL.~(N+Z)
+;					PC <-- PC + sext(displ.bb)
+;	BLEQ		15	if {N or Z} eql 1,			0	--	--	BXX..		PSL.(N+Z)
+;					PC <-- PC + sext(displ.bb)
+;	BGEQ		18	if N eql 0, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.~N
+;	BLSS		19	if N eql 1, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.N
+;	BGTRU		1A	if {C or Z} eql 0,			0	--	--	BXX..		PSL.~(C+Z)
+;					PC <-- PC + sext(displ.bb)
+;	BLEQU		1B	if {C or Z} eql 1,			0	--	--	BXX..		PSL.(C+Z)
+;					PC <-- PC + sext(displ.bb)
+;	BVC		1C	if V eql 0, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.~V
+;	BVS		1D	if V eql 1, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.V
+;	BGEQU, BCC	1E	if C eql 0, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.~C
+;	BLSSU, BCS	1F	if C eql 1, PC <-- PC + sext(displ.bb)	0	--	--	BXX..		PSL.C
+;
+;	JMP		17	PC <-- src.ab				1	a/b	--	JMP..		--
+;
+;	Entry conditions from initial decode (branches):
+;		IDR	=	(displacement) operand
+;
+;	Entry conditions from specifier flows (JMP):
+;		MD.S1	=	source address
+;
+;	Exit conditions:
+;		The PC and VIBA have been updated (if branch taken).
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	Branch operation:
+;
+;		if branch condition satisfied then PC <-- PC + sext(displ.bx)
+
+;	 Note: this is also an exit path for other branch instructions.
+
+BXX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [PC] + [IDR],		; compute new PC
+	CONDITIONALLY LOAD VIBA AND PC,		; conditionally update PC
+	LAST CYCLE				; decode next instruction
+ 						; >> no CALL during first cycle
+
+BRX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [PC] + [IDR],		; compute new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [WAIT.PC.LOAD.2]			; >> load PC, no decode in next 2 cycles
+ 						; >> no CALL during first cycle
+
+;	JMP operation:
+;
+;		PC <-- src.ab
+
+POWERUP.START:					; enter here from powerup
+JMP..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1],			; fetch new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [WAIT.PC.LOAD.2]			; >> load PC, no decode in next 2 cycles
+
+.nobin
+.TOC	"	BSBB, BSBW, JSB"
+
+;	These instructions call local subroutines.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BSBB		10	-(SP) <-- PC, PC <-- PC + sext(displ.bb) 0	--	--	BSBX..		--
+;	BSBW		30	-(SP) <-- PC, PC <-- PC + sext(displ.bw) 0	--	--	BSBX..		--
+;
+;	JSB		16	-(SP) <-- PC, PC <-- src.ab		1	a/b	--	JSB..		--
+;
+;	Entry conditions from initial decode (BSBx):
+;		IDR	=	(displacement) operand
+;
+;		from specifier flows (JSB):
+;		MD.S1	=	first (address) operand
+;		DL	=	data type of first operand (byte)
+;
+;	Exit conditions:
+;		The PC has been pushed on the stack.
+;		The PC and VIBA have been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+
+;	BSBx, JSB, AOBLxx, and SOBGxx, along with other instructions, exploit detailed
+;	knowledge of the operation of the micropipeline in order to load the new value
+;	of PC, and read out the old value just before it is destroyed.  The implementation
+;	of LOAD PC is such that an implied write to the PC is not bypassed by the hardware.
+;	As such, a read of PC in the microinstruction immediately following a LOAD PC
+;	is guaranteed to get the old value of PC, independent of traps, stalls, or other
+;	events.
+;
+;	Consider the following two microinstructions:
+;
+;		A:	[WBUS] <-- [new-PC],
+;			LOAD VIBA AND PC
+;
+;		B:	[x] <-- [PC]
+;
+;	The pipeline usage for these two instructions looks as follows:
+;
+;						
+;		A:	|----------.----------.----------|
+;						      |<--- new PC loaded here
+;		B:	           |----------.----------.----------|
+;					      |<--- old PC latched in data path here
+;
+;	Because the LOAD VIBA AND PC memory request is not a memory read to an MD,
+;	the E-box and M-box pipeline remain in lockstep for the execution of
+;	microinstruction A.  Therefore, if the LOAD VIBA AND PC advances from
+;	CS1 to CS2, the operand access to the old value of PC must have also
+;	advanced from CS0 to CS1.  Once in CS1, the operand (the old value of
+;	PC in this case) is isolated from any subsequent change to PC.
+
+.bin
+
+;	BSBB, BSBW operation:
+;
+;		-(SP) <-- PC, PC <-- PC + sext(displ.bx)
+
+BSBX..:
+	;********** Hardware Dispatch **********;
+	VA.WCHK&, [WBUS] <-- [SP] - 4, LONG,	; write check stack location
+ 						; >> no CALL during first cycle
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	[WBUS] <-- [PC] + [IDR],		; compute new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [BSBX.COMMON]			; >> load PC, no decode in next 2 cycles
+
+;	JSB operation:
+;
+;		-(SP) <-- PC, PC <-- src.ab
+
+JSB..:
+	;********** Hardware Dispatch **********;
+	VA.WCHK&, [WBUS] <-- [SP] - 4, LONG,	; write check stack location
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.S1],			; get new PC from specifier flow
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; turn on prefetch
+	GOTO [BSBX.COMMON]			; >> load PC, no decode in next 2 cycles
+
+;	Common code to write PC to stack assuming already write checked.
+
+BSBX.COMMON:
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [PC], LONG	; write value of OLD PC onto stack
+
+	;---------------------------------------;
+	[SP] <-- [SP] - 4,			; decrement stack pointer
+	GOTO [LAST.CYCLE]			; decode next instruction
+
+.nobin
+.TOC	"	RSB"
+
+;	This instruction returns control from a subroutine called by BSBB, BSBW, or JSB.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	RSB		05	PC <-- (SP)+				0	--	--	RSB..		--
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The PC has been popped from the stack.
+;		The PC and VIBA have been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	RSB operation:
+;
+;		PC <-- (SP)+
+
+RSB..:
+	;********** Hardware Dispatch **********;
+	[MD.S1] <-- MEM ([SP]), LONG,		; get return PC from stack
+ 						; >> no CALL during first cycle
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	[SP] <-- [SP] + 4,			; increment stack pointer and wait for read
+	GOTO [JMP..]				; load new PC and exit
+
+.nobin
+.TOC	"	CASEx"
+
+;	These instructions implement multiway case branching on an input selector.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CASEB		8F	(see below)				3	rrr/bbb	jizj	CASEX..		--
+;	CASEW		AF	(see below)				3	rrr/www	jizj	CASEX..		--
+;	CASEL		CF	(see below)				3	rrr/lll	jizj	CASEX..		--
+;
+;	The case operation is as follows:
+;		tmp <-- selector.rx - base.rx
+;		PC <-- PC + if (tmp LEQU limit.rx) then {sext(displ.bw[tmp])} else {2 + 2*zext(limit.rx))
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (selector) operand
+;		MD.S2	=	second (base) operand
+;		MD.S3	=	third (limit) operand, if memory
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The PC and VIBA have been updated.
+;
+;	Condition codes:
+;		N <-- selector - base LSS limit
+;		Z <-- selector - base EQL limit
+;		V <-- 0					[Integer overflow trap cannot occur.]
+;		C <-- selector - base LSSU limit
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	CASEx operation:
+;
+;		tmp <-- selector.rx - base.rx
+;		PC <-- PC + if (tmp LEQU limit.rx) then {sext(displ.bw[tmp])}
+;						   else {2 + 2*zext(limit.rx))}
+
+;	casex x,x,r --
+
+CASEX..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1] - [MD.S2], LEN(DL)	; compute selector - base
+
+	;---------------------------------------;
+	[WBUS] <-- [SC] - [MD.S3], LEN(DL),	; compare with limit
+	SET PSL CC, MAP.JIZJ,			; set PSL CCs, map is JIZJ
+	CALL [WAIT.ONE.CYCLE],			; wait for WBUS CCs
+		sim wbus.nzvc <-- k[0]
+
+	;---------------------------------------;
+	[MD.T1] <-- [MD.S3] + [MD.S3] + 1,	; compute zext(limit)*2 + 1
+	LONG					; extend to full longword
+
+	;---------------------------------------;
+	[SC] <-- [SC] LSH [1.],			; compute displacement from PC
+	DL <-- WORD,				; change DL to word for read
+	CASE [WBUS.NZC] AT [CASEX.IN.RANGE.1]	; in range?
+
+;= ALIGNLIST 100*	(CASEX.IN.RANGE.1,	CASEX.OUT.RANGE,
+;=					 ,	CASEX.IN.RANGE.2)
+
+CASEX.OUT.RANGE:
+	;---------------------------------------; wbus.zc = 01:
+	[WBUS] <-- [PC] + [MD.T1] + 1,		; PC + (limit*2 + 2)
+	LOAD VIBA AND PC,			; jam new PC
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [WAIT.PC.LOAD.2]			; >> load PC, no decode in next 2 cycles
+
+;	CASEx, continued.
+;	Case in range.  Read displacement, sign extend, load new PC.
+
+;	At this point,
+;		SC	=	zext(selector - base) * 2
+
+CASEX.IN.RANGE.1:
+	;---------------------------------------; wbus.zc = 00:
+	[MD.T6] <-- MEM ([PC] + [SC]), LEN(DL),	; read word containing displacement
+	GOTO [CASEX.IN.RANGE.COMMON],		; join common flow
+		sim addr [case] [0]
+
+CASEX.IN.RANGE.2:
+	;---------------------------------------; wbus.zc = 11:
+	[MD.T6] <-- MEM ([PC] + [SC]), LEN(DL),	; read word containing displacement
+		sim addr [case] [0]
+
+CASEX.IN.RANGE.COMMON:
+	;---------------------------------------;
+	[SC] <-- [MD.T6] LSH [16.]		; first half of sign-extend
+
+	;---------------------------------------;
+	[SC] <-- SEXT.[SC] RSH [16.]		; second half of sign-extend
+
+	;---------------------------------------;
+	[WBUS] <-- [PC] + [SC],			; compute new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [WAIT.PC.LOAD.2]			; >> load PC, no decode in next 2 cycles
+.nobin
+.TOC	"	SOBGTR, SOBGEQ"
+
+;	These instructions decrement an index and test it against zero.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	SOBGEQ		F4	index.ml <-- index.ml - 1		1	m/l	iiip	SOBGXX..	PSL.~N
+;					if (index geq 0) then PC <-- PC + sext(displ.bb)
+;	SOBGTR		F5	index.ml <-- index.ml - 1		1	m/l	iiip	SOBGXX..	PSL.~(N+Z)
+;					if (index gtr 0) then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (index) operand
+;		VA	=	address of first (index) operand, if memory
+;		RN	=	register number of first (index) operand, if register
+;		DL	=	data type of first (index) operand (long)
+;		IDR	=	(displacement) operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- overflow		[Integer overflow trap enabled by final iiii map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	SOBGEQ, SOBGTR operation:
+;
+;		index.ml <-- index.ml - 1
+;		if (index geq, gtr 0) then PC <-- PC + sext(displ.bb)
+
+;	See the comments for BSBx, JSB re updating PC and then reading the old value.
+
+SOBGXX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [PC] + [IDR],		; [1] assume branch taken, compute new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush ib
+	ENABLE IB PREFETCH			; make sure prefetch is on
+ 						; >> load PC, no mmgt utrap in next 3 cycles
+						; >> load PC, no decode in next 2 cycles
+
+	;---------------------------------------;
+	[MD.T1] <-- [PC],			; [2] save old PC in case branch not taken
+	CASE [INT.RMODE] AT [SOBGXX.MEM]	; goto separate memory and register flows
+
+;= ALIGNLIST 110*	(SOBGXX.MEM,		SOBGXX.REG)
+
+SOBGXX.MEM:
+	;---------------------------------------; int.rmode<0> = 0:
+	CALL [WAIT.ONE.CYCLE]			; [3-4] can't do a memory reference for
+						;       two cycles
+
+	;---------------------------------------;
+	VA.WCHK&, [WBUS] <-- [VA], LONG,	; [5] write check to make sure the TB entry
+						;     is valid
+		sim addr [ea] [1]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.S1] - 1,	; [6] compute and store result
+	SET PSL CC, LONG,			; set PSL CCs, default map is iiip
+	GOTO [SOBGXX.COMMON]			; go do conditional branch
+
+SOBGXX.REG:
+	;---------------------------------------; int.rmode<0> = 1:
+	[G.RN] <-- [MD.S1] - 1,			; [3] compute and store result
+	SET PSL CC, LONG,			; set PSL CCs, default map is iiip
+	GOTO [SOBGXX.COMMON]			; go do conditional branch
+
+SOBGXX.COMMON:
+	;---------------------------------------;
+	[WBUS] <-- [MD.T1],			; [4,7] get the old PC
+	CONDITIONALLY LOAD VIBA AND PC,		; conditionally update PC
+	MAP.IIII,				; enable integer overflow with iiii map
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	AOBLSS, AOBLEQ"
+
+;	These instructions increment an index and test it against a limit.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	AOBLSS		F2	index.ml <-- index.ml + 1		2	rm/ll	iiip	AOBLXX..	WBUS.LSS
+;					if (index lss limit) then PC <-- PC + sext(displ.bb)
+;	AOBLEQ		F3	index.ml <-- index.ml + 1		2	rm/ll	iiip	AOBLXX..	WBUS.LEQ
+;					if (index leq limit) then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (limit) operand
+;		MD.S2	=	second (index) operand
+;		VA	=	address of second (index) operand, if memory
+;		RN	=	register number of second (index) operand, if register
+;		DL	=	data type of second operand (long)
+;		IDR	=	(displacement) operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- overflow		[Integer overflow trap enabled by final iiii map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	AOBLSS, AOBLEQ operation:
+;
+;		index.ml <-- index.ml + 1
+;		if (index lss, leq limit) then PC <-- PC + sext(displ.bb)
+
+;	See the comments for BSBx, JSB re updating PC and then reading the old value.
+
+AOBLXX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [PC] + [IDR],		; [1] assume branch taken, compute new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH			; make sure prefetch is on
+ 						; >> load PC, no mmgt utrap in next 3 cycles
+ 						; >> load PC, no decode in next 2 cycles
+
+	;---------------------------------------;
+	[MD.T1] <-- [PC],			; [2] save old PC in case branch not taken
+	CASE [INT.RMODE] AT [AOBLXX.MEM]	; goto separate memory and register flows
+
+;= ALIGNLIST 110*	(AOBLXX.MEM,		AOBLXX.REG)
+
+AOBLXX.MEM:
+	;---------------------------------------; int.rmode<0> = 0:
+	CALL [WAIT.ONE.CYCLE]			; [3-4] can't do a memory reference for
+						;       two cycles
+
+	;---------------------------------------;
+	VA.WCHK&, [WBUS] <-- [VA], LONG,	; [5] write check to make sure the TB entry
+						;     is valid
+		sim addr [ea] [2]
+
+	;---------------------------------------;
+	MEM (VA)&, [SC] <-- [MD.S2] + 1, LONG,	; [6] compute and store result
+	SET PSL CC,				; set PSL CCs, default map is iiip
+	GOTO [AOBLXX.EXIT]			; go do compare
+
+AOBLXX.REG:
+	;---------------------------------------; int.rmode<0> = 1:
+	SC&, [G.RN] <-- [MD.S2] + 1, LONG,	; [3] compute and store result
+	SET PSL CC,				; set PSL CCs, default map is iiip
+	GOTO [AOBLXX.EXIT]			; go do compare
+
+AOBLXX.EXIT:
+	;---------------------------------------;
+	[WBUS] <-- [SC] - [MD.S1], LONG,	; [4,7] compare result with limit
+	GOTO [SOBGXX.COMMON]			; go do conditional branch
+
+.nobin
+.TOC	"	ACBx"
+
+;	These instructions add a value to an index and test the result against a limit.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ACBB		9D	index.mb <-- index.mb + add.rb		3	rrm/bbb	iiip	ACBI..		WBUS.LEQ
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;	ACBW		3D	index.mw <-- index.mw + add.rw		3	rrm/www	iiip	ACBI..		WBUS.LEQ
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;	ACBL		F1	index.ml <-- index.ml + add.rl		3	rrm/lll	iiip	ACBI..		WBUS.LEQ
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (limit) operand
+;		MD.S2	=	second (add) operand
+;		MD.S3	=	third (index) operand, if memory
+;		VA	=	address of third (index) operand, if memory
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand
+;		IDR	=	(displacement) operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- overflow		[Integer overflow trap enabled by final iiii map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		Use of the hardware branch-taken microbranch saves three microwords.
+;
+.bin
+
+;	ACBx operation:
+;
+;		index.mx <-- index.mx + add.rx
+;			if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bb)
+;			if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bb)
+
+ACBI..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S2], LEN(DL),		; [1] pass add.rx thru ALU for branch
+	CASE [INT.RMODE] AT [ACBI.MEM],		; case on memory vs register
+		sim wbus.nzvc <-- k[8]
+
+;= ALIGNLIST 110*	(ACBI.MEM,		ACBI.REG)
+
+ACBI.MEM:
+	;---------------------------------------; int.rmode<0> = 0:
+	VA.WCHK&, [WBUS] <-- [VA], LEN(DL),	; [2] write check to get TB entry
+		sim addr [ea] [3]
+
+	;---------------------------------------;
+	MEM (VA)&, [SC] <-- [MD.S2] + [MD.S3],	; [3] write result to memory
+	SET PSL CC, LEN(DL),			; set PSL CC, default map is iiip
+	GOTO [ACBI.CONTINUE]			; join common code
+
+ACBI.REG:
+	;---------------------------------------; int.rmode<0> = 1:
+	SC&, [G.RN] <-- [MD.S2] + [MD.S3],	; [2] write result to reg and SC
+	SET PSL CC, LEN(DL),			; set PSL CC, default map is iiip
+	CALL [WAIT.ONE.CYCLE]			; [3] wait for wbus CCs
+
+ACBI.CONTINUE:
+	;---------------------------------------;
+	[WBUS] <-- [SC] - [MD.S1], LEN(DL),	; [4] assume add geq 0, compute index-limit
+	CASE [WBUS.NZV] AT [ACBI.COMMON],	; case on sign of add.rx from cycle [1]
+		sim wbus.nzvc <-- [br.taken.0z00]
+
+;= ALIGNLIST 01**	(ACBI.COMMON,		ACBI.LSS)
+;  WBUS.NZVC SET FROM pass ALU function --> V = C = 0
+
+ACBI.LSS:
+	;---------------------------------------; wbus.n = 0:
+	[WBUS] <-- [MD.S1] - [SC], LEN(DL),	; [4a] add lss 0, compute limit-index
+	GOTO [ACBI.COMMON],			; join common flow
+		sim wbus.nzvc <-- [br.taken.0z00]
+
+;	ACBi, continued.
+;	Result stored, branch condition computed.
+;	Load branch-taken PC, case on branch result.
+;
+;	The addition done by the ACBi instructions may cause an integer overflow.  To
+;	avoid a simultaneous integer overflow and conditional branch taken microtraps,
+;	which the hardware doesn't handle well, these flows use explicit PC loads
+;	via LOAD VIBA AND PC.  As these are loop branch instructions, it is assumed that
+;	the branch is taken.  Final determination is made by a microbranch on wbus.nzv.
+;	The branch-taken equation is:
+;
+;		wbus.z OR (wbus.n XOR wbus.v)
+
+;	At this point,
+;		WBUS.NZVC =	result of branch-taken decision (from cycle [4] or [4a])
+
+ACBI.COMMON:
+	;---------------------------------------; wbus.n = 1:
+	[WBUS] <-- [PC] + [IDR],		; [5] assume branch taken, compute new PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH			; make sure prefetch is on
+ 						; >> load PC, no decode in next 2 cycles
+
+	;---------------------------------------;
+	[MD.T1] <-- [PC]			; [6] save old PC in case branch not taken
+
+	;---------------------------------------;
+	MAP.IIII,				; [7] enable integer overflow with iiii map
+	CASE [WBUS.NZV] AT [ACBI.WBUS.CC.000]	; case on branch result from [4] or [4a]
+
+;	ACBi, continued.
+;	Branch decision made.
+;	Load old PC if branch not taken, otherwise decode next instruction.
+
+;	At this point,
+;		MD.T1	=	PC to restore if branch not taken
+;		WBUS.NZVC =	result of branch-taken decision (from cycle [4] or [4a])
+
+;= ALIGNLIST 000*	(ACBI.WBUS.CC.000,	ACBI.WBUS.CC.001,
+;=			 ACBI.WBUS.CC.010,	,
+;=			 ACBI.WBUS.CC.100,	ACBI.WBUS.CC.101,
+;=			 ,			,		)
+;  WBUS.NZVC set from subtract --> 011, 110, 111 combinations not possible.
+
+ACBI.WBUS.CC.000:
+	;---------------------------------------; wbus.nzv = 000 --> branch not taken:
+	[WBUS] <-- [MD.T1],			; [8] fetch back old PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [WAIT.PC.LOAD.2]			; >> load PC, no decode in next 2 cycles
+
+ACBI.WBUS.CC.001:
+	;---------------------------------------; wbus.nzv = 001 --> branch taken:
+	LAST CYCLE				; [8] decode next instruction
+
+ACBI.WBUS.CC.010:
+	;---------------------------------------; wbus.nzv = 010 --> branch taken:
+	LAST CYCLE				; [8] decode next instruction
+
+ACBI.WBUS.CC.100:
+	;---------------------------------------; wbus.nzv = 100 --> branch taken:
+	LAST CYCLE				; [8] decode next instruction
+
+ACBI.WBUS.CC.101:
+	;---------------------------------------; wbus.nzv = 101 --> branch not taken:
+	[WBUS] <-- [MD.T1],			; [8] fetch back old PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; make sure prefetch is on
+	GOTO [WAIT.PC.LOAD.2]			; >> load PC, no decode in next 2 cycles
+
+.nobin
+.TOC	"	BBx, BBxS, BBxC, BBxxI"
+
+;	These instructions test, or test and alter, a one-bit field.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BBS		E0	if bit(pos.rl, base.vb) eql 1		2	rv/lb	--	BBX..		WBUS.~Z
+;					then PC <-- PC + sext(displ.bb)
+;	BBC		E1	if bit(pos.rl, base.vb) eql 0		2	rv/lb	--	BBX..		WBUS.Z
+;					then PC <-- PC + sext(displ.bb)
+;
+;	BBSS		E2	if bit(pos.rl, base.vb) eql 1		2	rv/lb	--	BBX..		WBUS.~Z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1
+;	BBCS		E3	if bit(pos.rl, base.vb) eql 0		2	rv/lb	--	BBX..		WBUS.Z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1
+;
+;	BBSC		E4	if bit(pos.rl, base.vb) eql 1		2	rv/lb	--	BBX..		WBUS.~Z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0
+;	BBCC		E5	if bit(pos.rl, base.vb) eql 0		2	rv/lb	--	BBX..		WBUS.Z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0
+;
+;	BBSSI		E6	if bit(pos.rl, base.vb) eql 1		2	rv/lb	--	BBX..		WBUS.~Z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1 INTERLOCKED
+;	BBCCI		E7	if bit(pos.rl, base.vb) eql 0		2	rv/lb	--	BBX..		WBUS.Z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0 INTERLOCKED
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(=S1) =	first (position) operand
+;		MD.T2(=S2) =	address of second (base) operand, if memory
+;		MD.T2(=S1) =	C(G.RN), if register
+;		VA	=	address of second (base) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (byte)
+;		IDR	=	(displacement) operand
+;		STATE<2> =	0 if field in memory, 1 if field in register
+;
+;	Note: The contents of MD.T3 as supplied by the SPEC.AV.REG flow are
+;	not deterministic for this instruction and should not be used as
+;	an input operand.
+;
+;	Exit conditions:
+;		The PC has been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BBx operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+
+;	BBxS operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- 1
+
+;	BBxC operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- 0
+
+;	BBxxI operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- x INTERLOCKED
+
+BBX..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.T0] - 000000[32.], LONG,	; [1] check for pos >= 32 for rmode case
+	STATE3-0 <-- 0,				; clear state bits
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[SC] <-- [MD.T0] LSH [0],		; [2] set shifter sign for memory case
+	HOLD WBUS CC,				; hold cycle [1] test for rmode case
+	CASE [INT.RMODE] AT [BBX.MEMORY]	; break out into register and memory flows
+
+;	BB memory.
+;	Get byte offset.
+
+;	At this point,
+;		MD.T0	=	pos
+;		MD.T2	=	base address
+;		SHIFTER.SIGN =	set from MD.T0
+;		DL	=	data type of second operand (byte)
+;		IDR	=	disp
+
+;=ALIGNLIST 110*	(BBX.MEMORY,	BBX.REGISTER)
+
+BBX.MEMORY:
+	;---------------------------------------; int.rmode<0> = 0:
+	[SC] <-- [MD.T0] AND 000000[07], LONG	; [3] mask off bit position within byte
+						;     for mem case
+
+	;---------------------------------------;
+	[MD.T1] <-- SEXT.[MD.T0] RSH [3],	; [4] compute sign-extended byte pos offset
+	CASE [OPCODE2-0] AT [BBX.MEM.READ.BBX]	; case on type of branch instruction
+
+;	BB memory, continued.
+;	Read byte and create bit mask.
+
+;	At this point,
+;		MD.T0	=	pos
+;		MD.T2	=	base address
+;		MD.T1	=	byte pos offset
+;		SC	=	pos within byte
+;		DL	=	data type of second operand (byte)
+;		IDR	=	disp
+
+;= ALIGNLIST 001*	(BBX.MEM.READ.BBX,	BBX.MEM.READ.BBXS,
+;=			 BBX.MEM.READ.BBXC,	BBX.MEM.READ.BBXXI)
+
+BBX.MEM.READ.BBX:
+	;---------------------------------------; opcode<2:1> = 00:
+	[MD.T6] <-- MEM ([MD.T2] + [MD.T1]), LEN(DL), ; [5] read target byte
+		sim addr [vfield] [0]
+
+	;---------------------------------------;
+	[MD.T4] <-- [K1] LSH (SC),		; [6] create mask to test bit within field
+	GOTO [BBX.MEM.TEST]			; join test code
+
+BBX.MEM.READ.BBXS:
+	;---------------------------------------; opcode<2:1> = 01:
+	[MD.T6] <-- MEM.WCHECK ([MD.T2] + [MD.T1]), ; [5] read and write check for later
+	LEN(DL), STATE0 <-- 1,			; flag no write lock
+		sim addr [vfield] [0]
+
+	;---------------------------------------;
+	[MD.T4] <-- [K1] LSH (SC),		; [6] create mask to test bit within field
+	GOTO [BBX.MEM.SET]			; join set code
+
+BBX.MEM.READ.BBXC:
+	;---------------------------------------; opcode<2:1> = 10:
+	[MD.T6] <-- MEM.WCHECK ([MD.T2] + [MD.T1]), ; [5] read and write check for later
+	LEN(DL), STATE0 <-- 1,			; flag no write lock
+		sim addr [vfield] [0]
+
+	;---------------------------------------;
+	[MD.T4] <-- [K1] LSH (SC),		; [6] create mask to test bit within field
+	GOTO [BBX.MEM.CLR]			; join clear code
+
+BBX.MEM.READ.BBXXI:
+	;---------------------------------------; opcode<2:1> = 11:
+	[MD.T6] <-- MEM.LOCK ([MD.T2] + [MD.T1]), LEN(DL), ; [5] read and lock
+	DISABLE IB PREFETCH,			; disable prefetch
+						; >> no prefetch until write unlock
+		sim addr [vfield] [0]
+
+	;---------------------------------------;
+	[MD.T4] <-- [K1] LSH (SC),		; [6] create mask to test bit within field
+	CASE [OPCODE2-0] AT [BBX.MEM.SET]	; case on clear or set
+
+;	BB memory, continued.
+;	Perform specified operation and exit.
+
+;	At this point,
+;		MD.T4	=	bit test mask
+;		MD.T6	=	bit test field
+;		DL	=	data type of second operand (byte)
+;		IDR	=	disp
+
+;= ALIGNLIST 110*	(BBX.MEM.SET,		BBX.MEM.CLR)
+
+BBX.MEM.SET:
+	;---------------------------------------; opcode<0> = 0:
+	[SC] <-- [MD.T6] OR [MD.T4],		; [7] set specified bit in byte
+	CASE [STATE2-0] AT [BBX.MEM.WRITE.BBXXI]; case on interlock
+
+BBX.MEM.CLR:
+	;---------------------------------------; opcode<0> = 0:
+	[SC] <-- [MD.T6] ANDNOT [MD.T4],	; [7] clear specified bit in byte
+	CASE [STATE2-0] AT [BBX.MEM.WRITE.BBXXI]; case on interlock
+
+;= ALIGNLIST **0*	(BBX.MEM.WRITE.BBXXI,	BBX.MEM.WRITE.BBXY)
+;  state<2:1> = 0 --> state<2:0> = 00?
+
+BBX.MEM.WRITE.BBXXI:
+	;---------------------------------------; state<0> = 0:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [SC], LEN(DL), ; [8] write bit and unlock
+	ENABLE IB PREFETCH,			; interlock finished, turn the prefetcher
+	GOTO [BBX.MEM.TEST]			; back on and join common code
+
+BBX.MEM.WRITE.BBXY:
+	;---------------------------------------; state<0> = 1:
+	MEM (VA)&, [WBUS] <-- [SC], LEN(DL),	; [8] write bit
+	GOTO [BBX.MEM.TEST]			; join common code
+
+BBX.MEM.TEST:
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] AND [MD.T6], LONG,	; [7/9] mask of selected bit for test
+	GOTO [BBX.RMODE.BRANCH]			; join common code
+
+;	BB register.
+;	Create bit mask.
+
+;	At this point,
+;		MD.T2	=	original contents of GPR
+;		SC 	=	pos - 32, available for shift in next cycle only
+;		RN	=	register number of second specifier
+;		IDR	=	disp
+;		WBUS.NZVC =	set from pos - 32 test (cycle [1], held by cycle [2])
+
+;	Note that shifter is controlled by SC<4:0>, i.e., SC mod 32.
+;	SC = pos - 32 --> SC<4:0> = pos - 32 mod 32 = pos - 32.
+
+BBX.REGISTER:
+	;---------------------------------------; int.rmode<0> = 1:
+	[MD.T4] <-- [K1] LSH (SC),		; [3] create mask to test bit in register
+						; >> shift on PREVIOUS value of SC = pos
+	CASE [OPCODE2-0] AT [BBX.RMODE.BBX]	; case on opcode<2:0>
+
+;= ALIGNLIST 001*	(BBX.RMODE.BBX,		BBX.RMODE.BBXS,
+;=			 BBX.RMODE.BBXC,	BBX.RMODE.BBXXI)
+
+BBX.RMODE.BBX:
+	;---------------------------------------; opcode<2:1> = 00:
+	[WBUS] <-- [G.RN] AND [MD.T4], LONG,	; [4] test specified bit in register
+	CASE [WBUS.NZC] AT [BBX.RMODE.BRANCH]	; case on pos <= 32 from cycle [1]
+
+BBX.RMODE.BBXS:
+	;---------------------------------------; opcode<2:1> = 01:
+	[WBUS] <-- [G.RN] AND [MD.T4], LONG,	; [4] test specified bit in register
+	GOTO [BBX.RMODE.SET]			; set bit in register
+
+BBX.RMODE.BBXC:
+	;---------------------------------------; opcode<2:1> = 10:
+	[WBUS] <-- [G.RN] AND [MD.T4], LONG,	; [4] test specified bit in register
+	GOTO [BBX.RMODE.CLR]			; clear bit in register
+
+BBX.RMODE.BBXXI:
+	;---------------------------------------; opcode<2:1> = 11:
+	[WBUS] <-- [G.RN] AND [MD.T4], LONG,	; [4] test specified bit in register
+	CASE [OPCODE2-0] AT [BBX.RMODE.SET]	; case on BBSSI vs BBCCI
+
+;	BB register, continued.
+;	Set or clear mask bit, test for reserved operand.
+
+;	At this point,
+;		MD.T2	=	original contents of GPR
+;		MD.T4	=	bit to set or clear
+;		RN	=	register number of second specifier
+;		IDR	=	disp
+;		WBUS.NZVC =	set from pos - 32 test (cycle [1], held by cycle [2])
+
+;= ALIGNLIST 110*	(BBX.RMODE.SET,		BBX.RMODE.CLR)
+
+BBX.RMODE.SET:
+	;---------------------------------------; opcode<0> = 0:
+	[G.RN] <-- [G.RN] OR [MD.T4],		; [5] set bit in general register
+	HOLD WBUS CC,				; block update of WBUS CCs
+	CASE [WBUS.NZC] AT [BBX.RMODE.BRANCH]	; case on pos <= 32 from cycle [1/2]
+
+BBX.RMODE.CLR:
+	;---------------------------------------; opcode<0> = 1:
+	[G.RN] <-- [G.RN] ANDNOT [MD.T4],	; [5] clear bit in general register
+	HOLD WBUS CC,				; block update of WBUS CCs
+	CASE [WBUS.NZC] AT [BBX.RMODE.BRANCH]	; case on pos <= 32 from cycle [1/2]
+
+;= ALIGNLIST 110*	(BBX.RMODE.BRANCH,	BBX.RMODE.RSRV.OPER)
+
+BBX.RMODE.BRANCH:
+	;---------------------------------------; wbus.c = 0:
+	[WBUS] <-- [PC] + [IDR],		; [5/6] compute new PC
+	CONDITIONALLY LOAD VIBA AND PC,		; conditionally update PC
+	LAST CYCLE				; decode next instruction
+
+;	Here if pos > 32.  As the GPR may have been modified above, it
+;	must be restored.  The specifier flows copied the original contents
+;	of G.RN to MD.T2, and it is restored from there.
+
+BBX.RMODE.RSRV.OPER:
+	;---------------------------------------; wbus.c = 1:
+	[G.RN] <-- [MD.T2],			; [5/6] restore GPR in case modified
+	GOTO [BBX.RESERVED.OPERAND.FAULT]	; exit thru reserved operand fault
+
+.nobin
+.TOC	"	BLBx"
+
+;	These instructions test the low order bit of the source operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BLBS		E8	if src.rl<0> eql 1			1	r/l	--	BLBX..		WBUS.~Z
+;					then PC <-- PC + sext(displ.bb)
+;	BLBC		E9	if src.rl<0> eql 0			1	r/l	--	BLBX..		WBUS.Z
+;					then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (source) operand
+;		DL	=	data type of first (source) operand (long)
+;		IDR	=	(displacement) operand
+;
+;	Exit conditions:
+;		The PC has been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BLBx operation:
+;
+;		if (src.rl<0> eql x) then PC <-- PC + sext(displ.bb)
+
+BLBX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1] AND 000000[01],	; test low bit
+	GOTO [BXX..]				; join common code
+
+;= END CTRL

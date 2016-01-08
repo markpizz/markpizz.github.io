@@ -1,0 +1,2010 @@
+.TITLE	"Rigel I-box Decode Tables"
+.TOC	"Revision 3.4"
+
+
+;	Mike Uhler
+
+
+
+; Assembly directives
+
+.icode					; Use I memory
+.hexadecimal				; Numbers are hex by default
+.rtol					; Bit numbering is right to left
+.allmemfields				; Include everything in .ULD file
+.sequential				; Allocation is sequential
+.width/80				; Length of decode tables including simulation fields
+; .width/43				; Length of real decode tables
+
+
+; Conditional assembly switches
+
+.default/perf.model	= 0		; 1 to assemble for performance model
+					; 0 to assemble for behavioral model
+
+
+.nobin
+.nocref
+
+
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    4  09-May-89 REC	Deoptimized MUL{B,W}2 and MUL{B,W,L}3.  A nop is
+;			being added to the first cycle of MULx2 and MULx3
+;			execution flows to guarantee that we get the correct
+;			value of DL for case branching.
+;    3  28-Dec-87 GMU	Changed the first specifier of PROBEVMx from .rb
+;			to .rl to reflect the recent VAX ECO.
+;    2  24-Sep-87 GMU	Deoptimized MULL2.  The I-box does not guarantee
+;			the state of AT for an optimized execution flow and
+;			the operand transfer done at MULL2.R.. was being
+;			killed by the M-box because AT was being set to
+;			AT=A.
+; (3)1  23-Aug-87 GMU	Optimized INDEX; pass 1 code freeze.
+;
+;    9 01-Jul-87 GMU	Removed DIVLx as F-chip instructions.
+;    8 21-May-87 GMU	Added VSYNC regnum.rw as A8FD.  This only changes
+;			the opcode name.
+;    7 27-Apr-87 GMU	Changed specifier definitions for MxVP per latest
+;			vector spec.  Also moved MTVP from 30FD to A9FD.
+;    6 03-Apr-87 GMU	Removed VVDIVL and VSDIVL instructions per latest
+;			change to the spec.  Note that these only change
+;			the opcode names and not the bit definitions as
+;			they become unpredictible opcodes.
+;    5 31-Dec-86 GMU	Added new instructions for VAX vectors and virtual
+;			VAX.
+;    4 31-Dec-86 GMU	Moved entry point for MOVX..
+;    3 14-Nov-86 GMU	Optimized MUL{B,W,L}{2,3}.
+;    2 07-Oct-86 GMU	Added real entry points for CMPC3, CMPC5, LOCC, SKPC,
+;			SCANC, SPANC; make ACBf reserved opcodes.
+; (2)1 15-Sep-86 GMU	Initial production microcode.
+.TOC	"	I-box Decode Table Formats"
+
+
+; The I-box decode tables are a set of lookup tables indexed by the opcode of
+; each instruction in the VAX instruction set.  Indicies in the range 000-0FF
+; (hex) correspond to the equivalent VAX instructions.  Indicies in the
+; range 100-1FF (hex) correspond to the VAX FD opcode instructions.
+;
+; Each table entry contains information necessary to decode the instruction.
+; Each entry has the following format:
+;
+;	 42 41 40 39 38 37 36 35 34 33
+;	+--+--+--+--+--+--+--+--+--+--+
+;	|     XCT OFFSET     |FL|FP|RM|
+;	+--+--+--+--+--+--+--+--+--+--+
+;
+;		 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;		|  AT 6  | DL 6|  AT 5  | DL 5|  AT 4  | DL 4|  AT 3  | DL 3|  AT 2  | DL 2|  AT 1  | DL 1|SPEC CNT|
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;
+;
+; In addition, other bits have been added to support the simulator.
+;
+;
+;
+;
+;
+;
+;******************************************************************************
+;*                            W A R N I N G                                   *
+;*                                                                            *
+;* Any .wx or .mx specifier appearing in an instruction must be the last      *
+;* explicit specifier for that instruction (excluding branch displacements).  *
+;* Because .wx and .mx specifiers leave the computed address in VA and        *
+;* nowhere else, they must be the last specifier to guarantee that the        *
+;* address is not destroyed by a specifier or memory management flow between  *
+;* the specifier flow which calculates the address, and the execution flow    *
+;* which uses the address.                                                    *
+;*
+;* Also, there must not be more than one .vx specifier in any instruction.    *
+;* The value of the Rmode bit for any .vx specifiers in an instruction is     *
+;* passed from the specifier flows to the instruction flows via state<2>.     *
+;* Therefore, an instruction may have exactly one (or none) .vx specifiers.   *
+;******************************************************************************
+.TOC	"	Field Definitions"
+
+
+; LFSR_SPEC_COUNT	Count of the number of specifiers for this instruction.
+;			This count is encoded for use in a linear feedback shift
+;			register, so it is not the binary coded value that you
+;			might expect (see the SPEC_COUNT field for that value.)
+;			This count includes the implicit branch displacement
+;			specifiers.
+;
+;			The mapping between specifier count and the value encoded
+;			in LFSR_SPEC_COUNT is as follows:
+;
+;			  Specifier count	    LFSR_SPEC_COUNT value
+;			  ---------------	    ---------------------
+;				0			0   (%B 000)
+;				1			1   (%B 001)
+;				2			2   (%B 010)
+;				3			5   (%B 101)
+;				4			3   (%B 011)
+;				5			7   (%B 111)
+;				6			6   (%B 110)
+
+LFSR_SPEC_COUNT/=<2:0>,.DEFAULT=<LFSR_SPEC_COUNT/LFSR_ZERO>
+
+	LFSR_ZERO		= 0	; No specifiers
+	LFSR_ONE		= 1	; One specifier
+	LFSR_TWO		= 2	; Two specifiers
+	LFSR_THREE		= 5	; Three specifiers
+	LFSR_FOUR		= 3	; Four specifiers
+	LFSR_FIVE		= 7	; Five specifiers
+	LFSR_SIX		= 6	; Six specifiers
+
+; DL			Data length for a specifier.  This field only supplies
+;			the correct value names for the post-processors.  The
+;			actual data lengths for each specifier are contained
+;			in the six fields DL1 - DL6 that follow.
+
+DL/=<4:3>
+
+	BYTE		= <DL1/RB>	; Byte
+	WORD		= <DL1/RW>	; Word
+	LONG		= <DL1/RL>	; Longword
+	QUAD		= <DL1/RQ>	; Quadword
+
+
+; DL			Access type for a specifier.  This field only supplies
+;			the correct value names for the post-processors.  The
+;			actual access types for each specifier are contained
+;			in the six fields AT1 - AT6 that follow.
+
+AT/=<7:5>
+
+	READ		= <AT1/RL>	; Read
+	WRITE		= <AT1/WL>	; Write
+	MODIFY		= <AT1/ML>	; Modify
+	ADDR		= <AT1/AL>	; Address
+	VFIELD		= <AT1/VL>	; Variable bit field
+	BRANCH		= <AT1/BB>	; Branch displacement
+
+DL1/=<4:3>,.DEFAULT=<DL1/BAD_DEFAULT>
+
+	NONE		= 0		; No specifier in this place
+
+	RB		= 0		; DL/BYTE
+	MB		= 0		; DL/BYTE
+	WB		= 0		; DL/BYTE
+	AB		= 0		; DL/BYTE
+	VB		= 0		; DL/BYTE
+
+	RW		= 1		; DL/WORD
+	MW		= 1		; DL/WORD
+	WW		= 1		; DL/WORD
+	AW		= 1		; DL/WORD
+	VW		= 1		; DL/WORD
+
+	RL		= 2		; DL/LONG
+	ML		= 2		; DL/LONG
+	WL		= 2		; DL/LONG
+	AL		= 2		; DL/LONG
+	VL		= 2		; DL/LONG
+
+	RQ		= 3		; DL/QUAD
+	MQ		= 3		; DL/QUAD
+	WQ		= 3		; DL/QUAD
+	AQ		= 3		; DL/QUAD
+	VQ		= 3		; DL/QUAD
+
+; Branch and jump specifiers
+
+	BB		= 0		; DL/BYTE (Branch with byte displacement)
+	BW		= 1		; DL/WORD (Branch with word displacement)
+
+; AT1/DL1 - These fields are the access type and data length for the first
+;	    specifier.
+
+AT1/=<7:5>,.DEFAULT=<AT1/BAD_DEFAULT>
+
+	NONE		= 0		; No specifier in this place
+
+	RB		= 0		; AT/READ
+	WB		= 1		; AT/WRITE
+	MB		= 2		; AT/MODIFY
+	AB		= 5		; AT/ADDR
+	VB		= 6		; AT/VFIELD
+
+	RW		= 0		; AT/READ
+	WW		= 1		; AT/WRITE
+	MW		= 2		; AT/MODIFY
+	AW		= 5		; AT/ADDR
+	VW		= 6		; AT/VFIELD
+
+	RL		= 0		; AT/READ
+	WL		= 1		; AT/WRITE
+	ML		= 2		; AT/MODIFY
+	AL		= 5		; AT/ADDR
+	VL		= 6		; AT/VFIELD
+
+	RQ		= 0		; AT/READ
+	WQ		= 1		; AT/WRITE
+	MQ		= 2		; AT/MODIFY
+	AQ		= 5		; AT/ADDR
+	VQ		= 6		; AT/VFIELD
+
+; Branch and jump specifiers
+
+	BB		= 7		; AT/BRANCH (Branch with byte displacement)
+	BW		= 7		; AT/BRANCH (Branch with word displacement)
+	
+; AT2/DL2		These fields are the access type and data length for the second
+;			specifier.
+
+DL2/=<9:8>,.DEFAULT=<DL2/BAD_DEFAULT>
+AT2/=<12:10>,.DEFAULT=<AT2/BAD_DEFAULT>
+	; Same value field values as for AT1/DL1
+
+
+; AT3/DL3		These fields are the access type and data length for the third
+;			specifier.
+
+DL3/=<14:13>,.DEFAULT=<DL3/BAD_DEFAULT>
+AT3/=<17:15>,.DEFAULT=<AT3/BAD_DEFAULT>
+	; Same value field values as for AT1/DL1
+
+
+; AT4/DL4		These fields are the access type and data length for the fourth
+;			specifier.
+
+DL4/=<19:18>,.DEFAULT=<DL4/BAD_DEFAULT>
+AT4/=<22:20>,.DEFAULT=<AT4/BAD_DEFAULT>
+	; Same value field values as for AT1/DL1
+
+
+; AT5/DL5		These fields are the access type and data length for the fifth
+;			specifier.
+
+DL5/=<24:23>,.DEFAULT=<DL5/BAD_DEFAULT>
+AT5/=<27:25>,.DEFAULT=<AT5/BAD_DEFAULT>
+	; Same value field values as for AT1/DL1
+
+
+; AT6/DL6		These fields are the access type and data length for the sixth
+;			specifier.
+
+DL6/=<29:28>,.DEFAULT=<DL6/BAD_DEFAULT>
+AT6/=<32:30>,.DEFAULT=<AT6/BAD_DEFAULT>
+	; Same value field values as for AT1/DL1
+
+; RMODE_ENABLE		Enable Rmode optimization.  This bit is the master enable
+;			which causes the I-box to generate a register mode optimized
+;			execution dispatch if all other conditions are met.
+
+RMODE_ENABLE/=<33>,.DEFAULT=<RMODE_ENABLE/NO>
+
+	NO		= 0		; Don't allow Rmode optimizations
+	YES		= 1		; Allow Rmode optimizations
+
+
+; FPU_INSTN		This opcode is processed by the FPU.  This bit is used to
+;			conditionally send operands to the FPU during specifier
+;			processing.
+
+FPU_INSTN/=<34>,.DEFAULT=<FPU_INSTN/NO>
+
+	NO		= 0		; Not processed by the FPU
+	YES		= 1		; Processed by the FPU
+
+
+; FLOATING_INSTN	This opcode is a floating point instruction processed by
+;			the FPU.  This bit is used by the I-box to generate a
+;			reserved operand fault if the FPU isn't present.
+
+FLOATING_INSTN/=<35>,.DEFAULT=<FLOATING_INSTN/NO>
+
+	NO		= 0		; No a floating point instruction
+	YES		= 1		; Floating point instruction
+
+; EXECUTION_OFFSET	7-bit offset of the first micro instruction in the processing
+;			routine for each macro instruction.  These addresses have
+;			been permanently assigned by the allocator.
+
+EXECUTION_OFFSET/=<42:36>,.DEFAULT=<EXECUTION_OFFSET/BAD_DEFAULT>
+
+;	   name		offset		address
+;	----------	------		-------
+	IB.STALL..	= 40		; 0100
+	NOP..		= 44		; 0110
+	REI..		= 48		; 0120
+	BPT..		= 4C		; 0130
+	RET..		= 50		; 0140
+	RSB..		= 54		; 0150
+	LDPCTX..	= 58		; 0160
+	SVPCTX..	= 5C		; 0170
+	HALT..		= 60		; 0180
+	XFC..		= 64		; 0190
+	BXX..		= 68		; 01A0
+	BSBX..		= 6C		; 01B0
+	BRX..		= 70		; 01C0
+	RSVDOP..	= 00		; 0200
+	MNEGX..		= 02		; 0208
+	MCOMX..		= 03		; 020C
+	ADDI2..		= 04		; 0210
+	ADDI3..		= 05		; 0214
+	SUBI2..		= 06		; 0218
+	SUBI3..		= 07		; 021C
+	BISX2..		= 08		; 0220
+	BISX3..		= 09		; 0224
+	BICX2..		= 0A		; 0228
+	BICX3..		= 0B		; 022C
+	XORX2..		= 0C		; 0230
+	XORX3..		= 0D		; 0234
+	CMPI..		= 0E		; 0238
+	BITX..		= 0F		; 023C
+	TSTX..		= 10		; 0240
+	ADAWI..		= 11		; 0244
+	ADWC..		= 12		; 0248
+	SBWC..		= 13		; 024C
+	DIVX2..		= 14		; 0250
+	DIVX3..		= 15		; 0254
+	CVTBI..		= 16		; 0258
+	CVTWL..		= 17		; 025C
+	CVTIB..		= 18		; 0260
+	CVTLW..		= 19		; 0264
+	ASHX..		= 1A		; 0268
+	ROTL..		= 1C		; 0270
+	PUSHX..		= 1D		; 0274
+	EMULATE..	= 1E		; 0278
+	LOCC.SKPC..	= 20		; 0280
+	SCANC.SPANC..	= 21		; 0284
+	MOVF..		= 22		; 0288
+	MOVDG..		= 23		; 028C
+	FPU.1R.MSPC..	= 24		; 0290
+	FPU.1R.WSPC..	= 25		; 0294
+	FPU.2R.MSPC..	= 26		; 0298
+	FPU.2R.WSPC..	= 27		; 029C
+	CMPF..		= 28		; 02A0
+	CMPCX..		= 29		; 02A4
+	CALLX..		= 2A		; 02A8
+	POPR.PUSHR..	= 2B		; 02AC
+	CASEX..		= 2C		; 02B0
+	PROBEX..	= 2D		; 02B4
+	JMP..		= 2E		; 02B8
+	JSB..		= 2F		; 02BC
+	BBX..		= 30		; 02C0
+	BLBX..		= 31		; 02C4
+	INDEX..		= 32		; 02C8
+	MOVCX..		= 33		; 02CC
+	MTPR..		= 34		; 02D0
+	MFPR..		= 35		; 02D4
+	CHMK..		= 36		; 02D8
+	CHME..		= 37		; 02DC
+	CHMS..		= 38		; 02E0
+	CHMU..		= 39		; 02E4
+	INSQUE..	= 3A		; 02E8
+	REMQUE..	= 3B		; 02EC
+	INSQXI..	= 3C		; 02F0
+	REMQXI..	= 3D		; 02F4
+	INSV..		= 40		; 0300
+	FIELDX..	= 41		; 0304
+	SOBGXX..	= 42		; 0308
+	AOBLXX..	= 43		; 030C
+	EDIV..		= 44		; 0310
+	PROBEVMX..	= 45		; 0314
+	BIXPSW..	= 46		; 0318
+	MULX2..		= 47		; 031C
+	MULX3..		= 48		; 0320
+	MOVX..		= 4B		; 032C
+	INCX..		= 60		; 0380
+	DECX..		= 61		; 0384
+	CLRX..		= 62		; 0388
+	MOVPSL..	= 63		; 038C
+	ACBI..		= 64		; 0390
+	VEC.VV..	= 65		; 0394
+	VEC.MFVP..	= 66		; 0398
+	VEC.VS.Q..	= 67		; 039C
+	VEC.VS.L..	= 68		; 03A0
+	VEC.LDST..	= 69		; 03A4
+	VEC.GASC..	= 6A		; 03A8
+
+; The remaining fields are used to support the simulators.  They do not really
+; appear in the I-box decode tables.
+
+
+; IID_INSTN		Instruction is processed by the IID PLA.
+
+IID_INSTN/=<43>,.DEFAULT=<IID_INSTN/NO>
+
+	NO		= 0		; Not IID instruction
+	YES		= 1		; IID instruction
+
+
+; PC_CHANGE		Instruction may change PC
+
+PC_CHANGE/=<44>,.DEFAULT=<PC_CHANGE/NO>
+
+	NO		= 0		; Instruction doesn't change PC
+	YES		= 1		; Instruction may change PC
+
+
+; EMULATION_TIME	Delay time, in ns, for the emulated macro instructions on
+;			a MicroVax.  This number is the compute time for the
+;			instruction and does not include the time to start the
+;			exception.  The E chip model converts these numbers to
+;			cycles by dividing by the factor (E$EMULATE_SPEED_UP *
+;			E$CYCLE_TIME).
+;
+;	The numbers included below come from "Mayflower instruction timings"
+;	by Vivek Marya, August 27, 1984.  They are 4000 ns less than the
+;	numbers shown in this memo to account for approximately 20 200 ns
+;	cycles spent building the stack frame and initiating the exception
+;	(which is modeled explicitly).
+
+EMULATION_TIME/=<76:45>,.DEFAULT=<EMULATION_TIME/0>
+
+
+; SPEC_COUNT		Count of the number of specifiers for this instruction.
+;			This is the real binary coded value (as opposed to the
+;			encoded value given by LFSR_SPEC_COUNT).
+;			This count includes the implicit branch displacement
+;			specifiers.
+
+SPEC_COUNT/=<79:77>,.DEFAULT=<SPEC_COUNT/0>
+
+; The following six bit fields specify whether a specifier exits in each of the
+; six specifier positions.  These bits are used to count the number of specifiers
+; for the LFSR_SPEC_COUNT and SPEC_COUNT fields.
+
+SP1/=<80>,.DEFAULT=<SP1/BAD_DEFAULT>
+
+	NONE		= 0		; Specifier is not present in this position
+
+	RB		= 1		; Specifier present in this position
+	MB		= 1		; Specifier present in this position
+	WB		= 1		; Specifier present in this position
+	AB		= 1		; Specifier present in this position
+	VB		= 1		; Specifier present in this position
+
+	RW		= 1		; Specifier present in this position
+	MW		= 1		; Specifier present in this position
+	WW		= 1		; Specifier present in this position
+	AW		= 1		; Specifier present in this position
+	VW		= 1		; Specifier present in this position
+
+	RL		= 1		; Specifier present in this position
+	ML		= 1		; Specifier present in this position
+	WL		= 1		; Specifier present in this position
+	AL		= 1		; Specifier present in this position
+	VL		= 1		; Specifier present in this position
+
+	RQ		= 1		; Specifier present in this position
+	MQ		= 1		; Specifier present in this position
+	WQ		= 1		; Specifier present in this position
+	AQ		= 1		; Specifier present in this position
+	VQ		= 1		; Specifier present in this position
+
+	BB		= 1		; Specifier present in this position
+	BW		= 1		; Specifier present in this position
+
+SP2/=<81>,.DEFAULT=<SP1/PRESENT>
+	; Same field values as for SP1
+
+SP3/=<82>,.DEFAULT=<SP1/PRESENT>
+	; Same field values as for SP1
+
+SP4/=<83>,.DEFAULT=<SP1/PRESENT>
+	; Same field values as for SP1
+
+SP5/=<84>,.DEFAULT=<SP1/PRESENT>
+	; Same field values as for SP1
+
+SP6/=<85>,.DEFAULT=<SP1/PRESENT>
+	; Same field values as for SP1
+
+.TOC	"	Macro Definitions"
+
+
+; Expresion to count the number of specifiers
+
+.SET/LFSR.SPEC.COUNT=<.SELECT[	<.EQL[<SP1/>,<SP1/NONE>]>,	<LFSR_SPEC_COUNT/LFSR_ZERO>,
+				<.EQL[<SP2/>,<SP1/NONE>]>,	<LFSR_SPEC_COUNT/LFSR_ONE>,
+				<.EQL[<SP3/>,<SP1/NONE>]>,	<LFSR_SPEC_COUNT/LFSR_TWO>,
+				<.EQL[<SP4/>,<SP1/NONE>]>,	<LFSR_SPEC_COUNT/LFSR_THREE>,
+				<.EQL[<SP5/>,<SP1/NONE>]>,	<LFSR_SPEC_COUNT/LFSR_FOUR>,
+				<.EQL[<SP6/>,<SP1/NONE>]>,	<LFSR_SPEC_COUNT/LFSR_FIVE>,
+				<1>,				<LFSR_SPEC_COUNT/LFSR_SIX>	]>
+
+.SET/SPEC.COUNT=<.SELECT[	<.EQL[<SP1/>,<SP1/NONE>]>,	<SPEC_COUNT/0>,
+				<.EQL[<SP2/>,<SP1/NONE>]>,	<SPEC_COUNT/1>,
+				<.EQL[<SP3/>,<SP1/NONE>]>,	<SPEC_COUNT/2>,
+				<.EQL[<SP4/>,<SP1/NONE>]>,	<SPEC_COUNT/3>,
+				<.EQL[<SP5/>,<SP1/NONE>]>,	<SPEC_COUNT/4>,
+				<.EQL[<SP6/>,<SP1/NONE>]>,	<SPEC_COUNT/5>,
+				<1>,				<SPEC_COUNT/6>	]>
+
+;	Macro definitions, continued
+
+
+;      +------------------- Opcode mnemonic
+;      |  +---------------- First specifier
+;      |  |  +------------- Second specifier
+;      |  |  |  +---------- Third specifier
+;      |  |  |  |  +------- Fourth specifier  
+;      |  |  |  |  |  +---- Fifth specifier
+;      |  |  |  |  |  |  +- Sixth specifier       
+;      |  |  |  |  |  |  |
+;      v  v  v  v  v  v  v
+
+INSTR [] [] [] [] [] [] [] DISPATCH TO []	"AT1/<AT1/@2>,DL1/<DL1/@2>,SP1/<SP1/@2>,
+						 AT2/<AT1/@3>,DL2/<DL1/@3>,SP2/<SP1/@3>,
+						 AT3/<AT1/@4>,DL3/<DL1/@4>,SP3/<SP1/@4>,
+						 AT4/<AT1/@5>,DL4/<DL1/@5>,SP4/<SP1/@5>,
+						 AT5/<AT1/@6>,DL5/<DL1/@6>,SP5/<SP1/@6>,
+						 AT6/<AT1/@7>,DL6/<DL1/@7>,SP6/<SP1/@7>,
+						 SPEC_COUNT/<SPEC.COUNT>,
+						 LFSR_SPEC_COUNT/<LFSR.SPEC.COUNT>,
+						 EXECUTION_OFFSET/@8"
+
+.if/perf.model
+IID INSTR [] [] [] [] [] [] [] DISPATCH TO []	"INSTR [@1] [@2] [@3] [@4] [@5] [@6] [@7] DISPATCH TO [@8],
+						 IID INSTRUCTION"
+.ifnot/perf.model
+IID INSTR [] [] [] [] [] [] [] DISPATCH TO []	"INSTR [@1] [none] [none] [none] [none] [none] [none] DISPATCH TO [0],
+						 FPU_INSTN/NO, FLOATING_INSTN/NO, RMODE_ENABLE/NO"
+.endif/perf.model
+
+RESERVED OPCODE			"INSTR [RSVDOP] [none] [none] [none] [none] [none] [none] DISPATCH TO [RSVDOP..]"
+
+UNIMPLEMENTED OPCODE []		"INSTR [@1] [none] [none] [none] [none] [none] [none] DISPATCH TO [RSVDOP..]"
+
+FPU INSTRUCTION			"FPU_INSTN/YES"
+
+FLOATING INSTRUCTION		"FPU_INSTN/YES, FLOATING_INSTN/YES, RMODE_ENABLE/NO"
+
+OPTIMIZE			"RMODE_ENABLE/YES"
+
+
+; Simulation support macros
+
+EMULATION TIME []		"EMULATION_TIME/@1"
+
+PC CHANGE			"PC_CHANGE/YES"
+
+IID INSTRUCTION			"IID_INSTN/YES"
+
+
+.cref
+.bin
+.TOC	"	Specifier Decode Directives"
+
+
+;						=-=-=-=-=-=
+;						| 00 - 0F |
+;						=-=-=-=-=-=
+
+000: IID INSTR [HALT] [none] [none] [none] [none] [none] [none] DISPATCH TO [HALT..],
+	PC CHANGE
+
+001: IID INSTR [NOP] [none] [none] [none] [none] [none] [none] DISPATCH TO [NOP..]
+
+002: IID INSTR [REI] [none] [none] [none] [none] [none] [none] DISPATCH TO [REI..],
+	PC CHANGE
+
+003: IID INSTR [BPT] [none] [none] [none] [none] [none] [none] DISPATCH TO [BPT..]
+
+004: IID INSTR [RET] [none] [none] [none] [none] [none] [none] DISPATCH TO [RET..],
+	PC CHANGE	 
+
+005: IID INSTR [RSB] [none] [none] [none] [none] [none] [none] DISPATCH TO [RSB..],
+	PC CHANGE
+
+006: IID INSTR [LDPCTX] [none] [none] [none] [none] [none] [none] DISPATCH TO [LDPCTX..],
+	PC CHANGE
+
+007: IID INSTR [SVPCTX] [none] [none] [none] [none] [none] [none] DISPATCH TO [SVPCTX..],
+	PC CHANGE
+
+008: INSTR [CVTPS] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [114930.]
+
+009: INSTR [CVTSP] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [120650.]
+
+00A: INSTR [INDEX] [rl] [rl] [rl] [rl] [rl] [wl] DISPATCH TO [INDEX..],
+	OPTIMIZE
+
+00B: INSTR [CRC] [ab] [rl] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [265490.]
+
+00C: INSTR [PROBER] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [PROBEX..]
+
+00D: INSTR [PROBEW] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [PROBEX..]
+
+00E: INSTR [INSQUE] [ab] [ab] [none] [none] [none] [none] DISPATCH TO [INSQUE..]
+
+00F: INSTR [REMQUE] [ab] [wl] [none] [none] [none] [none] DISPATCH TO [REMQUE..]
+
+;						=-=-=-=-=-=
+;						| 10 - 1F |
+;						=-=-=-=-=-=
+
+
+010: IID INSTR [BSBB] [bb] [none] [none] [none] [none] [None] DISPATCH TO [BSBX..],
+	PC CHANGE	   
+	 
+011: IID INSTR [BRB] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BRX..],
+	PC CHANGE
+
+012: IID INSTR [BNEQ] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	 
+
+013: IID INSTR [BEQL] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	 
+
+014: IID INSTR [BGTR] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	 
+
+015: IID INSTR [BLEQ] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	 
+
+016: INSTR [JSB] [ab] [none] [none] [none] [none] [none] DISPATCH TO [JSB..],
+	PC CHANGE
+
+017: INSTR [JMP] [ab] [none] [none] [none] [none] [none] DISPATCH TO [JMP..],
+	PC CHANGE
+
+018: IID INSTR [BGEQ] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	
+
+019: IID INSTR [BLSS] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	 
+
+01A: IID INSTR [BGTRU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE	 
+
+01B: IID INSTR [BLEQU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE
+
+01C: IID INSTR [BVC] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE
+
+01D: IID INSTR [BVS] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE
+
+01E: IID INSTR [BGEQU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE
+
+01F: IID INSTR [BLSSU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX..],
+	PC CHANGE
+
+;						=-=-=-=-=-=
+;						| 20 - 2F |
+;						=-=-=-=-=-=
+
+
+020: INSTR [ADDP4] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [246910.]
+
+021: INSTR [ADDP6] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [246910.]
+
+022: INSTR [SUBP4] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [246910.]
+
+023: INSTR [SUBP6] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [246910.]
+
+024: INSTR [CVTPT] [rw] [ab] [ab] [rw] [ab] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [106190.]
+
+025: INSTR [MULP] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [711410.]
+
+026: INSTR [CVTTP] [rw] [ab] [ab] [rw] [ab] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [110000.]
+
+027: INSTR [DIVP] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [502170.]
+
+028: INSTR [MOVC3] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [MOVCX..]
+
+029: INSTR [CMPC3] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [CMPCX..]
+
+02A: INSTR [SCANC] [rw] [ab] [ab] [rb] [none] [none] DISPATCH TO [SCANC.SPANC..]
+
+02B: INSTR [SPANC] [rw] [ab] [ab] [rb] [none] [none] DISPATCH TO [SCANC.SPANC..]
+
+02C: INSTR [MOVC5] [rw] [ab] [rb] [rw] [ab] [none] DISPATCH TO [MOVCX..]
+
+02D: INSTR [CMPC5] [rw] [ab] [rb] [rw] [ab] [none] DISPATCH TO [CMPCX..]
+
+02E: INSTR [MOVTC] [rw] [ab] [rb] [ab] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [99930.]
+
+02F: INSTR [MOVTUC] [rw] [ab] [rb] [ab] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [77610.]
+
+;						=-=-=-=-=-=
+;						| 30 - 3F |
+;						=-=-=-=-=-=
+
+
+030: IID INSTR [BSBW] [bw] [none] [none] [none] [none] [None] DISPATCH TO [BSBX..],
+	PC CHANGE
+	 
+031: IID INSTR [BRW] [bw] [none] [none] [none] [none] [none] DISPATCH TO [BRX..],
+	PC CHANGE
+
+032: INSTR [CVTWL] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [CVTWL..],
+	OPTIMIZE
+
+033: INSTR [CVTWB] [rw] [wb] [none] [none] [none] [none] DISPATCH TO [CVTIB..],
+	OPTIMIZE
+
+034: INSTR [MOVP] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [93690.]
+
+035: INSTR [CMPP3] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [90630.]
+
+036: INSTR [CVTPL] [rw] [ab] [vl] [none] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [162980.], OPTIMIZE
+
+037: INSTR [CMPP4] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [97030.]
+
+038: INSTR [EDITPC] [rw] [ab] [ab] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [450000.]
+
+039: INSTR [MATCHC] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [87040.]
+
+03A: INSTR [LOCC] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [LOCC.SKPC..]
+
+03B: INSTR [SKPC] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [LOCC.SKPC..]
+
+03C: INSTR [MOVZWL] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+03D: INSTR [ACBW] [rw] [rw] [mw] [bw] [none] [none] DISPATCH TO [ACBI..],
+	PC CHANGE
+
+03E: INSTR [MOVAW] [aw] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+03F: INSTR [PUSHAW] [aw] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX..]
+
+;						=-=-=-=-=-=
+;						| 40 - 4F |
+;						=-=-=-=-=-=
+
+
+040: INSTR [ADDF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FPU.1R.MSPC..],
+	FLOATING INSTRUCTION
+
+041: INSTR [ADDF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+042: INSTR [SUBF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FPU.1R.MSPC..],
+	FLOATING INSTRUCTION
+
+043: INSTR [SUBF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+044: INSTR [MULF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FPU.1R.MSPC..],
+	FLOATING INSTRUCTION
+
+045: INSTR [MULF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+046: INSTR [DIVF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FPU.1R.MSPC..],
+	FLOATING INSTRUCTION
+
+047: INSTR [DIVF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+048: INSTR [CVTFB] [rl] [wb] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+049: INSTR [CVTFW] [rl] [ww] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+	 
+04A: INSTR [CVTFL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+04B: INSTR [CVTRFL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+04C: INSTR [CVTBF] [rb] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+04D: INSTR [CVTWF] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+04E: INSTR [CVTLF] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+04F: UNIMPLEMENTED OPCODE [ACBF]
+
+;						=-=-=-=-=-=
+;						| 50 - 5F |
+;						=-=-=-=-=-=
+
+
+050: INSTR [MOVF] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MOVF..],
+	FLOATING INSTRUCTION
+
+051: INSTR [CMPF] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [CMPF..],
+	FLOATING INSTRUCTION
+
+052: INSTR [MNEGF] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+053: INSTR [TSTF] [rl] [none] [none] [none] [none] [none] DISPATCH TO [CMPF..],
+	FLOATING INSTRUCTION
+
+054: UNIMPLEMENTED OPCODE [EMODF]
+
+055: UNIMPLEMENTED OPCODE [POLYF]
+
+056: INSTR [CVTFD] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+057: RESERVED OPCODE
+
+058: INSTR [ADAWI] [rw] [vw] [none] [none] [none] [none] DISPATCH TO [ADAWI..],
+	OPTIMIZE
+
+059: RESERVED OPCODE
+
+05A: RESERVED OPCODE
+
+05B: RESERVED OPCODE
+
+05C: INSTR [INSQHI] [ab] [aq] [none] [none] [none] [none] DISPATCH TO [INSQXI..]
+
+05D: INSTR [INSQTI] [ab] [aq] [none] [none] [none] [none] DISPATCH TO [INSQXI..]
+
+05E: INSTR [REMQHI] [aq] [wl] [none] [none] [none] [none] DISPATCH TO [REMQXI..]
+
+05F: INSTR [REMQTI] [aq] [wl] [none] [none] [none] [none] DISPATCH TO [REMQXI..]
+
+;						=-=-=-=-=-=
+;						| 60 - 6F |
+;						=-=-=-=-=-=
+
+
+060: INSTR [ADDD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+061: INSTR [ADDD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+062: INSTR [SUBD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+063: INSTR [SUBD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+064: INSTR [MULD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+065: INSTR [MULD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+066: INSTR [DIVD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+067: INSTR [DIVD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+068: INSTR [CVTDB] [rq] [wb] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+069: INSTR [CVTDW] [rq] [ww] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+06A: INSTR [CVTDL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+06B: INSTR [CVTRDL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+06C: INSTR [CVTBD] [rb] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+	 
+06D: INSTR [CVTWD] [rw] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+06E: INSTR [CVTLD] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+06F: UNIMPLEMENTED OPCODE [ACBD]
+
+;						=-=-=-=-=-=
+;						| 70 - 7F |
+;						=-=-=-=-=-=
+
+
+070: INSTR [MOVD] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [MOVDG..],
+	FLOATING INSTRUCTION
+
+071: INSTR [CMPD] [rq] [rq] [none] [none] [none] [none] DISPATCH TO [CMPF..],
+	FLOATING INSTRUCTION
+
+072: INSTR [MNEGD] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+073: INSTR [TSTD] [rq] [none] [none] [none] [none] [none] DISPATCH TO [CMPF..],
+	FLOATING INSTRUCTION
+
+074: UNIMPLEMENTED OPCODE [EMODD]
+
+075: UNIMPLEMENTED OPCODE [POLYD]
+
+076: INSTR [CVTDF] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+077: RESERVED OPCODE
+
+078: INSTR [ASHL] [rb] [rl] [wl] [none] [none] [none] DISPATCH TO [ASHX..],
+	OPTIMIZE
+
+079: INSTR [ASHQ] [rb] [rq] [wq] [none] [none] [none] DISPATCH TO [ASHX..],
+	OPTIMIZE
+
+07A: INSTR [EMUL] [rl] [rl] [rl] [wq] [none] [none] DISPATCH TO [MULX3..]
+
+07B: INSTR [EDIV] [rl] [rq] [vl] [wl] [none] [none] DISPATCH TO [EDIV..]
+
+07C: INSTR [CLRQ] [wq] [none] [none] [none] [none] [none] DISPATCH TO [CLRX..]
+
+07D: INSTR [MOVQ] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+07E: INSTR [MOVAQ] [aq] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+07F: INSTR [PUSHAQ] [aq] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX..]
+
+;						=-=-=-=-=-=
+;						| 80 - 8F |
+;						=-=-=-=-=-=
+
+
+080: INSTR [ADDB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [ADDI2..],
+	OPTIMIZE
+
+081: INSTR [ADDB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [ADDI3..],
+	OPTIMIZE
+
+082: INSTR [SUBB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [SUBI2..],
+	OPTIMIZE
+
+083: INSTR [SUBB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [SUBI3..],
+	OPTIMIZE
+
+084: INSTR [MULB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [MULX2..]
+
+085: INSTR [MULB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [MULX3..]
+
+086: INSTR [DIVB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [DIVX2..],
+	OPTIMIZE
+
+087: INSTR [DIVB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [DIVX3..],
+	OPTIMIZE
+
+088: INSTR [BISB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [BISX2..],
+	OPTIMIZE
+
+089: INSTR [BISB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [BISX3..],
+	OPTIMIZE
+
+08A: INSTR [BICB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [BICX2..],
+	OPTIMIZE
+
+08B: INSTR [BICB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [BICX3..],
+	OPTIMIZE
+
+08C: INSTR [XORB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [XORX2..],
+	OPTIMIZE
+
+08D: INSTR [XORB3] [rb] [rb] [wb] [none] [none] [none] DISPATCH TO [XORX3..],
+	OPTIMIZE
+
+08E: INSTR [MNEGB] [rb] [wb] [none] [none] [none] [none] DISPATCH TO [MNEGX..],
+	OPTIMIZE
+
+08F: INSTR [CASEB] [rb] [rb] [rb] [none] [none] [none] DISPATCH TO [CASEX..],
+	PC CHANGE
+
+;						=-=-=-=-=-=
+;						| 90 - 9F |
+;						=-=-=-=-=-=
+
+
+090: INSTR [MOVB] [rb] [wb] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+091: INSTR [CMPB] [rb] [rb] [none] [none] [none] [none] DISPATCH TO [CMPI..],
+	OPTIMIZE
+
+092: INSTR [MCOMB] [rb] [wb] [none] [none] [none] [none] DISPATCH TO [MCOMX..],
+	OPTIMIZE
+
+093: INSTR [BITB] [rb] [rb] [none] [none] [none] [none] DISPATCH TO [BITX..],
+	OPTIMIZE
+
+094: INSTR [CLRB] [wb] [none] [none] [none] [none] [none] DISPATCH TO [CLRX..]
+
+095: INSTR [TSTB] [rb] [none] [none] [none] [none] [none] DISPATCH TO [TSTX..]
+	 
+096: INSTR [INCB] [mb] [none] [none] [none] [none] [none] DISPATCH TO [INCX..]
+
+097: INSTR [DECB] [mb] [none] [none] [none] [none] [none] DISPATCH TO [DECX..]
+
+098: INSTR [CVTBL] [rb] [wl] [none] [none] [none] [none] DISPATCH TO [CVTBI..],
+	OPTIMIZE
+
+099: INSTR [CVTBW] [rb] [ww] [none] [none] [none] [none] DISPATCH TO [CVTBI..],
+	OPTIMIZE
+
+09A: INSTR [MOVZBL] [rb] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+09B: INSTR [MOVZBW] [rb] [ww] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+09C: INSTR [ROTL] [rb] [rl] [wl] [none] [none] [none] DISPATCH TO [ROTL..],
+	OPTIMIZE
+
+09D: INSTR [ACBB] [rb] [rb] [mb] [bw] [none] [none] DISPATCH TO [ACBI..],
+	PC CHANGE
+
+09E: INSTR [MOVAB] [ab] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+09F: INSTR [PUSHAB] [ab] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX..]
+
+;						=-=-=-=-=-=
+;						| A0 - AF |
+;						=-=-=-=-=-=
+
+0A0: INSTR [ADDW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [ADDI2..],
+	OPTIMIZE
+
+0A1: INSTR [ADDW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [ADDI3..],
+	OPTIMIZE
+
+0A2: INSTR [SUBW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [SUBI2..],
+	OPTIMIZE
+
+0A3: INSTR [SUBW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [SUBI3..],
+	OPTIMIZE
+
+0A4: INSTR [MULW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [MULX2..]
+
+0A5: INSTR [MULW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [MULX3..]
+	 
+0A6: INSTR [DIVW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [DIVX2..],
+	OPTIMIZE
+
+0A7: INSTR [DIVW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [DIVX3..],
+	OPTIMIZE
+
+0A8: INSTR [BISW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [BISX2..],
+	OPTIMIZE
+
+0A9: INSTR [BISW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [BISX3..],
+	OPTIMIZE
+
+0AA: INSTR [BICW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [BICX2..],
+	OPTIMIZE
+
+0AB: INSTR [BICW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [BICX3..],
+	OPTIMIZE
+
+0AC: INSTR [XORW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [XORX2..],
+	OPTIMIZE
+
+0AD: INSTR [XORW3] [rw] [rw] [ww] [none] [none] [none] DISPATCH TO [XORX3..],
+	OPTIMIZE
+
+0AE: INSTR [MNEGW] [rw] [ww] [none] [none] [none] [none] DISPATCH TO [MNEGX..],
+	OPTIMIZE
+
+0AF: INSTR [CASEW] [rw] [rw] [rw] [none] [none] [none] DISPATCH TO [CASEX..],
+	PC CHANGE
+
+;						=-=-=-=-=-=
+;						| B0 - BF |
+;						=-=-=-=-=-=
+
+
+0B0: INSTR [MOVW] [rw] [ww] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+0B1: INSTR [CMPW] [rw] [rw] [none] [none] [none] [none] DISPATCH TO [CMPI..],
+	OPTIMIZE
+
+0B2: INSTR [MCOMW] [rw] [ww] [none] [none] [none] [none] DISPATCH TO [MCOMX..],
+	OPTIMIZE
+	 
+0B3: INSTR [BITW] [rw] [rw] [none] [none] [none] [none] DISPATCH TO [BITX..],
+	OPTIMIZE
+
+0B4: INSTR [CLRW] [ww] [none] [none] [none] [none] [none] DISPATCH TO [CLRX..]
+
+0B5: INSTR [TSTW] [rw] [none] [none] [none] [none] [none] DISPATCH TO [TSTX..]
+
+0B6: INSTR [INCW] [mw] [none] [none] [none] [none] [none] DISPATCH TO [INCX..]
+
+0B7: INSTR [DECW] [mw] [none] [none] [none] [none] [none] DISPATCH TO [DECX..]
+
+0B8: INSTR [BISPSW] [rw] [none] [none] [none] [none] [none] DISPATCH TO [BIXPSW..]
+
+0B9: INSTR [BICPSW] [rw] [none] [none] [none] [none] [none] DISPATCH TO [BIXPSW..]
+
+0BA: INSTR [POPR] [rw] [none] [none] [none] [none] [none] DISPATCH TO [POPR.PUSHR..]
+
+0BB: INSTR [PUSHR] [rw] [none] [none] [none] [none] [none] DISPATCH TO [POPR.PUSHR..]
+
+0BC: INSTR [CHMK] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHMK..],
+	PC CHANGE
+
+0BD: INSTR [CHME] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHME..],
+	PC CHANGE
+
+0BE: INSTR [CHMS] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHMS..],
+	PC CHANGE
+
+0BF: INSTR [CHMU] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHMU..],
+	PC CHANGE
+
+
+;						=-=-=-=-=-=
+;						| C0 - CF |
+;						=-=-=-=-=-=
+
+
+0C0: INSTR [ADDL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [ADDI2..],
+	OPTIMIZE
+
+0C1: INSTR [ADDL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [ADDI3..],
+	OPTIMIZE
+
+0C2: INSTR [SUBL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [SUBI2..],
+	OPTIMIZE
+
+0C3: INSTR [SUBL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [SUBI3..],
+	OPTIMIZE
+
+0C4: INSTR [MULL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [MULX2..],
+	FPU INSTRUCTION
+
+0C5: INSTR [MULL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [MULX3..],
+	FPU INSTRUCTION
+
+0C6: INSTR [DIVL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [DIVX2..],
+	OPTIMIZE
+
+0C7: INSTR [DIVL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [DIVX3..],
+	OPTIMIZE
+
+0C8: INSTR [BISL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [BISX2..],
+	OPTIMIZE
+
+0C9: INSTR [BISL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [BISX3..],
+	OPTIMIZE
+
+0CA: INSTR [BICL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [BICX2..],
+	OPTIMIZE
+
+0CB: INSTR [BICL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [BICX3..],
+	OPTIMIZE
+
+0CC: INSTR [XORL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [XORX2..],
+	OPTIMIZE
+
+0CD: INSTR [XORL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [XORX3..],
+	OPTIMIZE
+
+0CE: INSTR [MNEGL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MNEGX..],
+	OPTIMIZE
+
+0CF: INSTR [CASEL] [rl] [rl] [rl] [none] [none] [none] DISPATCH TO [CASEX..],
+	PC CHANGE
+
+;						=-=-=-=-=-=
+;						| D0 - DF |
+;						=-=-=-=-=-=
+
+
+0D0: INSTR [MOVL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+0D1: INSTR [CMPL] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [CMPI..],
+	OPTIMIZE
+
+0D2: INSTR [MCOML] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MCOMX..],
+	OPTIMIZE
+
+0D3: INSTR [BITL] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [BITX..],
+	OPTIMIZE
+
+0D4: INSTR [CLRL] [wl] [none] [none] [none] [none] [none] DISPATCH TO [CLRX..]
+
+0D5: INSTR [TSTL] [rl] [none] [none] [none] [none] [none] DISPATCH TO [TSTX..]
+
+0D6: INSTR [INCL] [ml] [none] [none] [none] [none] [none] DISPATCH TO [INCX..]
+
+0D7: INSTR [DECL] [ml] [none] [none] [none] [none] [none] DISPATCH TO [DECX..]
+
+0D8: INSTR [ADWC] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [ADWC..],
+	OPTIMIZE
+
+0D9: INSTR [SBWC] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [SBWC..],
+	OPTIMIZE
+
+0DA: INSTR [MTPR] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [MTPR..],
+	OPTIMIZE
+
+0DB: INSTR [MFPR] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MFPR..],
+	OPTIMIZE
+
+0DC: INSTR [MOVPSL] [wl] [none] [none] [none] [none] [none] DISPATCH TO [MOVPSL..]
+
+0DD: INSTR [PUSHL] [rl] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX..]
+
+0DE: INSTR [MOVAL] [al] [wl] [none] [none] [none] [none] DISPATCH TO [MOVX..],
+	OPTIMIZE
+
+0DF: INSTR [PUSHAL] [al] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX..]
+
+
+;						=-=-=-=-=-=
+;						| E0 - EF |
+;						=-=-=-=-=-=
+
+
+0E0: INSTR [BBS] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E1: INSTR [BBC] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E2: INSTR [BBSS] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E3: INSTR [BBCS] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E4: INSTR [BBSC] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E5: INSTR [BBCC] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E6: INSTR [BBSSI] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E7: INSTR [BBCCI] [rl] [vb] [bb] [none] [none] [none] DISPATCH TO [BBX..],
+	PC CHANGE
+
+0E8: INSTR [BLBS] [rl] [bb] [none] [none] [none] [none] DISPATCH TO [BLBX..],
+	PC CHANGE
+
+0E9: INSTR [BLBC] [rl] [bb] [none] [none] [none] [none] DISPATCH TO [BLBX..],
+	PC CHANGE
+
+0EA: INSTR [FFS] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [FIELDX..],
+	OPTIMIZE
+
+0EB: INSTR [FFC] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [FIELDX..],
+	OPTIMIZE
+	 
+0EC: INSTR [CMPV] [rl] [rb] [vb] [rl] [none] [none] DISPATCH TO [FIELDX..],
+	OPTIMIZE
+
+0ED: INSTR [CMPZV] [rl] [rb] [vb] [rl] [none] [none] DISPATCH TO [FIELDX..],
+	OPTIMIZE
+
+0EE: INSTR [EXTV] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [FIELDX..],
+	OPTIMIZE
+
+0EF: INSTR [EXTZV] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [FIELDX..],
+	OPTIMIZE
+
+;						=-=-=-=-=-=
+;						| F0 - FF |
+;						=-=-=-=-=-=
+
+
+0F0: INSTR [INSV] [rl] [rl] [rb] [vb] [none] [none] DISPATCH TO [INSV..],
+	OPTIMIZE
+
+0F1: INSTR [ACBL] [rl] [rl] [ml] [bw] [none] [none] DISPATCH TO [ACBI..],
+	PC CHANGE
+
+0F2: INSTR [AOBLSS] [rl] [ml] [bb] [none] [none] [none] DISPATCH TO [AOBLXX..],
+	PC CHANGE
+
+0F3: INSTR [AOBLEQ] [rl] [ml] [bb] [none] [none] [none] DISPATCH TO [AOBLXX..],
+	PC CHANGE
+
+0F4: INSTR [SOBGEQ] [ml] [bb] [none] [none] [none] [none] DISPATCH TO [SOBGXX..],
+	PC CHANGE
+
+0F5: INSTR [SOBGTR] [ml] [bb] [none] [none] [none] [none] DISPATCH TO [SOBGXX..],
+	PC CHANGE
+
+0F6: INSTR [CVTLB] [rl] [wb] [none] [none] [none] [none] DISPATCH TO [CVTIB..],
+	OPTIMIZE
+
+0F7: INSTR [CVTLW] [rl] [ww] [none] [none] [none] [none] DISPATCH TO [CVTLW..],
+	OPTIMIZE
+
+0F8: INSTR [ASHP] [rb] [rw] [ab] [rb] [rw] [ab] DISPATCH TO [EMULATE..],
+	EMULATION TIME [183270.]
+
+0F9: INSTR [CVTLP] [rl] [rw] [ab] [none] [none] [none] DISPATCH TO [EMULATE..],
+	EMULATION TIME [109530.]
+
+0FA: INSTR [CALLG] [ab] [ab] [none] [none] [none] [none] DISPATCH TO [CALLX..],
+	PC CHANGE
+
+0FB: INSTR [CALLS] [rl] [ab] [none] [none] [none] [none] DISPATCH TO [CALLX..],
+	PC CHANGE
+
+0FC: IID INSTR [XFC] [none] [none] [none] [none] [none] [none] DISPATCH TO [XFC..]
+
+0FD: UNIMPLEMENTED OPCODE [ESCD]
+
+0FE: UNIMPLEMENTED OPCODE [ESCE]
+
+0FF: UNIMPLEMENTED OPCODE [ESCF]
+
+;						=-=-=-=-=-=-=-=
+;						| FD00 - FD0F |
+;						=-=-=-=-=-=-=-=
+
+
+100: RESERVED OPCODE
+
+101: RESERVED OPCODE
+
+102: UNIMPLEMENTED OPCODE [WAIT]
+
+103: RESERVED OPCODE
+
+104: RESERVED OPCODE
+
+105: RESERVED OPCODE
+
+106: RESERVED OPCODE
+
+107: RESERVED OPCODE
+
+108: RESERVED OPCODE
+
+109: RESERVED OPCODE
+
+10A: RESERVED OPCODE
+
+10B: RESERVED OPCODE
+
+10C: RESERVED OPCODE
+
+10D: RESERVED OPCODE
+
+10E: RESERVED OPCODE
+
+10F: RESERVED OPCODE
+
+
+;						=-=-=-=-=-=-=-=
+;						| FD10 - FD1F |
+;						=-=-=-=-=-=-=-=
+
+
+110: RESERVED OPCODE
+
+111: RESERVED OPCODE
+
+112: RESERVED OPCODE
+
+113: RESERVED OPCODE
+
+114: RESERVED OPCODE
+
+115: RESERVED OPCODE
+
+116: RESERVED OPCODE
+
+117: RESERVED OPCODE
+
+118: RESERVED OPCODE
+
+119: RESERVED OPCODE
+
+11A: RESERVED OPCODE
+
+11B: RESERVED OPCODE
+
+11C: RESERVED OPCODE
+
+11D: RESERVED OPCODE
+
+11E: RESERVED OPCODE
+
+11F: RESERVED OPCODE
+
+
+;						=-=-=-=-=-=-=-=
+;						| FD20 - FD3F |
+;						=-=-=-=-=-=-=-=
+
+
+120: RESERVED OPCODE
+
+121: RESERVED OPCODE
+
+122: RESERVED OPCODE
+
+123: RESERVED OPCODE
+
+124: RESERVED OPCODE
+
+125: RESERVED OPCODE
+
+126: RESERVED OPCODE
+
+127: RESERVED OPCODE
+
+128: RESERVED OPCODE
+
+129: RESERVED OPCODE
+
+12A: RESERVED OPCODE
+
+12B: RESERVED OPCODE
+
+12C: RESERVED OPCODE
+
+12D: RESERVED OPCODE
+
+12E: RESERVED OPCODE
+
+12F: RESERVED OPCODE
+
+
+;						=-=-=-=-=-=-=-=
+;						| FD30 - FD3F |
+;						=-=-=-=-=-=-=-=
+
+
+130: RESERVED OPCODE
+
+131: INSTR [MFVP] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [VEC.MFVP..]
+
+132: UNIMPLEMENTED OPCODE [CVTDH]
+
+133: INSTR [CVTGF] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+134: INSTR [VLDL] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.LDST..]
+
+135: INSTR [VGATHL] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.GASC..]
+
+136: INSTR [VLDQ] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.LDST..]
+
+137: INSTR [VGATHQ] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.GASC..]
+
+138: RESERVED OPCODE
+
+139: RESERVED OPCODE
+
+13A: RESERVED OPCODE
+
+13B: RESERVED OPCODE
+
+13C: RESERVED OPCODE
+
+13D: RESERVED OPCODE
+
+13E: RESERVED OPCODE
+
+13F: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FD40 - FD4F |
+;						=-=-=-=-=-=-=-=
+
+
+140: INSTR [ADDG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+141: INSTR [ADDG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+142: INSTR [SUBG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+	 
+143: INSTR [SUBG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+144: INSTR [MULG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+145: INSTR [MULG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+146: INSTR [DIVG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.MSPC..],
+	FLOATING INSTRUCTION
+
+147: INSTR [DIVG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+148: INSTR [CVTGB] [rq] [wb] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+149: INSTR [CVTGW] [rq] [ww] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+14A: INSTR [CVTGL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+14B: INSTR [CVTRGL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FPU.1R.WSPC..],
+	FLOATING INSTRUCTION
+
+14C: INSTR [CVTBG] [rb] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+14D: INSTR [CVTWG] [rw] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+14E: INSTR [CVTLG] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+14F: UNIMPLEMENTED OPCODE [ACBG]
+
+;						=-=-=-=-=-=-=-=
+;						| FD50 - FD5F |
+;						=-=-=-=-=-=-=-=
+
+
+150: INSTR [MOVG] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [MOVDG..],
+	FLOATING INSTRUCTION
+
+151: INSTR [CMPG] [rq] [rq] [none] [none] [none] [none] DISPATCH TO [CMPF..],
+	FLOATING INSTRUCTION
+
+152: INSTR [MNEGG] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+
+153: INSTR [TSTG] [rq] [none] [none] [none] [none] [none] DISPATCH TO [CMPF..],
+	FLOATING INSTRUCTION
+
+154: UNIMPLEMENTED OPCODE [EMODG]
+
+155: UNIMPLEMENTED OPCODE [POLYG]
+
+156: UNIMPLEMENTED OPCODE [CVTGH]
+
+157: RESERVED OPCODE
+
+158: RESERVED OPCODE
+
+159: RESERVED OPCODE
+
+15A: RESERVED OPCODE
+
+15B: RESERVED OPCODE
+
+15C: RESERVED OPCODE
+
+15D: RESERVED OPCODE
+
+15E: RESERVED OPCODE
+
+15F: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FD60 - FD6F |
+;						=-=-=-=-=-=-=-=
+
+
+160: UNIMPLEMENTED OPCODE [ADDH2]
+
+161: UNIMPLEMENTED OPCODE [ADDH3]
+
+162: UNIMPLEMENTED OPCODE [SUBH2]
+
+163: UNIMPLEMENTED OPCODE [SUBH3]
+
+164: UNIMPLEMENTED OPCODE [MULH2]
+
+165: UNIMPLEMENTED OPCODE [MULH3]
+
+166: UNIMPLEMENTED OPCODE [DIVH2]
+
+167: UNIMPLEMENTED OPCODE [DIVH3]
+
+168: UNIMPLEMENTED OPCODE [CVTHB]
+
+169: UNIMPLEMENTED OPCODE [CVTHW]
+
+16A: UNIMPLEMENTED OPCODE [CVTHL]
+
+16B: UNIMPLEMENTED OPCODE [CVTRHL]
+
+16C: UNIMPLEMENTED OPCODE [CVTBH]
+
+16D: UNIMPLEMENTED OPCODE [CVTWH]
+
+16E: UNIMPLEMENTED OPCODE [CVTLH]
+
+16F: UNIMPLEMENTED OPCODE [ACBH]
+
+;						=-=-=-=-=-=-=-=
+;						| FD70 - FD7F |
+;						=-=-=-=-=-=-=-=
+
+
+170: UNIMPLEMENTED OPCODE [MOVH]
+
+171: UNIMPLEMENTED OPCODE [CMPH]
+
+172: UNIMPLEMENTED OPCODE [MNEGH]
+
+173: UNIMPLEMENTED OPCODE [TSTH]
+
+174: UNIMPLEMENTED OPCODE [EMODH]
+
+175: UNIMPLEMENTED OPCODE [POLYH]
+
+176: UNIMPLEMENTED OPCODE [CVTHG]
+
+177: RESERVED OPCODE
+
+178: RESERVED OPCODE
+
+179: RESERVED OPCODE
+
+17A: RESERVED OPCODE
+
+17B: RESERVED OPCODE
+
+17C: UNIMPLEMENTED OPCODE [CLRO]
+
+17D: UNIMPLEMENTED OPCODE [MOVO]
+
+17E: UNIMPLEMENTED OPCODE [MOVAO]
+
+17F: UNIMPLEMENTED OPCODE [PUSHAO]
+
+;						=-=-=-=-=-=-=-=
+;						| FD80 - FD8F |
+;						=-=-=-=-=-=-=-=
+
+
+180: INSTR [VVADDL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+181: INSTR [VSADDL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+182: INSTR [VVADDG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+183: INSTR [VSADDG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+184: INSTR [VVADDF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+185: INSTR [VSADDF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+186: INSTR [VVADDD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+187: INSTR [VSADDD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+188: INSTR [VVSUBL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+189: INSTR [VSSUBL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+18A: INSTR [VVSUBG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+18B: INSTR [VSSUBG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+18C: INSTR [VVSUBF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+18D: INSTR [VSSUBF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+18E: INSTR [VVSUBD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+18F: INSTR [VSSUBD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+;						=-=-=-=-=-=-=-=
+;						| FD90 - FD9F |
+;						=-=-=-=-=-=-=-=
+
+
+190: RESERVED OPCODE
+
+191: RESERVED OPCODE
+
+192: RESERVED OPCODE
+
+193: RESERVED OPCODE
+
+194: RESERVED OPCODE
+
+195: RESERVED OPCODE
+
+196: RESERVED OPCODE
+
+197: RESERVED OPCODE
+
+198: UNIMPLEMENTED OPCODE [CVTFH]
+
+199: INSTR [CVTFG] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FPU.2R.WSPC..],
+	FLOATING INSTRUCTION
+	 
+19A: INSTR [PROBEVMR] [rl] [ab] [none] [none] [none] [none] DISPATCH TO [PROBEVMX..]
+
+19B: INSTR [PROBEVMW] [rl] [ab] [none] [none] [none] [none] DISPATCH TO [PROBEVMX..]
+
+19C: INSTR [VSTL] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.LDST..]
+
+19D: INSTR [VSCATL] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.GASC..]
+
+19E: INSTR [VSTQ] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.LDST..]
+
+19F: INSTR [VSCATQ] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.GASC..]
+
+;						=-=-=-=-=-=-=-=
+;						| FDA0 - FDAF |
+;						=-=-=-=-=-=-=-=
+
+
+1A0: INSTR [VVMULL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1A1: INSTR [VSMULL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1A2: INSTR [VVMULG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1A3: INSTR [VSMULG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1A4: INSTR [VVMULF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1A5: INSTR [VSMULF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1A6: INSTR [VVMULD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1A7: INSTR [VSMULD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1A8: INSTR [VSYNC] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1A9: INSTR [MTVP] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1AA: INSTR [VVDIVG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1AB: INSTR [VSDIVG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1AC: INSTR [VVDIVF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1AD: INSTR [VSDIVF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1AE: INSTR [VVDIVD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1AF: INSTR [VSDIVD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+;						=-=-=-=-=-=-=-=
+;						| FDB0 - FDBF |
+;						=-=-=-=-=-=-=-=
+
+
+1B0: RESERVED OPCODE
+
+1B1: RESERVED OPCODE
+
+1B2: RESERVED OPCODE
+
+1B3: RESERVED OPCODE
+
+1B4: RESERVED OPCODE
+
+1B5: RESERVED OPCODE
+
+1B6: RESERVED OPCODE
+
+1B7: RESERVED OPCODE
+
+1B8: RESERVED OPCODE
+
+1B9: RESERVED OPCODE
+
+1BA: RESERVED OPCODE
+
+1BB: RESERVED OPCODE
+
+1BC: RESERVED OPCODE
+
+1BD: RESERVED OPCODE
+
+1BE: RESERVED OPCODE
+
+1BF: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FDC0 - FDCF |
+;						=-=-=-=-=-=-=-=
+
+
+1C0: INSTR [VVCMPL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1C1: INSTR [VSCMPL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1C2: INSTR [VVCMPG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1C3: INSTR [VSCMPG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1C4: INSTR [VVCMPF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1C5: INSTR [VSCMPF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1C6: INSTR [VVCMPD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1C7: INSTR [VSCMPD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1C8: INSTR [VVBISL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1C9: INSTR [VSBISL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1CA: INSTR [OPC1CA] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1CB: INSTR [OPC1CB] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1CC: INSTR [VVBICL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1CD: INSTR [VSBICL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1CE: INSTR [OPC1CE] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1CF: INSTR [OPC1CF] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+;						=-=-=-=-=-=-=-=
+;						| FDD0 - FDDF |
+;						=-=-=-=-=-=-=-=
+
+
+1D0: RESERVED OPCODE
+
+1D1: RESERVED OPCODE
+
+1D2: RESERVED OPCODE
+
+1D3: RESERVED OPCODE
+
+1D4: RESERVED OPCODE
+
+1D5: RESERVED OPCODE
+
+1D6: RESERVED OPCODE
+
+1D7: RESERVED OPCODE
+
+1D8: RESERVED OPCODE
+
+1D9: RESERVED OPCODE
+
+1DA: RESERVED OPCODE
+
+1DB: RESERVED OPCODE
+
+1DC: RESERVED OPCODE
+
+1DD: RESERVED OPCODE
+
+1DE: RESERVED OPCODE
+
+1DF: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FDE0 - FDEF |
+;						=-=-=-=-=-=-=-=
+
+
+1E0: INSTR [VVSRLL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1E1: INSTR [VSSRLL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1E2: INSTR [OPC1E2] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1E3: INSTR [OPC1E3] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1E4: INSTR [VVSLLL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1E5: INSTR [VSSLLL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1E6: INSTR [OPC1E6] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1E7: INSTR [OPC1E7] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1E8: INSTR [VVXORL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1E9: INSTR [VSXORL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1EA: INSTR [OPC1EA] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1EB: INSTR [OPC1EB] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+1EC: INSTR [VVCVT] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1ED: INSTR [IOTA] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L..]
+
+1EE: INSTR [VVMERGE] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV..]
+
+1EF: INSTR [VSMERGE] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q..]
+
+;						=-=-=-=-=-=-=-=
+;						| FDF0 - FDFF |
+;						=-=-=-=-=-=-=-=
+
+
+1F0: RESERVED OPCODE
+
+1F1: RESERVED OPCODE
+
+1F2: RESERVED OPCODE
+
+1F3: RESERVED OPCODE
+
+1F4: RESERVED OPCODE
+
+1F5: RESERVED OPCODE
+
+1F6: UNIMPLEMENTED OPCODE [CVTHF]
+
+1F7: UNIMPLEMENTED OPCODE [CVTHD]
+
+1F8: RESERVED OPCODE
+
+1F9: RESERVED OPCODE
+
+1FA: RESERVED OPCODE
+
+1FB: RESERVED OPCODE
+
+1FC: RESERVED OPCODE
+
+1FD: RESERVED OPCODE
+
+1FE: RESERVED OPCODE
+
+1FF: RESERVED OPCODE
+
+.nolist					; Force memory designator into .ULD
+.if/perf.model
+.nocref
+.zcode
+.width/1
+ZFOO/=<0>
+ZFOO/0
+.cref
+.endif/perf.model
+.list

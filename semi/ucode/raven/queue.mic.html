@@ -1,0 +1,1079 @@
+.TOC	"QUEUE.MIC -- Queue Instructions"
+.TOC	"Revision 2.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 21-Jan-90 RMS	Editorial changes.
+;    1 30-Nov-89 RMS	Revised for half-bandwidth writes.
+; (2)0 16-Nov-89 RMS	Revised for simplified decoder.
+;    7 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    6 06-Oct-89 RMS	Fixed VA stall in REMQUE.R.
+;    5 20-Jul-89 RMS	Fixed another problem with state flags.
+;    4 05-Jul-89 RMS	Fixed problems with state flags.
+;    3 02-Jul-89 RMS	Revised to create one line subroutine.
+;    2 21-Jun-89 RMS	Editorial changes.
+;    1 16-Jun-89 RMS	Revised to use state flags in exception handler.
+; (1)0 11-Jun-89 RMS	Revised to fix bug in IQ and for release to CMS.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 30-Sep-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN QUEUE
+.nobin
+
+;	This module implements the queue class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	5C	 INSQHI entry.ab, header.aq					0 * 0 *		rsv
+;
+;	5D	 INSQTI entry.ab, header.aq					0 * 0 *		rsv
+;
+;	0E	 INSQUE entry.ab, pred.ab					* * 0 *
+;
+;	5E	 REMQHI header.aq, addr.wl					0 * * *		rsv
+;
+;	5F	 REMQTI header.aq, addr.wl					0 * * *		rsv
+;
+;	0F	 REMQUE entry.ab, addr.wl					* * * *
+;
+.TOC	"	INSQUE"
+
+;	This instruction inserts a queue element into a queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	INSQUE		0E	if {all memory accesses ok} then	2	aa/bb	jizj	INSQUE		--
+;					(entry) <-- (pred)
+;					(entry+4) <-- pred
+;					((pred)+4) <-- entry
+;					(pred) <-- entry
+;
+;	Entry conditions from specifier flows:
+;		W0	=	address of first (entry) operand
+;		W2	=	address of second (predecessor) operand
+;		DL	=	data length of second operand (byte)
+;
+;	Exit conditions:
+;		The entry has been inserted in the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- (entry) LSS (entry+4)
+;		Z <-- (entry) EQL (entry+4)
+;		V <-- 0				[Integer overflow trap disabled.]
+;		C <-- (entry) LSSU (entry+4)
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Because the last specifier is address mode, register references are trapped
+;		   by the I Box, and no register entry point is required.
+;
+.bin
+
+;	INSQUE operation:
+;
+;		Read the predecessor's forward pointer.		(pred)
+;		Check to see if all writes will succeed.
+;		Compare the predecessor's forward pointer	(pred) : pred
+;		and the	predecessor address.
+;		Update the successor's backward pointer.	((pred)+4) <-- entry
+;		Update the predecessor's forward pointer.	(pred) <-- entry
+;		Update the entry's forward pointer.		(entry) <-- (pred)
+;		Update the entry's backward pointer.		(entry+4) <-- pred
+
+INSQUE:
+	;********** Hardware dispatch **********;
+	VA <-- [W0],				; [1] VA <-- entry
+						; >> W0 not written in prev cycle
+	[W6] <-- MEM.WCHK (VA), BYTE		; write check start of entry
+
+	;---------------------------------------;
+	VA <-- [W2],				; [2] VA <-- pred
+						; >> W2 not written in prev cycle
+	[W3] <-- MEM.WCHK (VA), LONG		; write check pred, get (pred)
+
+	;---------------------------------------;
+	VA <-- [W0] + 000000[07],		; [3] VA <-- end of entry
+						; >> W0 not written in prev cycle
+	[W6] <-- MEM.WCHK (VA), BYTE		; write check end of entry
+
+	;---------------------------------------;
+	VA <-- [W3] + 4,			; [4] VA <-- (pred)+4
+						; >> W3 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W0], LONG,	; ((pred)+4) <-- entry, only unchecked write
+	SET NORETRY				; set disable retry flag
+
+	;---------------------------------------;
+	VA <-- [W2],				; [5] VA <-- pred, previously checked
+						; >> W2 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W0], LONG	; (pred) <-- entry, can't fail
+
+	;---------------------------------------;
+	VA <-- [W0],				; [6] VA <-- entry, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W3], LONG	; (entry) <-- (pred), can't fail
+
+	;---------------------------------------;
+	[WBUS] <-- [W3] - [W2], LONG,		; [7] compare new (entry) : new (entry+4)
+	SET PSL CC (JIZJ)			; set psl cc's, psl map is jizj
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; [8] VA <-- entry+4, previously checked
+	MEM (VA)&, [WDR] <-- B [W2], LONG,	; (entry+4) <-- pred
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	REMQUE"
+
+;	This instruction removes a queue element from a queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	REMQUE		0F	if {all memory accesses ok} then	2	aw/bl	jizj	REMQUE		--
+;					((entry+4)) <-- (entry)
+;					((entry)+4) <-- (entry+4)
+;					(addr) <-- entry
+;
+;	Entry conditions from specifier flows:
+;		W0	=	address of first (entry) operand
+;		W2 = VA	=	address of second (addr) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data length of second operand (longword)
+;
+;	Exit conditions:
+;		The entry has been removed from the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- (entry) LSS (entry+4)
+;		Z <-- (entry) EQL (entry+4)
+;		V <-- entry EQL (entry+4)	[Integer overflow trap disabled.]
+;		C <-- (entry) LSSU (entry+4)
+;
+;	Tradeoffs:
+;		None.
+;
+.bin
+
+;	REMQUE operation:
+;
+;		Read the entry's backward pointer.		(entry+4)
+;		Read the entry's forward pointer.		(entry)
+;		Check to see if all writes will succeed.
+;		Compare the entry's forward and backward	(entry) : (entry+4)
+;		pointers.
+;		Set psl.v if the queue is empty.		entry : (entry+4)
+;		Update the successor's backward pointer.	((entry)+4) <-- (entry+4)
+;		Update the predecessor's forward pointer.	((entry+4)) <-- (entry)
+;		Update the destination if register.		G.RN <-- entry
+;		Update the destination if memory.		(addr) <-- entry
+
+REMQUE.R:
+	;********** Hardware dispatch **********;
+	NOP,					; [1] wait out ADR data forwarding on W0
+	GOTO [REMQUE.CONT]			; join common code
+
+REMQUE:
+	;********** Hardware dispatch **********;
+	[W6] <-- MEM.WCHK (VA), LONG,		; [1] read (and write check) destination
+	STATE.0 <-- 1,				; flag memory destination
+	GOTO [REMQUE.CONT]			; join common code
+
+REMQUE.CONT:
+	;---------------------------------------;
+	VA <-- [W0] + 4,			; [2] VA <-- entry + 4
+						; >> W0 not written in prev cycle
+	[W4] <-- MEM (VA), LONG			; W4 <-- (entry+4)
+
+	;---------------------------------------;
+	VA <-- [W0],				; [3] VA <-- entry
+						; >> W0 not written in prev cycle
+	IntWBUS <-- [W0] XOR [W4],		; compare entry : (entry+4)
+	[W3] <-- MEM (VA), LONG			; W3 <-- (entry)
+
+	;---------------------------------------;
+	[WBUS] <-- [W3] - [W4], LONG,		; [4] compare (entry) : (entry+4)
+	SET PSL CC (JIZJ),			; set psl cc's, psl map is jizj
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	VA <-- [W4],				; [5] VA <-- (entry+4)
+						; >> W4 not written in prev cycle
+	[W6] <-- MEM.WCHK (VA), LONG,		; read and write check ((entry+4))
+	SELECT [STATE.3-0],			; prepare to case on state (empty path)
+	CASE AT [REMQUE.NOT.EMPTY]		; case on queue empty from [3]
+
+;	REMQUE, continued.
+;	Write checks complete.
+;	Update ((entry)+4), ((entry+4)), and the destination.
+
+;	At this point,
+;		W0	=	entry	=  address of entry
+;		W2	=	addr	=  address of destination if not register
+;		W3	=	(entry)	=  address of successor
+;		W4	=	(entry+4) = address of predecessor
+;		RN	=	register number of destination if register
+;		STATE<0> =	1 if destination is memory
+
+;= ALIGNLIST 10***	(REMQUE.NOT.EMPTY,	REMQUE.EMPTY)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+REMQUE.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [W3] + 4,			; [6] VA <-- (entry) + 4, only unchecked write
+						; >> W3 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W4], LONG,	; ((entry)+4) <-- (entry+4)
+	SET NORETRY,				; set disable retry flag
+	SELECT [STATE.3-0]			; prepare to case on state flags
+
+	;---------------------------------------;
+	VA <-- [W4],				; [7] VA <-- (entry+4), previously checked
+						; >> W4 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W3], LONG,	; ((entry+4)) <-- (entry), can't fail
+	CASE AT [REMQUE.WRITE.REG]		; case on register vs memory
+
+REMQUE.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SET PSL(V),				; [6] set psl.v to signify empty queue
+	CASE AT [REMQUE.WRITE.REG]		; case on register vs memory
+
+;= ALIGNLIST ***0*	(REMQUE.WRITE.REG,	REMQUE.WRITE.MEM)
+;  No v specifier --> STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+REMQUE.WRITE.REG:
+	;---------------------------------------; state<0> = 0:
+	[Rrn] <-- [W0], LONG,			; [8] destination <-- entry
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+REMQUE.WRITE.MEM:
+	;---------------------------------------; state<0> = 1:
+	VA <-- [W2],				; [8] VA <-- addr, previously checked
+						; >> W2 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W0], LONG,	; (addr) <-- entry
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	INSQxI"
+
+;	These instructions insert an entry at the head or tail of an interlocked,
+;	self-relative queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	INSQHI		5C	see next page				2	aa/bq	iiii	INSQXI		--
+;	INSQTI		5D	see next page				2	aa/bq	iiii	INSQXI		--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	address of first (entry) operand
+;		W2	=	address of second (header) operand
+;		DL	=	data length of second operand (quadword)
+;
+;	Exit conditions:
+;		The entry has been inserted in the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- if insertion succeeded then (entry) EQL (entry+4) else 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- if insertion succeeded then 0 else 1
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Because the last specifier is address mode, register references are trapped
+;		   by the I box, and no register entry point is needed.
+;
+
+;	INSQxI operation:
+;
+;		tmp1 <-- (header) interlocked
+;		if tmp1<2:1> <> 0 then
+;			(header) <-- tmp1 release interlock
+;			{reserved operand fault}
+;		if tmp1<0> = 1 then
+;			(header) <-- tmp1 release interlock
+;			psl cc <-- 0001 and EXIT
+;		(header) <-- tmp1 + 1 release interlock
+;		if {any memory access cannot complete} then
+;			{release secondary interlock}
+;			{initiate memory management exception}
+;		else 	{insert entry at head/tail of queue}
+;			{release secondary interlock}
+;
+;	The actual insertion process is best understood pictorially:
+;
+;	BEFORE				AFTER INSQHI			AFTER INSQTI
+;
+;	H:	A-H			H:	D-H	W		H:	A-H	W to release interlock
+;	H+4:	C-H			H+4:	C-H			H+4:	D-H	W
+;
+;	A:	B-A			A:	B-A			A:	B-A
+;	A+4:	H-A			A+4:	D-A	W		A+4:	H-A
+;
+;	B:	C-B			B:	C-B			B:	C-B
+;	B+4:	A-B			B+4:	A-B			B+4:	A-B
+;
+;	C:	H-C			C:	H-C			C:	D-C	W
+;	C+4:	B-C			C+4:	B-C			C+4:	B-C
+;
+;	D:	---			D:	A-D	W		D:	H-D	W
+;	D+4:	---			D+4:	H-D	W		D+4:	C-D	W
+;
+;	Note that the queue header, the entry to be inserted, and all the intermediate entries
+;	that are "touched" in any way must be QUADWORD aligned.  In addition, the header and
+;	the entry must not be equal.
+;
+;	For INSQHI, H, A+4, D, and D+4 must be WRITEABLE.
+;	For INSQTI, H+4, C, D, and D+4 must be WRITEABLE.
+;
+.bin
+
+;	INSQxI.
+;	Read header, interlocked, check alignment of header, entry.
+
+INSQXI:
+	;********** Hardware dispatch **********;
+	VA <-- [W0],				; [1] VA <-- entry
+						; >> W0 not written in prev cycle
+	IntWBUS <-- [W0] AND 000000[7],		; check entry addr quad aligned
+	[W6] <-- MEM.WCHK (VA), BYTE		; check that entry is write accessible
+
+	;---------------------------------------;
+	[WBUS] <-- [W2] XOR [W0], LONG,		; [2] check if header = entry
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	VA <-- [W2],				; [3] VA <-- header
+						; >> W2 not written in prev cycle
+	IntWBUS <-- [W2] AND 000000[7],		; check header addr quad aligned
+	[W4] <-- MEM.LOCK (VA), BYTE,		; read and lock header, force aligned
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [INSQI.RSRV.OPER.1]		; case on entry quad aligned from [1]
+
+;= ALIGNLIST *0***	(INSQI.RSRV.OPER.1,	INSQI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+INSQI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], BYTE,	; [4] release hardware interlock, force aligned
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+;	IQ instructions, continued.
+;	Hardware interlocked header read complete.
+;	Complete instruction validation.
+
+;	At this point,
+;		W0	=	INSQxI: address of entry [D]
+;				REMQxI: address of header [H]
+;		W2	=	INSQxI: address of header [H]
+;				REMQxI: address of destination (dst)
+;		W4	=	header forward pointer [A-H]
+;		VA	=	address of header [H]
+
+INSQI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	[VM.UEXC] <-- [W4] AND 000000[07],	; [4] test header<2:0>, clear other bits
+	BYTE,					; set up microcode exception vector
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [INSQI.CONT.2]			; case on header = entry/dst from [2]
+
+;= ALIGNLIST 10***	(INSQI.CONT.2,	INSQI.RSRV.OPER.2)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+INSQI.RSRV.OPER.2:
+	;---------------------------------------; wbus.z = 1:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], BYTE,	; [5] release hardware interlock, force aligned
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+INSQI.CONT.2:
+	;---------------------------------------; wbus.z = 0:
+	[W1] <-- [VA] + [W4], LONG,		; [5] A = H + [A-H]
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [INSQI.RSRV.OPER.3]    		; case on header quad aligned from [3]
+
+;= ALIGNLIST *0***	(INSQI.RSRV.OPER.3,	INSQI.CONT.3)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+INSQI.RSRV.OPER.3:
+	;---------------------------------------; wbus.z = 0:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], BYTE,	; [6] release hardware interlock, force aligned
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+INSQI.CONT.3:
+	;---------------------------------------; wbuz.z = 1:
+	[WBUS] <-- ZEXT [W4] RSH [1], LONG,	; [6] set psl.z if queue empty
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode<2:0>
+	CASE AT [IQ.SET.000]			; case on Wbus<2:0> = header<2:0> from [4]
+
+;	IQ instructions, continued.
+;	Empty queue, entry alignment, and header alignment checked.
+;	Ready to set software interlock.
+
+;	At this point,
+;		W0	=	INSQxI: address of entry [D]
+;				REMQxI: address of header [H]
+;		W1	=	address of queue head [A]
+;      		W2	=	INSQxI: address of header [H]
+;				REMQxI: address of destination (dst)
+;		W4	=	header forward pointer [A-H]
+;		VA	=	address of header [H]
+
+;= ALIGNLIST *000*	(IQ.SET.000,	IQ.SET.001,	IQ.SET.010,	IQ.SET.011,
+;=			 IQ.SET.100,	IQ.SET.101,	IQ.SET.110,	IQ.SET.111)
+;  Wbus<3> = 0 --> Wbus<3:0> = 0???
+
+IQ.SET.000:
+	;---------------------------------------; wbus<2:0> = 000:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4] OR 000000[01], ; [7] set software interlock
+	LONG,					; release hardware interlock
+	SET NORETRY,				; set disable retry flag
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [INSQHI.CONT]			; branch into different instruction flows
+
+IQ.SET.001:
+	;---------------------------------------; wbus<2:0> = 001:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; [7] release hardware interlock
+	CASE AT [INSQI.BUSY]			; case on INSQxI vs REMQxI
+
+;= ALIGNLIST 1101*	(INSQI.BUSY,	REMQI.BUSY)
+
+INSQI.BUSY:
+	;---------------------------------------; opcode<1> = 0:
+	[WBUS] <-- 000000[01], LONG,		; iiij on 1 = 0001
+	SET PSL CC (IIIJ),			; set psl cc's, psl map is iiij
+	LAST CYCLE				; decode next instruction
+
+REMQI.BUSY:
+	;---------------------------------------; opcode<1> = 1:
+	[WBUS] <-- [80]000000 - [K1], LONG,	; iiii on 80000000 - 1 = 0011
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	LAST CYCLE				; decode next instruction
+
+;	IQ instructions, continued.
+;	Header misformed.
+;	Release hardware interlock and fault.
+
+;	Note that the header is known to be quadword aligned.
+
+;	At this point,
+;		W4	=	header forward pointer [A-H]
+
+IQ.SET.010:
+	;---------------------------------------; wbus<2:0> = 010:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; release hardware interlock
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+IQ.SET.011:
+	;---------------------------------------; wbus<2:0> = 011:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; release hardware interlock
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+IQ.SET.100:
+	;---------------------------------------; wbus<2:0> = 100:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; release hardware interlock
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+IQ.SET.101:
+	;---------------------------------------; wbus<2:0> = 101:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; release hardware interlock
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+IQ.SET.110:
+	;---------------------------------------; wbus<2:0> = 110:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; release hardware interlock
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+IQ.SET.111:
+	;---------------------------------------; wbus<2:0> = 111:
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; release hardware interlock
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+;	INSQHI, continued.
+;	Secondary interlock acquired, header and entry quad aligned.
+;	Update pointers (A+4), (D), and (D+4).
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management fault occurs.
+
+;	At this point,
+;		W0	=	address of entry [D]
+;		W1	=	address of queue head [A]
+;		W2	=	address of header [H]
+;		W4	=	header forward pointer [A-H]
+;		PSL CC's =	0<empty queue>00
+
+;= ALIGNLIST 1100*	(INSQHI.CONT,	INSQTI.CONT,	REMQHI.CONT,	REMQTI.CONT)
+
+INSQHI.CONT:
+	;---------------------------------------; opcode<1:0> = 00:
+	VA <-- [W1] + 4,			; [8] VA <-- A+4, only unchecked write
+						; >> W1 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W1] + [W0]),	; (A+4) <-- [D-A]
+	LONG					; if microtrap, flag write in [10] done
+
+	;---------------------------------------;
+	VA <-- [W0],				; [9] VA <-- D, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W0] + [W1]),	; (D) <-- [A-D], can't fail
+	LONG					; if microtrap, flag write in [10] done
+	
+INSQHI.CONT.1:
+	;---------------------------------------;
+	VA <-- [W0] + 4,			; [10] VA <-- D+4, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W0] + [W2]),	; (D+4) <-- [H-D], can't fail
+	LONG,					;
+	STATE.3 <-- 1,				; enable microcode exception handler
+	CALL [INSQI.LOCK.HEADER]		; [11] read and lock header, prev checked
+						; if microtrap, flag clear in [13] done
+
+	;---------------------------------------;
+	MEM.UNLOCK (VA)&, [WDR] <-- [W0] - [W2], ; [12] (H) <-- [D-H], can't fail
+	LONG,					; unlock header (must be aligned)
+						; if microtrap, flag clear in [13] done
+	GOTO [LAST.CYCLE.CLEAR.STATE.3.0]	; [13] go clear microcode execption handler
+
+;	One line subroutine to read and lock header for INSQxI.
+
+INSQI.LOCK.HEADER:
+	;---------------------------------------;
+	VA <-- [W2],				; VA <-- H
+						; >> W2 not written in prev cycle
+	[W6] <-- MEM.LOCK (VA), LONG,		; read and lock header (must be aligned)
+	RETURN					; return to caller
+
+;	INSQTI, continued.
+;	Secondary interlock acquired, header and entry quad aligned.
+;	Check for queue empty, establish quad alignment of tail.
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management or reserved operand fault occurs.
+;	Note: A case on queue empty has been selected on entry to this flow.
+
+;	At this point,
+;		W0	=	address of entry [D]
+;		W1	=	address of queue head [A]
+;		W2	=	address of header [H]
+;		W4	=	header forward pointer [A-H]
+;		PSL CC's =	0<empty queue>00
+
+INSQTI.CONT:
+	;---------------------------------------; opcode<1:0> = 01:
+	VA <-- [W2] + 4,			; [8] VA <-- H+4
+						; >> W2 not written in prev cycle
+	[W6] <-- MEM (VA), LONG,		; read header back pointer [C-H]
+						; if microtrap, flag write in [10] done
+	CASE AT [INSQTI.NOT.EMPTY]		; case on queue empty from [6]
+
+;= ALIGNLIST *0***	(INSQTI.NOT.EMPTY,	INSQTI.EMPTY)
+;  WBUS.NZVC set by zext right shift --> N = V = C = 0
+
+INSQTI.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [W1] + 4,			; [9] VA <-- A+4, only unchecked write
+						; >> W1 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W1] + [W0]),	; (A+4) <-- [D-A]
+	LONG					; if microtrap, flag write in [10] done
+
+	;---------------------------------------;
+	VA <-- [W0],				; [10] VA <-- D, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W0] + [W1]),	; (D) <-- [A-D], can't fail
+	LONG,					;
+	STATE.3 <-- 1,				; enable microcode exception handler
+	GOTO [INSQHI.CONT.1]			; finish as INSQHI
+
+INSQTI.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	[WBUS] <-- [W6] AND 000000[7], LONG	; [9] check [C-H] for quad alignment
+
+	;---------------------------------------;
+	[W6] <-- [W6] + [W2], LONG,		; [10] get address of tail C = [C-H] + H
+	STATE.3 <-- 1,				; enable microcode exception handler
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	NOP,					; [11] nothing to do...
+	CASE AT [INSQTI.RSRV.OPER.1]		; case on [C-H] quad aligned from [9]
+
+;	INSQTI, continued.
+;	Tail quad alignment and writability verified.
+;	Update pointers (C), (H+4), (D), and (D+4).
+
+;	At this point,
+;		W0	=	address of entry [D]
+;		W2	=	address of header [H]
+;		W4	=	header forward pointer [A-H]
+;		W6	=	C
+;		STATE<3> =	1 (software interlock flag)
+;		PSL CC's =	0<empty queue>00
+
+;= ALIGNLIST *0***	(INSQTI.RSRV.OPER.1,	INSQTI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+INSQTI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [12] reserved operand fault
+
+INSQTI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [W6],				; [12] VA <-- C, only unchecked write
+						; >> W6 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W6] + [W0]),	; (C) <-- [D-C]
+	LONG					;
+
+	;---------------------------------------;
+	VA <-- [W2] + 4,			; [13] VA <-- H+4, previously checked
+						; >> W2 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W2] + [W0]),	; (H+4) <-- [D-H], can't fail
+	LONG					;
+
+	;---------------------------------------;
+	VA <-- [W0],				; [14] VA <-- D, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W0] + [W2]),	; (D) <-- [H-D], can't fail
+	LONG					;
+
+	;---------------------------------------;
+	VA <-- [W0] + 4,			; [15] VA <-- D+4, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W0] + [W6]),	; (D+4) <-- [C-D], can't fail
+	LONG,					;
+	CALL [INSQI.LOCK.HEADER]		; [16] read and lock header
+						; if microtrap, flag clear in [18] done
+	
+IQ.EXIT:
+	;---------------------------------------;
+	MEM.UNLOCK (VA)&, [WDR] <-- [W4], LONG,	; [17] unlock and update header
+						; if microtrap, flag clear in [18] done
+	GOTO [LAST.CYCLE.CLEAR.STATE.3.0]	; [18] go clear microcode execption handler
+
+.nobin
+.TOC	"	REMQxI"
+
+;	These instructions remove an entry from the head or tail of an interlocked,
+;	self-relative queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	REMQHI		5E	see next page				2	aw/ql	iiii	REMQXI		--
+;	REMQTI		5F	see next page				2	aw/ql	iiii	REMQXI		--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	address of first (header) operand
+;		W2 = VA	=	address of second (destination) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data length of second operand (longword)
+;
+;	Exit conditions:
+;		The entry has been removed from the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- if removal succeeded then {queue now empty} else 0
+;		V <-- if {no entry removed} then 1 else 0	[Integer overflow trap disabled.]
+;		C <-- if removal succeeded then 0 else 1
+;
+;	Tradeoffs:
+;		None.
+;
+
+;	REMQxI operation:
+;
+;		tmp1 <-- (header) interlocked
+;		if tmp1<2:1> <> 0 then
+;			(header) <-- tmp1 release interlock
+;			{reserved operand fault}
+;		if tmp1<0> = 1 then
+;			(header) <-- tmp1 release interlock
+;			psl cc <-- 0011 and EXIT
+;		(header) <-- tmp1 + 1 release interlock
+;		if {any memory access cannot complete} then
+;			{initiate memory management exception}
+;			{release secondary interlock}
+;		if {queue empty} then
+;			{release secondary interlock}
+;			psl cc <-- 0110 and EXIT
+;		else 	{remove entry from head/tail of queue}
+;			{release secondary interlock}
+;
+;	The actual removal process is best understood pictorially:
+;
+;	BEFORE				AFTER REMQHI			AFTER REMQTI
+;
+;	H:	A-H			H:	B-H	W		H:	A-H	W to release interlock
+;	H+4:	C-H			H+4:	C-H			H+4:	B-H	W
+;
+;	A:	B-A			A:	B-A	R		A:	B-A
+;	A+4:	H-A			A+4:	H-A			A+4:	H-A
+;
+;	B:	C-B			B:	C-B			B:	H-B	W
+;	B+4:	A-B			B+4:	H-B	W		B+4:	A-B
+;
+;	C:	H-C			C:	H-C			C:	H-C
+;	C+4:	B-C			C+4:	B-C			C+4:	B-C	R
+;
+;	Note that the queue header, the entry to be inserted, and all the intermediate entries
+;	that are "touched" in any way must be QUADWORD aligned.  In addition, the header and
+;	the destination must not be equal.
+;
+;	For REMQHI, H and B+4 must be WRITEABLE, A must be READABLE.
+;	For REMQTI, H+4 and B must be WRITEABLE, C+4 must be READABLE.
+;
+.bin
+
+;	REMQxI.
+;
+;	Note that cycle numbering begins late, in order to match up with the
+;	cycle counts in the merged INQSxI/REMQxI flows.
+
+REMQXI:
+	;********** Hardware dispatch **********;
+	IntWbus <-- [W0] XOR [W2],		; [2] check header = destination
+	[W6] <-- MEM.WCHK (VA), LONG,		; read and write check destination
+	STATE.0 <-- 1				; flag memory destination
+
+REMQXI.CONT:
+	;---------------------------------------;
+	VA <-- [W0],				; [3] VA <-- header
+						; >> W0 not written in prev cycle
+	IntWBUS <-- [W0] AND 000000[7],		; check header addr quad aligned
+	[W4] <-- MEM.LOCK (VA), BYTE,		; read and lock header, force aligned
+	STATE.1 <-- 1,				; flag REMQxI for exception handler
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	GOTO [INSQI.CONT.1]			; join common code
+
+REMQXI.R:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- 000000[01], LONG,		; [2] guarantee header ne destination
+	GOTO [REMQXI.CONT]			; go read header, check alignment
+
+;	REMQHI, continued.
+;	Secondary interlock acquired, header quad aligned.
+;	Check for empty queue and quad alignment of [B-A].
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management or reserved operand fault occurs.
+;	Note: A case on queue empty has been selected on entry to this flow.
+
+;	At this point,
+;		W0	=	address of header [H]
+;		W1	=	address of queue head [A]
+;		W2	=	address of destination, if memory
+;		W4	=	header forward pointer [A-H]
+;		PSL CC's =	0<empty queue>00
+;		STATE<3:0> =	001<register vs memory>
+
+REMQHI.CONT:
+	;---------------------------------------; opcode<1:0> = 10:
+	VA <-- [W1],				; [8] VA <-- A
+						; >> W1 not written in prev cycle
+	[W6] <-- MEM (VA), LONG,		; read queue head forward pointer [B-A]
+						; if microtrap, flag write in [10] done
+	SELECT [STATE.3-0],			; prepare to case on state (empty path)
+	CASE AT [REMQHI.NOT.EMPTY]		; case on queue empty from [6]
+
+;= ALIGNLIST *0***	(REMQHI.NOT.EMPTY,	REMQHI.EMPTY)
+;  WBUS.NZVC set by zext right shift --> N = V = C = 0
+
+REMQHI.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SET PSL(V),				; [9] set psl.v in addition to psl.z
+	CASE AT [REMQI.WRITE.REG]		; case on reg vs memory destination
+
+REMQHI.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	[WBUS] <-- [W6] AND 000000[7], LONG	; [9] check if [B-A] is quad aligned
+
+	;---------------------------------------;
+	[W6] <-- [W6] + [W1], LONG,		; [10] B = [B-A] + A
+	STATE.3 <-- 1,				; enable microcode exception handler
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W4] <-- [W6] - [W0], LONG,		; [11] new header = [B-H]
+	CASE AT [REMQHI.RSRV.OPER.1]		; case on [B-A] quad aligned from [9]
+
+;	REMQHI, continued.
+;	Update pointer (B+4).
+
+;	At this point,
+;		W0	=	address of header [H]
+;		W1	=	address of queue head [A]
+;		W2	=	address of destination, if memory
+;		W4	=	new header forward pointer [B-H]
+;		W6	=	address of new queue head [B]
+;		STATE<3:0> =	101<register vs memory>
+
+;= ALIGNLIST *0***	(REMQHI.RSRV.OPER.1,	REMQHI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+REMQHI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [12] reserved operand fault
+
+REMQHI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [W6] + 4,			; [12] VA <-- B+4, only unchecked write
+						; >> W6 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W6] + [W0]),	; (B+4) <-- [H-B]
+	LONG,					;
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [REMQI.NORMAL.EXIT]		; join normal exit code
+
+;	REMQTI, continued.
+;	Secondary interlock acquired, header quad aligned.
+;	Check for empty queue and quad alignment of [C-H].
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management or reserved operand fault occurs.
+;	Note: A case on queue empty is selected on entry to this flow.
+
+;	At this point,
+;		W0	=	address of header [H]
+;		W1	=	address of queue head [A]
+;		W2	=	address of destination, if memory
+;		W4	=	header forward pointer [A-H]
+;		PSL CC's =	0<empty queue>00
+;		STATE<3:0> =	001<register vs memory>
+
+REMQTI.CONT:
+	;---------------------------------------; opcode<1:0> = 11:
+	VA <-- [W0] + 4,			; [8] VA <-- H+4
+						; >> W0 not written in prev cycle
+	[W6] <-- MEM (VA), LONG,		; read header back pointer [C-H]
+						; if microtrap, flag write in [10] done
+	SELECT [STATE.3-0],			; prepare to case on state (empty path)
+	CASE AT [REMQTI.NOT.EMPTY]		; case on queue empty from [6]
+
+;= ALIGNLIST *0***	(REMQTI.NOT.EMPTY,	REMQTI.EMPTY)
+;  WBUS.NZVC set by zext right shift --> V = C = 0
+
+REMQTI.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SET PSL(V),				; [9] set psl.v in addition to psl.z
+	CASE AT [REMQI.WRITE.REG]		; case on reg vs memory destination
+
+REMQTI.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	[W3] <-- [W6] AND 000000[07], LONG	; [9] test back pointer [C-H] quad aligned
+						; (if successful, put 0 in W3)
+
+	;---------------------------------------;
+	[W1] <-- [W6] + [W0], LONG,		; [10] C = [C-H] + H
+	STATE.3 <-- 1,				; enable microcode exception handler
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[WBUS] <-- [W4] XOR [W6], LONG,		; [11] test for fore pointer = back pointer
+	CASE AT [REMQTI.RSRV.OPER.1]		; case on [C-H] quad aligned from [9]
+
+;	REMQTI, continued.
+;	Read and check quad alignment of [B-C].
+
+;	At this point,
+;		W0	=	address of header [H]
+;		W1	=	address of queue tail [C]
+;		W2	=	address of destination, if memory
+;		W3	=	0
+;		W4	=	header forward pointer [A-H]
+;		STATE<3:0> =	101<register vs memory>
+
+;= ALIGNLIST *0***	(REMQTI.RSRV.OPER.1,	REMQTI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> V = C = 0
+
+REMQTI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [12] reserved operand fault
+
+REMQTI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [W1] + 4,			; [12] VA <-- C+4
+						; >> W1 not written in prev cycle
+	[W6] <-- MEM (VA), LONG,		; read queue tail back pointer [B-C]
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[WBUS] <-- [W6] AND 000000[07], LONG,	; [13] test for [B-C] quad aligned
+	CASE AT [REMQTI.MULTI]			; case on fore = back pointer from [11]
+
+;= ALIGNLIST 10***	(REMQTI.MULTI,	REMQTI.SINGLE)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+REMQTI.MULTI:
+	;---------------------------------------; wbus.z = 0:
+	[W6] <-- [W6] + [W1], LONG,		; [14] B = [B-C] + C
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- [W6] - [W0], LONG,		; [15] calculate B-H
+	CASE AT [REMQTI.RSRV.OPER.2]		; case on [B-C] quad aligned from [13]
+
+;= ALIGNLIST *0***	(REMQTI.RSRV.OPER.2,	REMQTI.CONT.2)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> V = C = 0
+
+REMQTI.RSRV.OPER.2:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [16] reserved operand fault
+
+;	REMQTI, continued.
+;	Update pointer (B), (H+4).
+
+;	At this point,
+;		W0	=	address of header [H]
+;		W1	=	address of queue tail [C]
+;		W2	=	address of destination, if memory
+;		W3	=	B-H (0 if only one entry)
+;		W4	=	header forward pointer [A-H]
+;		W6	=	address of new queue tail [B]
+;		STATE<3:0> =	101<register vs memory>
+
+REMQTI.CONT.2:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [W6],				; [16] VA <-- B, only unchecked write
+						; >> W6 not written in prev cycle
+	MEM (VA)&, [WDR] <-- (-[W6] + [W0]),	; (B) <-- [H-B]
+	LONG					;
+
+REMQTI.WRITE.HDR:
+	;---------------------------------------;
+	VA <-- [W0] + 4,			; [17] VA <-- H+4, previously checked
+						; >> W0 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W3], LONG,	; (H+4) <-- [B-H], can't fail
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [REMQI.NORMAL.EXIT]		; join normal exit flows
+
+;	If the queue contained only a single entry, then entry B is actually
+;	the header H.  We must NOT update pointer (B), that is, (H), because
+;	this would CLEAR the secondary interlock bit using a non-interlocked
+;	read-modify-write sequence.
+
+REMQTI.SINGLE:
+	;---------------------------------------; wbus.z = 1:
+	[W4] <-- 000000[00], LONG,		; single entry, new header is 0
+	GOTO [REMQTI.WRITE.HDR]			; go clear header back pointer
+
+;	REMQxI, continued.
+;	Common exit for remove queue interlocked instructions.
+;	Set condition codes, update destination, unlock queue.
+
+;	At this point,
+;		W0	=	address of header [H]
+;		W1	=	REMQHI not empty: address of removed entry [A]
+;				REMQTI not empty: address of removed entry [C]
+;				both empty: address of header [H]
+;		W2	=	address of destination, if memory
+;		W4	=	new header
+;		PSL CC's =	both empty: 0110
+;		STATE<3:0> =	101<register vs memory>
+
+REMQI.NORMAL.EXIT:
+	;---------------------------------------;
+	[WBUS] <-- ZEXT [W4] RSH [1], LONG,	; set psl.z if queue now empty
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	CASE AT [REMQI.WRITE.REG]		; case on register vs memory destination
+
+;= ALIGNLIST 1*10*	(REMQI.WRITE.MEM,	REMQI.WRITE.REG)
+;  No v specifier --> STATE<2> = 0 --> STATE<3:0> = 101?
+
+REMQI.WRITE.REG:
+	;---------------------------------------; state<0> = 0:
+	[Rrn] <-- [W1], LONG,			; store removed entry address in destination
+	STATE.3 <-- 1,				; enable microcode exc handler on queue empty path
+	GOTO [REMQI.EXIT]			; go release software interlock
+
+REMQI.WRITE.MEM:
+	;---------------------------------------; state<0> = 1:
+	VA <-- [W2],				; VA <-- dest, previously checked
+						; >> W2 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W1], LONG,	; store removed entry address in destination
+	STATE.3 <-- 1,				; enable microcode exc handler on queue empty path
+	GOTO [REMQI.EXIT]			; go release software interlock
+
+REMQI.EXIT:
+	;---------------------------------------;
+	VA <-- [W0],				; VA <-- H
+						; >> W0 not written in prev cycle
+	[W6] <-- MEM.LOCK (VA), LONG,		; read and lock header
+	GOTO [IQ.EXIT]				; go rewrite header and exit
+
+;	Interlocked queue exception handler.
+
+;	This routine is called if an exception occurs while STATE<3> is set during
+;	an interlocked queue instruction.  This routine must release the secondary
+;	interlock and return to the normal instruction cleanup flows.
+
+;	At this point,
+;		W0	=	REMQxI: address of header [H]
+;		W2	=	INSQxI: address of header [H]
+
+;	A case on STATE.3-0 is selected.
+
+QUEUE.PACK:                                                                               
+        ;---------------------------------------; wbus<1:0> = 00:                         
+        NOP,                                    ; nothing to do...                        
+        STATE.3-0 <-- 0,                        ; disable microcode exception handler
+        CASE AT [QUEUE.PACK.INSQI]              ; case on INSQxI vs REMQxI                
+                                                                                          
+;= ALIGNLIST 1*01*      (QUEUE.PACK.INSQI,      QUEUE.PACK.REMQI)
+;  STATE<2> = 0 --> STATE<3:0> = 10??
+                                                                                          
+QUEUE.PACK.INSQI:                                                                         
+        ;---------------------------------------; state<1> = 0:                          
+        VA <-- [W2], LONG,                      ; get header address for INSQxI           
+						; >> W2 not written in prev cycle
+        [WDR] <-- MEM.LOCK (VA), LONG,          ; read header, get hwre interlock         
+        GOTO [QUEUE.PACK.CONT]                  ; join common code                        
+                                                                                          
+QUEUE.PACK.REMQI:                                                                         
+        ;---------------------------------------; state<1> = 1:                          
+        VA <-- [W0], LONG,                      ; get header address for REMQxI           
+						; >> W0 not written in prev cycle
+        [WDR] <-- MEM.LOCK (VA), LONG,          ; read header, get hwre interlock         
+        GOTO [QUEUE.PACK.CONT]                  ; join common code                        
+                                                                                          
+QUEUE.PACK.CONT:                                                                          
+        ;---------------------------------------;                                         
+        MEM.UNLOCK (VA)&, [WDR] <-- [WDR] ANDNOT 000000[01], ; release hardware interlock,
+        LONG,                                   ; update header (must be aligned)         
+        GOTO [IE.CLEANUP.REG]                   ; join normal cleanup flow                
+
+;= END QUEUE

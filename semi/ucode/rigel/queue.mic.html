@@ -1,0 +1,1085 @@
+.TOC	"QUEUE.MIC -- Queue Instructions"
+.TOC	"Revision 3.1"
+
+;	Rick Calcagni, Bob Supnik, Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (3)1 21-Aug-87 RMS	Editorial changes; pass 1 code freeze.
+;
+;    2 29-Dec-86 RMS	Editorial changes.
+; (2)1 12-Sep-86 RMS	Initial production microcode.
+
+.bin
+;= BEGIN QUEUE
+.nobin
+
+;	This module implements the queue class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	5C	 INSQHI entry.ab, header.aq					0 * 0 *		rsv
+;
+;	5D	 INSQTI entry.ab, header.aq					0 * 0 *		rsv
+;
+;	0E	 INSQUE entry.ab, pred.ab					* * 0 *
+;
+;	5E	 REMQHI header.aq, addr.wl					0 * * *		rsv
+;
+;	5F	 REMQTI header.aq, addr.wl					0 * * *		rsv
+;
+;	0F	 REMQUE entry.ab, addr.wl					* * * *
+;
+.TOC	"	INSQUE"
+
+;	This instruction inserts a queue element into a queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	INSQUE		0E	if {all memory accesses ok} then	2	aa/bb	jizj	INSQUE		--
+;					(entry) <-- (pred)
+;					(entry+4) <-- pred
+;					((pred)+4) <-- entry
+;					(pred) <-- entry
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(S1) =	address of first (entry) operand
+;		MD.T2(S2) =	address of second (predecessor) operand
+;		DL	=	data type of second operand (byte)
+;
+;	Exit conditions:
+;		The entry has been inserted in the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- (entry) LSS (entry+4)
+;		Z <-- (entry) EQL (entry+4)
+;		V <-- 0				[Integer overflow trap cannot occur.]
+;		C <-- (entry) LSSU (entry+4)
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	INSQUE operation:
+;
+;		Read the predecessor's forward pointer.		(pred)
+;		Check to see if all writes will succeed.
+;		Compare the predecessor's forward pointer	(pred) : pred
+;		and the	predecessor address.
+;		Update the successor's backward pointer.	((pred)+4) <-- entry
+;		Update the predecessor's forward pointer.	(pred) <-- entry
+;		Update the entry's forward pointer.		(entry) <-- (pred)
+;		Update the entry's backward pointer.		(entry+4) <-- pred
+
+INSQUE..:
+	;********** Hardware dispatch **********;
+	[MD.T3] <-- MEM.WCHECK ([MD.T2]), LONG,	; write check pred, get (pred)
+	DL <-- QUAD,				; dl is quad for the entry
+	CALL [WRITE.CHECK.T0],			; write check address entry, quadword
+		sim addr [ea] [2]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T3] - [MD.T2],		; compare new (entry) : new (entry+4)
+	SET PSL CC, LONG, MAP.JIZJ		; set PSL CC's, map is jizj
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T3] + [K4],	; write check (pred)+4
+	LONG,					;
+		sim addr [queue] [0]
+
+;	INSQUE, continued.
+;	All destinations known writable.
+;	Update ((pred)+4), (pred), (entry), and (entry+4).
+
+;	At this point,
+;		MD.T0	=	entry	=  address of entry
+;		MD.T2	=	pred 	=  address of predecessor
+;		MD.T3	=	(pred)	=  predecessor's forward pointer
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T0], LONG,	; ((pred)+4) <-- entry
+	CALL [WRITE.CHECK.T0]			; write check address entry, quadword
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T3], LONG	; (entry) <-- (pred)
+
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- [MD.T2], LONG,	; (entry+4) <-- pred
+	DL <-- LONG,				; set dl = long for last write
+	GOTO [REMQUE.WRITE.MEM]			; go write (pred) <-- entry
+
+;	One line subroutine to write check address entry.
+
+WRITE.CHECK.T0:
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T0], LEN(DL),; write check address entry
+	RETURN,					; return to caller
+		sim addr [ea] [1]
+
+.nobin
+.TOC	"	REMQUE"
+
+;	This instruction removes a queue element from a queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	REMQUE		0F	if {all memory accesses ok} then	2	aw/bl	jizj	REMQUE		--
+;					((entry+4)) <-- (entry)
+;					((entry)+4) <-- (entry+4)
+;					(addr) <-- entry
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(S1) =	address of first (entry) operand
+;		MD.T2(S2) =	address of second (addr) operand, unless register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (longword)
+;
+;	Exit conditions:
+;		The entry has been removed from the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- (entry) LSS (entry+4)
+;		Z <-- (entry) EQL (entry+4)
+;		V <-- entry EQL (entry+4)	[Integer overflow trap disabled by jizj map.]
+;		C <-- (entry) LSSU (entry+4)
+;
+;	Size/performance tradeoffs:
+;		An optimized dispatch would save one cycle in register mode, at the
+;		cost of one microword.
+;
+;	Note:	REMQUE sets the PSL CC's before testing the write accessibility of all
+;		operands.
+;		(addr) is write checked by the specifier flows if not register.
+;
+.bin
+
+;	REMQUE operation:
+;
+;		Read the entry's backward pointer.		(entry+4)
+;		Read the entry's forward pointer.		(entry)
+;		Check to see if all writes will succeed.
+;		Compare the entry's forward and backward	(entry) : (entry+4)
+;		pointers.
+;		Set psl.v if the queue is empty.		entry : (entry+4)
+;		Update the successor's backward pointer.	((entry)+4) <-- (entry+4)
+;		Update the predecessor's forward pointer.	((entry+4)) <-- (entry)
+;		Update the destination if register.		G.RN <-- entry
+;		Update the destination if memory.		(addr) <-- entry
+
+REMQUE..:
+	;********** Hardware dispatch **********;
+	[MD.T4] <-- MEM ([MD.T0] + [K4]), LONG,	; MD.T4 <-- (entry+4)
+		sim addr [ea+4] [1]
+
+	;---------------------------------------;
+	[MD.T3] <-- MEM ([MD.T0]), LONG,	; MD.T3 <-- (entry)
+		sim addr [ea] [1]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T0] XOR [MD.T4], LONG,	; compare entry : (entry+4)
+		sim wbus.nzvc <-- k[0]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T3] - [MD.T4],		; compare (entry) : (entry+4)
+	SET PSL CC, LONG, MAP.JIZJ,		; set PSL CC's, map is jizj
+	CALL [WRITE.CHECK.T4]			; write check address (entry+4)
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T3] + [K4],	; write address (entry)+4
+	LONG,					;
+	CASE [WBUS.NZV] AT [REMQUE.CONT],	; case on queue not empty vs empty
+		sim addr [queue] [1]
+
+;	REMQUE, continued.
+;	All destinations known writable.
+;	Update ((entry)+4) and ((entry+4)).
+;	Update destination if register, else update (addr).
+
+;	At this point,
+;		MD.T0	=	entry	=  address of entry
+;		MD.T2	=	addr	=  address of destination if not register
+;		MD.T3	=	(entry)	=  address of successor
+;		MD.T4	=	(entry+4) = address of predecessor
+;		RN	=	register number of destination if register
+;		VA	=	(entry)+4
+
+;= ALIGNLIST 10**	(REMQUE.CONT,	REMQUE.EMPTY)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+REMQUE.CONT:
+	;---------------------------------------; wbus.z = 0:
+	MEM (VA)&, [WBUS] <-- [MD.T4], LONG,	; ((entry)+4) <-- (entry+4)
+	CALL [WRITE.CHECK.T4]			; write check address (entry+4)
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T3], LONG,	; ((entry+4)) <-- (entry)
+	CASE [INT.RMODE] AT [REMQUE.WRITE.MEM]	; case on memory vs register
+
+REMQUE.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SET PSL(V),				; set psl.v to signify empty queue
+	CASE [INT.RMODE] AT [REMQUE.WRITE.MEM]	; case on memory vs register
+
+;= ALIGNLIST 110*	(REMQUE.WRITE.MEM,	REMQUE.WRITE.REG)
+
+REMQUE.WRITE.REG:
+	;---------------------------------------; rmode = 1:
+	[G.RN] <-- [MD.T0],			; destination <-- entry
+	LAST CYCLE				; decode next instruction
+
+REMQUE.WRITE.MEM:
+	;---------------------------------------; rmode = 0:
+	VA.WCHK&, [VA.BUS] <-- [MD.T2], LONG,	; write address addr
+	GOTO [WRITE.MEM],			; go write MD.T0 to memory
+		sim addr [ea] [2]
+
+;	One line subroutine to write check address (entry+4).
+
+WRITE.CHECK.T4:
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T4], LONG,	; write check address (entry+4)
+	RETURN,					; return to caller
+		sim addr [queue] [0]
+
+.nobin
+.TOC	"	INSQxI"
+
+;	These instructions insert an entry at the head or tail of an interlocked,
+;	self-relative queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	INSQHI		5C	see next page				2	aa/bq	jizj	INSQXI		--
+;	INSQTI		5D	see next page				2	aa/bq	jizj	INSQXI		--
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(S1) =	address of first (entry) operand
+;		MD.T2(S2) =	address of second (header) operand
+;		DL	=	data type of second operand (quadword)
+;
+;	Exit conditions:
+;		The entry has been inserted in the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- if insertion succeeded then (entry) EQL (entry+4) else 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- if insertion succeeded then 0 else 1
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+
+;	INSQxI operation:
+;
+;		tmp1 <-- (header) interlocked
+;		if tmp1<0> = 1 then
+;			(header) <-- tmp1 release interlock
+;			psl cc <-- 0001 and EXIT
+;		else if {any memory access cannot complete} then
+;			{initiate memory management exception}
+;			{release secondary interlock}
+;		else 	{insert entry at head/tail of queue}
+;			{release secondary interlock}
+;
+;	The actual insertion process is best understood pictorially:
+;
+;	BEFORE				AFTER INSQHI			AFTER INSQTI
+;
+;	H:	A-H			H:	D-H	W		H:	A-H	W to release interlock
+;	H+4:	C-H			H+4:	C-H			H+4:	D-H	W
+;
+;	A:	B-A			A:	B-A			A:	B-A
+;	A+4:	H-A			A+4:	D-A	W		A+4:	H-A
+;
+;	B:	C-B			B:	C-B			B:	C-B
+;	B+4:	A-B			B+4:	A-B			B+4:	A-B
+;
+;	C:	H-C			C:	H-C			C:	D-C	W
+;	C+4:	B-C			C+4:	B-C			C+4:	B-C
+;
+;	D:	---			D:	A-D	W		D:	H-D	W
+;	D+4:	---			D+4:	H-D	W		D+4:	C-D	W
+;
+;	Note that the queue header, the entry to be inserted, and all the intermediate entries
+;	that are "touched" in any way must be QUADWORD aligned.  In addition, the header and
+;	the entry must not be equal.
+;
+;	For INSQHI, H, A+4, D, and D+4 must be WRITEABLE.
+;	For INSQTI, H+4, C, D, and D+4 must be WRITEABLE.
+;
+.bin
+
+;	INSQxI.
+;	Read header, interlocked, check alignment of header, entry.
+;	Because interlocked read bypasses the cache, many cycles
+;	can be filled before the data will be available.
+
+INSQXI..:
+	;********** Hardware dispatch **********;
+	[MD.T3] <-- 000000[7],			; [1] used for forcing quad addr alignment
+	DL <-- QUAD				; force data length to quad
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T0] ANDNOT [MD.T3], ; [2] write check quad aligned
+	LEN(DL),				;	     entry address
+		sim addr [ea] [1]
+
+	;---------------------------------------;
+	[MD.T4] <-- MEM.LOCK ([MD.T2] ANDNOT [MD.T3]), ; [3] read header,
+	LONG,					;	     acquire hardware interlock
+	DISABLE IB PREFETCH,			; disable prefetching while header is locked
+						; >> no prefetch until write unlock
+		sim addr [ea] [2]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T2] AND 000000[7], LONG,	; [4] check if header addr is quad aligned
+		sim wbus.nzvc <-- k[4]
+
+REMQI.MEM.MERGE:
+	;---------------------------------------; rmode = 0:
+	[WBUS] <-- [MD.T0] XOR [MD.T2], LONG,	; [5] compare entry address : header address
+		sim wbus.nzvc <-- k[0]
+
+REMQI.REG.MERGE:
+	;---------------------------------------;
+	[WBUS] <-- [MD.T0] AND 000000[7], LONG,	; [6] INSQxI: check entry addr quad aligned
+						;     REMQxI: check header addr quad aligned
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[SC] <-- [MD.T4],			; [7] get header into SC for casing
+	SET PSL CC, LONG, MAP.JIZJ,		; set PSL CC's, psl map is jizj
+	CASE [WBUS.NZV] AT [INSQI.RSRV.OPER.1],	; case on header addr quad aligned from [4]
+		sim sc <-- [0],
+		sim wbus.nzvc <-- k[0]
+
+;	IQ instructions, continued.
+;	Hardware interlocked header read complete.
+;	Read header back pointer.
+
+;	At this point,
+;		MD.T0	=	INSQxI: address of entry [D]
+;				REMQxI: address of header [H]
+;		MD.T2	=	INSQxI: address of header [H]
+;				REMQxI: address of destination (dst)
+;		MD.T3	=	00000007#16
+;		MD.T4 = SC =	header forward pointer [A-H]
+;		WBUS CC's =	set from MD.T4, testable in cycle [10] on
+
+;= ALIGNLIST *0**	(INSQI.RSRV.OPER.1,	INSQI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> V = C = 0
+
+INSQI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T1] <-- [MD.T4] + [MD.T2],		; [8] for INSQHI, A = [A-H] + H
+	HOLD WBUS CC,				; preserve WBUS CC's from prev cycle
+	CASE [WBUS.NZV] AT [INSQI.CONT.2]	; case on entry : header from [5]
+
+;= ALIGNLIST 10**	(INSQI.CONT.2,	INSQI.RSRV.OPER.2)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+INSQI.CONT.2:
+	;---------------------------------------; wbus.z = 0:
+	NOP,					; [9] do something here...
+	HOLD WBUS CC,				; preserve WBUS CC's from prev cycle
+	CASE [WBUS.NZV] AT [INSQI.RSRV.OPER.3]	; INSQxI: case on entry quad aligned fm [6]
+						; REMQxI: case on header quad aligned fm [6]
+
+;= ALIGNLIST *0**	(INSQI.RSRV.OPER.3,	INSQI.CONT.3)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+INSQI.CONT.3:
+	;---------------------------------------; wbus.z = 1:
+	[SC] <-- S[MD.T0],			; [10] for REMQxI, copy header addr to SC
+	STATE3 <-- 1,				; set software interlock flag
+	CASE [SC2-0] AT [IQ.SET.000]		; case on SC<2:0> = header<2:0> from [7]
+
+;	IQ instructions, continued.
+;	Empty queue, entry alignment, and header alignment checked.
+;	Ready to set software interlock.
+
+;	At this point,
+;		MD.T0 = SC =	INSQxI: address of entry [D]
+;				REMQxI: address of header [H]
+;		MD.T1	=	INSQxI: address of queue head [A]
+;		MD.T2	=	INSQxI: address of header [H]
+;				REMQxI: address of destination (dst)
+;		MD.T3	=	00000007#16
+;		MD.T4	=	header forward pointer [A-H]
+;		STATE<3> =	1 (software interlock flag)
+
+;= ALIGNLIST 000*	(IQ.SET.000,	IQ.SET.001,	IQ.SET.010,	IQ.SET.011,
+;=			 IQ.SET.100,	IQ.SET.101,	IQ.SET.110,	IQ.SET.111)
+
+IQ.SET.000:
+	;---------------------------------------; sc<2:0> = 000:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [K1] OR [MD.T4], ; [11] set software interlock
+	LONG,					; release hardware interlock
+	ENABLE IB PREFETCH,			; re enable prefetching
+	CASE [OPCODE2-0] AT [INSQHI.CONT]	; branch into different instruction flows
+
+IQ.SET.001:
+	;---------------------------------------; sc<2:0> = 001:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; [11] release hardware interlock
+	LONG,					;
+	ENABLE IB PREFETCH,			; re enable prefetching
+	CASE [OPCODE2-0] AT [INSQI.BUSY]	; case on INSQxI vs REMQxI
+
+;= ALIGNLIST 101*	(INSQI.BUSY,	REMQI.BUSY)
+
+INSQI.BUSY:
+	;---------------------------------------; opcode<1> = 0:
+	[WBUS] <-- [K1],			; jizj on k1 = 0001
+	SET PSL CC, LONG, MAP.JIZJ,		; set PSL CC's, map is jizj
+	LAST CYCLE				; decode next instruction
+
+REMQI.BUSY:
+	;---------------------------------------; opcode<1> = 1:
+	[WBUS] <-- [80]000000 - [K1],		; iiii on 80000000 - 1 = 0011
+	SET PSL CC, LONG, MAP.IIII,		; set PSL CC's, map is iiii
+	GOTO [MAP.JIZJ.LAST.CYCLE]		; go set map to jizj to disable ovflo
+
+;	IQ instructions, continued.
+;	Reserved operand exception.
+;	Release hardware interlock and fault.
+
+;	At this point,
+;		MD.T4	=	header forward pointer [A-H]
+
+INSQI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; header not quad aligned, fault
+
+INSQI.RSRV.OPER.2:
+	;---------------------------------------; wbus.z = 1:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; header = entry (dst), fault
+
+INSQI.RSRV.OPER.3:
+	;---------------------------------------; wbus.z = 0:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; entry (header) not quad aligned, fault
+
+;	IQ instructions, continued.
+;	Header misformed.
+;	Release hardware interlock and fault.
+
+;	At this point,
+;		MD.T4	=	header forward pointer [A-H]
+
+IQ.SET.010:
+	;---------------------------------------; sc<2:0> = 010:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; exit thru exception code
+
+IQ.SET.011:
+	;---------------------------------------; sc<2:0> = 011:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; exit thru exception code
+
+IQ.SET.100:
+	;---------------------------------------; sc<2:0> = 100:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; exit thru exception code
+
+IQ.SET.101:
+	;---------------------------------------; sc<2:0> = 101:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; exit thru exception code
+
+IQ.SET.110:
+	;---------------------------------------; sc<2:0> = 110:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; exit thru exception code
+
+IQ.SET.111:
+	;---------------------------------------; sc<2:0> = 111:
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock
+	LONG,					;
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [INSQTI.RSRV.OPER]			; exit thru exception code
+
+;	INSQHI, continued.
+;	Secondary interlock acquired, header and entry quad aligned.
+;	Establish access to queue head's back pointer.
+;	Update pointers (A+4), (D), and (D+4).
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management fault occurs.
+
+;	At this point,
+;		MD.T0	=	address of entry [D]
+;		MD.T1	=	address of queue head [A]
+;		MD.T2	=	address of header [H]
+;		MD.T4	=	header forward pointer [A-H]
+;		STATE<3> =	1 (software interlock flag)
+;		PSL CC's =	?<empty queue>0?
+
+;= ALIGNLIST 100*	(INSQHI.CONT,	INSQTI.CONT,
+;=			 REMQHI.CONT,	REMQTI.CONT)
+
+INSQHI.CONT:
+	;---------------------------------------; opcode<1:0> = 00:
+	SC&, [MD.T4] <-- [MD.T0] - [MD.T2]	; [12] new header = [D-H]
+
+INSQTI.EMPTY.CONT:
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T1] + [K4],	; [13] write check address A+4
+	LONG,					;
+		sim addr [queue] [0]
+	
+	;---------------------------------------;
+	MEM (VA)&, [MD.T6] <-- [MD.T0] - [MD.T1], ; [14] (A+4) <-- [D-A]
+	LONG,					;
+	GOTO [INSQI.UPDATE.ENTRY]		; go update (D) and (D+4)
+
+;	INSQTI, continued.
+;	Secondary interlock acquired, header and entry quad aligned.
+;	Check for queue empty.
+;	Establish quad alignment of tail.
+;	Establish access to queue tail's forward pointer.
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management or reserved operand fault occurs.
+
+;	At this point,
+;		MD.T0	=	address of entry [D]
+;		MD.T2	=	address of header [H]
+;		MD.T3	=	00000007#16
+;		MD.T4	=	header forward pointer [A-H]
+;		STATE<3> =	1 (software interlock flag)
+;		WBUS CC's =	queue header = 0, testable in [12]
+;		PSL CC's =	?<empty queue>0?
+
+INSQTI.CONT:
+	;---------------------------------------; opcode<1:0> = 01:
+	[MD.T5] <-- MEM (VAP), LONG,		; [12] read header back pointer [C-H]
+	CASE [WBUS.NZV] AT [INSQTI.NOT.EMPTY]	; case on queue empty from [7]
+
+;= ALIGNLIST 10**	(INSQTI.NOT.EMPTY,	INSQTI.EMPTY)
+;  WBUS.NZV set by MOVE --> V = C = 0
+
+INSQTI.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SC&, [MD.T4] <-- [MD.T0] - [MD.T2],	; [13] new header = [D-H]
+	GOTO [INSQTI.EMPTY.CONT]		; more efficient to treat this as INSQHI
+
+INSQTI.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	[WBUS] <-- [MD.T5] AND 000000[7], LONG,	; [13] check [C-H] for quad alignment
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[SC] <-- [MD.T5] + [MD.T2],		; [14] get address of tail C = [C-H] + H
+	CALL [WAIT.ONE.CYCLE]			; [15] do something here...
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [SC] ANDNOT [MD.T3], ; [16] write check addr C, quad aligned
+	LONG,					;
+	CASE [WBUS.NZV] AT [INSQTI.RSRV.OPER],	; case on [C-H] quad aligned from [13]
+		sim addr [queue] [0]
+
+;	INSQTI, continued.
+;	Tail quad alignment and writability verified.
+;	Update pointers (C), (H+4), (D), and (D+4).
+
+;	At this point,
+;		MD.T0	=	address of entry [D]
+;		MD.T2	=	address of header [H]
+;		MD.T4	=	header forward pointer [A-H]
+;		MD.T5	=	header backward pointer [C-H]
+;		SC = VA	=	address of queue tail [C]
+;		STATE<3> =	1 (software interlock flag)
+;		PSL CC's =	?<empty queue>0?
+
+;= ALIGNLIST *0**	(INSQTI.RSRV.OPER,	INSQTI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+INSQTI.RSRV.OPER:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [17] go to exception processing code
+
+INSQTI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	MEM (VA)&, [SC] <-- [MD.T0] - [SC],	; [17] (C) <-- [D-C]
+	LONG					;
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T2] + [K4], 	; [18] write address H+4, already checked
+	LONG,					;
+		sim addr [ea+4] [2]
+
+	;---------------------------------------;
+	MEM (VA)&, [MD.T6] <-- [MD.T0] - [MD.T2], ; [19] (H+4) <-- [D-H]
+	LONG,					;
+	GOTO [INSQI.UPDATE.ENTRY]		; go update (D) and (D+4)
+
+;	INSQxI, continued.
+;	Common routine for insert queue interlocked instructions.
+;	Update entry and entry+4.
+
+;	At this point,
+;		MD.T0	=	address of entry [D]
+;		MD.T2	=	address of header [H]
+;		MD.T4	=	new header
+;		MD.T6	=	INSQHI: [D-A]
+;				INSQTI: [D-H]
+;		SC	=	INSQHI: [D-H]
+;				INSQTI: [D-C]
+;		PSL CC's =	?<empty queue>0?
+
+INSQI.UPDATE.ENTRY:
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [MD.T0], LONG,	; write address D, already checked
+		sim addr [ea] [1]
+	
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- -[MD.T6], LONG	; INSQHI: (D) <-- [A-D]
+						; INSQTI: (D) <-- [H-D]
+
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- -[SC], LONG,	; INSQHI: (D+4) <-- [H-D]
+						; INSQTI: (D+4) <-- [C-D]
+	DISABLE IB PREFETCH			; disable prefetching while header is locked
+
+	;---------------------------------------;
+	[MD.T6] <-- MEM.LOCK ([MD.T2]), LONG,	; read header, acquire hardware interlock
+	ACCESS B[MD.T5],			; touch MD.T5 in case never accessed
+	STATE3-0 <-- 0,				; clear software interlock flag
+	GOTO [IQ.EXIT],				; go rewrite header and exit
+		sim addr [ea] [2]
+
+;	IQ instructions, continued.
+;	Common exit for insert queue interlocked instructions.
+;	Update header and release software interlock.
+
+;	At this point,
+;		MD.T4	=	new header
+;		MD.T6	=	current header, hardware interlocked
+;		VA	=	address of header [H]
+
+;	For INSQxI, the PSL CC's were set by testing the OLD header fore pointer so that
+;	psl.z = queue was empty, psl.v = 0, psl.nc = ??.
+;	For REMQxI, the PSL CC's were set by testing the NEW header fore pointer so that
+;	psl.z = queue is empty, psl.v = 0, psl.nc = ??.
+
+;	Prefeteching is disabled.
+
+IQ.EXIT:
+	;---------------------------------------;
+	[PSL] <-- [PSL] ANDNOT 000000[9],	; clear psl.n, psl.c
+	CALL [WAIT.ONE.CYCLE]			; >> PSL update, no decode in next cycle
+
+	;---------------------------------------;
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.T4], 	; release hardware interlock, update header
+	LONG,					;
+	ENABLE IB PREFETCH,			; re enable prefetching
+	ACCESS B[MD.T6],			; touch MD.T6 here to sync read lock
+	LAST CYCLE				; go decode next instruction
+
+.nobin
+.TOC	"	REMQxI"
+
+;	These instructions remove an entry from the head or tail of an interlocked,
+;	self-relative queue.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	REMQHI		5E	see next page				2	aw/ql	jizj	REMQXI		--
+;	REMQTI		5F	see next page				2	aw/ql	jizj	REMQXI		--
+;
+;	Optimizations patterns:
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(S1) =	address of first (header) operand
+;		MD.T2(S2) =	address of second (destination) operand, unless register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (longword)
+;
+;	Exit conditions:
+;		The entry has been removed from the queue.
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- if removal succeeded then {queue now empty} else 0
+;		V <-- if {no entry removed} then 1 else 0	[Integer overflow trap disabled by default jizj map.]
+;		C <-- if removal succeeded then 0 else 1
+;
+;	Note:	(destination) is write checked by the specifier flows if not register.
+;
+;	Size/performance tradeoffs:
+;		An optimized dispatch would save one cycle in register mode, at the
+;		cost of one microword.
+;
+
+;	REMQxI operation:
+;
+;		tmp1 <-- (header) interlocked
+;		if tmp1<0> = 1 then
+;			(header) <-- tmp1 release interlock
+;			psl cc <-- 0011 and EXIT
+;		else if {any memory access cannot complete} then
+;			{release secondary interlock}
+;			{initiate memory management exception}
+;		else if {queue now empty} then
+;			{release secondary interlock}
+;			alu.nzvc <-- 0010 and EXIT
+;		else 	{insert entry at head/tail of queue}
+;			{release secondary interlock}
+;
+;	The actual removal process is best understood pictorially:
+;
+;	BEFORE				AFTER REMQHI			AFTER REMQTI
+;
+;	H:	A-H			H:	B-H	W		H:	A-H	W to release interlock
+;	H+4:	C-H			H+4:	C-H			H+4:	B-H	W
+;
+;	A:	B-A			A:	B-A	R		A:	B-A
+;	A+4:	H-A			A+4:	H-A			A+4:	H-A
+;
+;	B:	C-B			B:	C-B			B:	H-B	W
+;	B+4:	A-B			B+4:	H-B	W		B+4:	A-B
+;
+;	C:	H-C			C:	H-C			C:	H-C
+;	C+4:	B-C			C+4:	B-C			C+4:	B-C	R
+;
+;	Note that the queue header, the entry to be inserted, and all the intermediate entries
+;	that are "touched" in any way must be QUADWORD aligned.  In addition, the header and
+;	the destination must not be equal.
+;
+;	For REMQHI, H and B+4 must be WRITEABLE, A must be READABLE.
+;	For REMQTI, H+4 and B must be WRITEABLE, C+4 must be READABLE.
+;
+.bin
+
+;	REMQxI.
+;	For cycle accounting purposes, the cycle count starts at [2],
+;	for proper alignment with the INSQxI flows.
+
+REMQXI..:
+	;********** Hardware dispatch **********;
+	[MD.T3] <-- 000000[7]			; [2] used for forcing quad addr alignment
+
+	;---------------------------------------;
+	[MD.T4] <-- MEM.LOCK ([MD.T0] ANDNOT [MD.T3]), ; [3] read header,
+	LONG,					;	     acquire hardware interlock
+	DISABLE IB PREFETCH,			; disable prefetching while header is locked
+						; >> no prefetch until write unlock
+		sim addr [ea] [1]
+
+	;---------------------------------------;
+	[WBUS] <-- [K0], LONG,			; [4] set wbus.z for case branch at [7]
+	CASE [INT.RMODE] AT [REMQI.MEM.MERGE],	; case on memory vs register destination
+		sim wbus.nzvc <-- k[4]
+
+;= ALIGNLIST 110*	(REMQI.MEM.MERGE,	REMQI.REG.CONT)
+
+REMQI.REG.CONT:
+	;---------------------------------------; rmode = 1:
+	[WBUS] <-- [K1], LONG,			; [5] clear wbus.z for case branch at [8]
+	GOTO [REMQI.REG.MERGE],			; go to shared code
+		sim wbus.nzvc <-- k[0]
+
+;	REMQHI, continued.
+;	Secondary interlock acquired, header quad aligned.
+;	Check for empty queue and quad alignment of [B-A].
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management or reserved operand fault occurs.
+
+;	At this point,
+;		MD.T0 = SC =	address of header [H]
+;		MD.T2	=	address of destination, unless register mode
+;		MD.T4	=	header forward pointer [A-H]
+;		STATE<3> =	1 (software interlock flag)
+;		WBUS CC's =	queue header = 0, testable in [12]
+
+REMQHI.CONT:
+	;---------------------------------------; opcode<1:0> = 10:
+	[MD.T5] <-- MEM ([MD.T4] + [MD.T0]), 	; [12] read head, address A = [A-H] + H
+	LONG,					;
+	CASE [WBUS.NZV] AT [REMQHI.NOT.EMPTY],	; case on queue empty
+		sim addr [queue] [0]
+
+;= ALIGNLIST 10**	(REMQHI.NOT.EMPTY,	REMQHI.EMPTY)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+REMQHI.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SET PSL(V),				; [13] empty queue, set psl.v
+	CASE [INT.RMODE] AT [REMQI.WRITE.MEM]	; case on memory vs register
+
+REMQHI.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	[WBUS] <-- [MD.T5] AND 000000[7], LONG,	; [13] check if [B-A] is quad aligned
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[SC] <-- [MD.T4] + [MD.T0]		; [14] A = [A-H] + H
+
+	;---------------------------------------;
+	[MD.T6] <-- [MD.T5] + [SC]		; [15] B = [B-A] + A
+
+	;---------------------------------------;
+	[MD.T4] <-- [MD.T6] - [MD.T0],		; [16] new header = [B-H]
+	CASE [WBUS.NZV] AT [REMQHI.RSRV.OPER.1]	; case on [B-A] quad aligned from [13]
+
+;	REMQHI, continued.
+;	Update pointer (B+4).
+
+;	At this point,
+;		MD.T0	=	address of header [H]
+;		MD.T2	=	address of destination, unless register mode
+;		MD.T4	=	new header forward pointer [B-H]
+;		MD.T5	=	current queue head forward pointer [B-A]
+;		MD.T6	=	address of new queue head [B]
+;		SC	=	address of current queue head [A]
+;		STATE<3> =	1 (software interlock flag)
+
+;= ALIGNLIST *0**	(REMQHI.RSRV.OPER.1,	REMQHI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+REMQHI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [17] go to exception processing code
+
+REMQHI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	VA.WCHK&, [VA.BUS] <-- [MD.T6] + [K4], 	; [17] write check address B+4
+	LONG,					;
+		sim addr [queue] [1]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T0] - [MD.T6],; [18] (B+4) <-- [H-B]
+	SET PSL CC, LONG, MAP.JIZJ,		; set psl.z if single entry, psl map is jizj
+	CASE [INT.RMODE] AT [REMQI.WRITE.MEM]	; case on memory vs register
+
+;	REMQTI, continued.
+;	Secondary interlock acquired, header quad aligned.
+;	Check for empty queue and quad alignment of [C-H] and [B-C].
+;
+;	Note: This flow depends on INTEXC microcode to release the software
+;	      interlock	if a memory management or reserved operand fault occurs.
+
+;	At this point,
+;		MD.T0 = SC =	address of header [H]
+;		MD.T2	=	address of destination, unless register mode
+;		MD.T3	=	00000007#16
+;		MD.T4	=	header forward pointer [A-H]
+;		STATE<3> =	1 (software interlock flag)
+;		WBUS CC's =	queue header = 0, testable in [12]
+
+REMQTI.CONT:
+	;---------------------------------------; opcode<1:0> = 11:
+	[MD.T5] <-- MEM (VAP), LONG,		; [12] read header back pointer [C-H]
+	CASE [WBUS.NZV] AT [REMQTI.NOT.EMPTY]	; case on queue empty from [7]
+
+;= ALIGNLIST 10**	(REMQTI.NOT.EMPTY,	REMQTI.EMPTY)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+REMQTI.EMPTY:
+	;---------------------------------------; wbus.z = 1:
+	SET PSL(V),				; [13] queue empty, set psl.v
+	CASE [INT.RMODE] AT [REMQI.WRITE.MEM]	; case on memory vs register
+
+REMQTI.NOT.EMPTY:
+	;---------------------------------------; wbus.z = 0:
+	[SC] <-- [MD.T5] + [MD.T0]		; [13] C = [C-H] + H
+
+	;---------------------------------------;
+	[SC] <-- [SC] ANDNOT 000000[7]		; [14] force C quad aligned
+
+	;---------------------------------------;
+	[MD.T6] <-- MEM ([SC] + [K4]), LONG,	; [15] read tail back pointer (C+4)
+		sim addr [queue] [0]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T5] AND 000000[7], LONG,	; [16] check if [C-H] is quad aligned
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T6] AND 000000[7], LONG,	; [17] check if [B-C] is quad aligned
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	[MD.T6] <-- [MD.T6] + [SC]		; [18] B = [B-C] + C
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] XOR [MD.T5], LONG,	; [19] check if head = tail
+	CASE [WBUS.NZV] AT [REMQTI.RSRV.OPER.1], ; case on [C-H] quad aligned from [16]
+		sim wbus.nzvc <-- k[0]
+
+;	REMQTI, continued.
+;	Write check pointer (B), update (H+4).
+
+;	At this point,
+;		MD.T0	=	address of header [H]
+;		MD.T2	=	address of destination, unless register mode
+;		MD.T3	=	00000007#16
+;		MD.T4	=	header forward pointer [A-H]
+;		MD.T6	=	address of new queue tail [B]
+;		SC	=	address of current queue tail [C]
+;		STATE<3> =	1 (software interlock flag)
+;		WBUS CC's =	tail backward pointer quadword aligned, testable in [20]
+;				single entry queue, testable in [22]
+
+;= ALIGNLIST *0**	(REMQTI.RSRV.OPER.1,	REMQTI.CONT.1)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> V = C = 0
+
+REMQTI.RSRV.OPER.1:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [20] go to exception processing code
+
+REMQTI.CONT.1:
+	;---------------------------------------; wbus.z = 1:
+	VA.WCHK&, [VA.BUS] <-- [MD.T6] ANDNOT [MD.T3], ; [20] write check address B,
+	LONG,					;	      quad aligned
+	CASE [WBUS.NZV] AT [REMQTI.RSRV.OPER.2], ; case on [B-C] quad alignment from [17]
+		sim addr [queue] [1]
+
+;= ALIGNLIST *0**	(REMQTI.RSRV.OPER.2,	REMQTI.CONT.2)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> V = C = 0
+
+REMQTI.RSRV.OPER.2:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [21] go to exception processing code
+
+REMQTI.CONT.2:
+	;---------------------------------------; wbus.z = 1:
+	VA.WCHK&, [VA.BUS] <-- [MD.T0] + [K4],	; [21] write address H+4, already checked
+	LONG,					;
+		sim addr [ea+4] [1]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T6] - [MD.T0],; [22] (H+4) <-- [B-H]
+	LONG,					;
+	CASE [WBUS.NZV] AT [REMQTI.MULTI]	; case on single entry queue from [19]
+
+;	REMQTI, continued.
+;	Update pointer (B).
+
+;	At this point,
+;		MD.T0	=	address of header [H]
+;		MD.T2	=	address of destination, unless register mode
+;		MD.T3	=	00000007#16
+;		MD.T4	=	header forward pointer [A-H]
+;		MD.T6	=	address of new queue tail [B]
+;		SC	=	address of current queue tail [C]
+;		STATE<3> =	1 (software interlock flag)
+
+;= ALIGNLIST 10**	(REMQTI.MULTI,	REMQTI.SINGLE)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+;	If the queue contained only a single entry, then entry B is actually
+;	the header H.  We must NOT update pointer (B), that is, (H), because
+;	this would CLEAR the secondary interlock bit using a non-interlocked
+;	read-modify-write sequence.
+;
+;	Since MD.T6 = address of B = address of H, the previous code segment
+;	wrote (H+4) <-- B-H = 0.
+
+REMQTI.SINGLE:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T4] <-- [K0],			; [23] single entry, new header is 0
+	SET PSL CC, LONG, MAP.JIZJ,		; set PSL CC's, psl map is jizj
+	CASE [INT.RMODE] AT [REMQI.WRITE.MEM]	; case on memory vs register
+
+REMQTI.MULTI:
+	;---------------------------------------; wbus.z = 0:
+	VA.WCHK&, [VA.BUS] <-- [MD.T6], LONG,	; [23] write address B
+		sim addr [queue] [1]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T0] - [MD.T6],; [24] (B) <-- [H-B]
+	LONG,					;
+	CASE [INT.RMODE] AT [REMQI.WRITE.MEM]	; case on memory vs register
+
+;	REMQxI, continued.
+;	Common routine for remove queue interlocked instructions.
+;	Update destination.
+
+;	At this point,
+;		MD.T0	=	address of header [H]
+;		MD.T2	=	address of destination, unless register mode
+;		MD.T4	=	new header
+;		SC	=	REMQHI: address of removed entry [A]
+;				REMQTI: address of removed entry [C]
+;				empty queue: address of header [H]
+;		STATE<3> =	1 (software interlock flag)
+
+;= ALIGNLIST 110*	(REMQI.WRITE.MEM,	REMQI.WRITE.REG)
+
+REMQI.WRITE.MEM:
+	;---------------------------------------; rmode = 0:
+	VA.WCHK&, [VA.BUS] <-- [MD.T2], LONG,	; write address destination, already checked
+		sim addr [ea] [2]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [SC], LONG,	; store removed entry address in destination
+	DISABLE IB PREFETCH,			; disable prefetching while header is locked
+	GOTO [REMQI.EXIT]			; go release software interlock
+
+REMQI.WRITE.REG:
+	;---------------------------------------; rmode = 1:
+	[G.RN] <-- [SC], LONG,			; store removed entry address in destination
+	DISABLE IB PREFETCH,			; disable prefetching while header is locked
+	GOTO [REMQI.EXIT]			; go release software interlock
+
+REMQI.EXIT:
+	;---------------------------------------;
+	[MD.T6] <-- MEM.LOCK ([MD.T0]), LONG,	; read header, acquire hardware interlock
+	ACCESS B[MD.T5],			; touch MD.T5 in case never accessed
+	STATE3-0 <-- 0,				; clear software interlock
+	GOTO [IQ.EXIT],				; go rewrite header and exit
+		sim addr [ea] [1]
+
+;= END QUEUE

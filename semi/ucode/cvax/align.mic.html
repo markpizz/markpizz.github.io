@@ -1,0 +1,281 @@
+.TOC	"ALIGN.MIC -- Hardware Address Allocation Constraints"
+.TOC    "Revision 3.1"
+
+;       Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC 	"	Revision History"
+
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 03	25-Sep-86	[RMS]	Added CMPC3, CMPC5, SCANC, SPANC, LOCC, SKPC
+; 02	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	15-May-86	[RMS]	Revised TSTf and MOVf dispatches (ECO 6MAY14RMS.1)
+;	8-Jan-86	[RMS]	Corrected FPA microtrap dispatches
+;	3-Jan-86	[RMS]	Corrected XFD, IE.IID.STALL dispatches
+;	29-Dec-85	[RMS]	Revised XFD dispatch (ECO 5DEC05DWA.1)
+;	14-Oct-85	[RMS]	Revised FPA dispatches
+;	25-Sep-85	[RMS]	Added yet another FPA microtrap
+;	19-Sep-85	[RMS]	Added another FPA microtrap
+;	12-Sep-85	[RMS]	Editorial changes
+;	2-Sep-85	[RMS]	Revised FPA microtraps and 500 page (ECO 5SEP07PIR.1)
+;	22-Aug-85	[RMS]	Swizzled no operand dispatches (ECO 5AUG20DWA.1)
+;	22-Aug-85	[RMS]	Added IE.IID.STALL dispatch
+; 01	8-Apr-85	[RMS]	Initial edit for CVAX
+
+.bin
+
+.TOC	"	Specifier Dispatches"
+
+;	These dispatches occur from a DEC.NEXT when there is a specifier to parse.
+
+;	Specifier dispatches are allocated in page 1 (080 - 0FF) at even
+;	microaddresses in blocks of 32 microwords.  All address bits are
+;	supplied by the I Box.
+
+;	block		used by
+;	-----		-------
+;	080 - 09F	normal specifier dispatch
+;	0C0 - 0DF	index specifier dispatch
+
+;= AT 080
+;= ALIGNLIST 0000*	(
+;=	SPEC.SH.LIT,		SPEC.INDEX,
+;=	SPEC.REG,		SPEC.REG.DEFER,
+;=	SPEC.AUTODEC,		SPEC.RSRV.ADDR,
+;=	SPEC.AUTOINC,		SPEC.IMED,
+;=	SPEC.AUTOINC.DEFER,	SPEC.ABSOLUTE,
+;=	SPEC.BWL.DISP,		SPEC.BWL.DISP.DEFER,
+;=			,			,
+;=			,			)
+
+;= AT 0C0
+;= ALIGNLIST 0000*	(
+;=	INDEX.SH.LIT,		INDEX.INDEX,
+;=	INDEX.REG,		INDEX.REG.DEFER,
+;=	INDEX.AUTODEC,		INDEX.RSRV.ADDR,
+;=	INDEX.AUTOINC,		INDEX.IMED,
+;=	INDEX.AUTOINC.DEFER,	INDEX.ABSOLUTE,
+;=	INDEX.BWL.DISP,		INDEX.BWL.DISP.DEFER,
+;=			,			,
+;=			,			)
+
+.TOC	"	Microtrap Dispatches"
+
+;	These dispatches occur from a memory management or other hardware
+;	microtrap.
+
+;	Microtrap dispatches are allocated in page 2 (100 - 17F) at even
+;	microaddresses in blocks of 16 microwords.  The microtrap generator
+;	supplies the high order bits;  the low order bits are supplied over
+;	the Microtest Bus.
+
+;	block		used by
+;	-----		-------
+;	100 - 10F	E Box - conditional branch
+;	110 - 11F	E Box - integer overflow
+;	120 - 12F	M Box - memory management
+;	130 - 13F	BIU - bus error
+;	140 - 14F	BIU - floating point error
+
+;= AT 100
+;= ALIGNLIST 0*	(IE.COND.BRANCH,	)
+
+;= AT 110
+;= ALIGNLIST 0*	(IE.INTOV,		)
+
+;= AT 120
+;= ALIGNLIST 000*	(
+;=	MM.TBM,		MM.M0,		MM.ACV.TNV,	MM.CPB,
+;=		,		,		,		)
+
+;=AT 130
+;= ALIGNLIST 000*	(
+;=	IE.BUSERR.READ.VIRT,	IE.BUSERR.READ.PHYS,
+;=	IE.BUSERR.READ.IPR,	IE.BUSERR.INT.VEC,
+;=	IE.BUSERR.WRITE.VIRT,	IE.BUSERR.WRITE.PHYS,
+;=			,					)
+
+;= AT 140
+;= ALIGNLIST 000*	(
+;=	FP.PROT.ERROR,		FP.RSRV.INST,
+;=	FP.RSRV.OPER,		FP.DIVIDE.BY.ZERO,
+;=	FP.OVERFLOW,		FP.UNDERFLOW,
+;=	FP.UNKNOWN.6,		FP.UNKNOWN.7)
+
+.TOC	"	Initial DEC.NEXT Dispatches"
+
+;	These dispatches occur from an initial DEC.NEXT of an exception condition
+;	or a zero specifier instruction.
+
+;	Initial DEC.NEXT dispatches are allocated in pages 3 - 7 (180 - 3FF) at even
+;	microaddresses.  All address bits are supplied by the I Box.
+
+;	IE.IID.STALL is dispatched specially to 7FE.
+
+;	address		used by
+;	-------		-------
+;	180 - 1FF	single operand instructions
+;	200		trace trap
+;	280		arithmetic trap
+;	282		reserved instruction
+;	300		prefetcher stall
+;	302		interrupt
+;	380		PSL<fpd> set
+;	382		prefetcher halted
+;	7FE		initial DEC.NEXT stall
+
+;= AT 180
+;= ALIGNLIST 000*	(
+;=	HALT,		NOP,		REI,		BPT,
+;=	RET,		RSB,		LDPCTX,		SVPCTX)
+
+;= AT 190
+;= ALIGNLIST 000*	(
+;=	BSBX,		BRX,		,		,
+;=	XFC,		XFD,		,		BRCOND)
+
+;= AT 200
+;= ALIGNLIST 0*	(IE.VAX.TRACE.TRAP,	)
+
+;= AT 280
+;= ALIGNLIST 0*	(IE.VAX.ARITH.TRAP,	RSRV.INST.FLT)
+
+;= AT 300
+;= ALIGNLIST 0*	(DEC.NEXT.STALL,	IE.VAX.INTERRUPT)
+
+;= AT 380
+;= ALIGNLIST 0*	(FPD,			DEC.NEXT.HALTED)
+
+;= AT 7FE
+;= ALIGNLIST *	(IE.IID.STALL		)
+
+.TOC	"	Execution Dispatches"
+
+;	These dispatches occur from a DEC.NEXT at the end of specifier decode.
+
+;	Execution dispatches are allocated in pages 8 - 11 (400 - 5FF) at even
+;	microaddresses in blocks of 128 microwords.  All address bits are
+;	supplied by the I Box.
+
+;	block		used by
+;	-----		-------
+;	400 - 47F	instructions with no allocation constraints
+;	480 - 4FF	instructions with no allocation constraints
+;	500 - 57F	instructions with initial allocation constraints
+;	580 - 58F	instructions with initial allocation constraints
+
+;	Page 8 allocation:  unconstrained instructions.
+
+;= AT 400
+;= ALIGNLIST 000000*	(
+;=	TSTX,			,	CMPX,		CMPX.RMODE,
+;=	BITX,		BITX.RMODE,	ADDX2,		ADDX2.RMODE,
+;=	SUBX2,		SUBX2.RMODE,	BISX2,		BISX2.RMODE,
+;=	BICX2,		BICX2.RMODE,	XORX2,		XORX2.RMODE,
+;=	ADWC,		ADWC.RMODE,	SBWC,		SBWC.RMODE,
+;=	MCOMX,		MCOMX.RMODE,	MNEGX,		MNEGX.RMODE,
+;=	ADDX3,		ADDX3.RMODE,	SUBX3,		SUBX3.RMODE,
+;=	BISX3,		BISX3.RMODE,	BICX3,		BICX3.RMODE,
+;=	XORX3,		XORX3.RMODE,	PUSHX,			,
+;=	ADAWI,		ADAWI.RMODE,	CVTBX,		CVTBX.RMODE,
+;=	CVTWL,		CVTWL.RMODE,	LOCC.SKPC,	LOCC.SKPC.RMODE,
+;=	ROTL,		ROTL.RMODE,	ASHX,		ASHX.RMODE,
+;=	ADDF3,		ADDF3.RMODE,	ADDDG3,		ADDDG3.RMODE,
+;=	DIVX2,		DIVX2.RMODE,	DIVX3,		DIVX3.RMODE,
+;=	INSV,		INSV.RMODE,	EMULATE.A,	EMULATE.A.RMODE,
+;=	EMULATE.3W,	EMULATE.3W.RMODE, SCANC.SPANC,	SCANC.SPANC.RMODE)
+
+;	Execution dispatches, continued.
+
+;	Page 9 allocation:  unconstrained instructions.
+;	NOTE:  REMQXI.RMODE must be allocated at 1010;  1110 must be unassigned.
+
+;= AT 480
+;= ALIGNLIST 000000*	(
+;=	JMP,			,	JSB,			,
+;=	AOBX,		AOBX.RMODE,	ACBX,		ACBX.RMODE,
+;=	BBX,		BBX.RMODE,	CASEX,		CASEX.RMODE,
+;=	CALLX,		CALLX.RMODE,	INDEX,		INDEX.RMODE,
+;=	POPR,			,	PUSHR,			,
+;=	INSQUE,		INSQUE.RMODE,	REMQUE,		REMQUE.RMODE,
+;=	MTPR,		MTPR.RMODE,	MFPR,		MFPR.RMODE,
+;=	CHMK,			,	CHME,			,
+;=	CHMS,			,	CHMU,			,
+;=	PROBEX,		PROBEX.RMODE,	INSQXI,		INSQXI.RMODE,
+;=	ADDF2,		ADDF2.RMODE,	ADDDG2,		ADDDG2.RMODE,
+;=	CMPF,		CMPF.RMODE,	CMPDG,		CMPDG.RMODE,
+;=	ACBF,		ACBF.RMODE,	ACBDG,		ACBDG.RMODE,
+;=	POLYF,		POLYF.RMODE,	POLYDG,		POLYDG.RMODE,
+;=	CMPCX,		CMPCX.RMODE,	EMODF,		EMODF.RMODE,
+;=	REMQXI,		REMQXI.RMODE,		,		)
+
+;	Execution dispatches, continued.
+
+;	Page 10 allocation:  constrained instructions.
+;	NOTE:  BLBX and SOBX must differ by exactly one bit.
+;	NOTE:  EDIV and EDIV.RMODE must be allocated at 1100 and 1110.
+
+;= AT 500
+;= ALIGNLIST 000000*	(
+;=	BLBX,			,	SOBX,			,
+;=	FIELDX,		FIELDX.RMODE,		,		,
+;=	MULX2,		MULX2.RMODE,	MULX3,		MULX3.RMODE,
+;=	TSTDG,			,	EDIV,		EDIV.RMODE,
+;=	BISPSW,			,	MOVCX,		MOVCX.RMODE,
+;=	TSTF,			,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		)
+
+;	Execution dispatches, continued.
+
+;	Page 11 allocation:  instructions with tight links to destination writes.
+;	NOTE:  MOVX and MOVX.RMODE must be allocated at 1100 and 1110.
+
+;= AT 580
+;= ALIGNLIST 000000*	(
+;=	INCX,			,	DECX,			,
+;=	CLRX,			,	MOVPSL,			,
+;=	MOVF,		MOVF.RMODE,	MOVDG,		MOVDG.RMODE,
+;=	CVTXY,		CVTXY.RMODE,	MOVX,		MOVX.RMODE,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		,
+;=		,		,		,		)

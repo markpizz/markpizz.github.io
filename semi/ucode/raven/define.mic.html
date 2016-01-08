@@ -1,0 +1,961 @@
+.TOC	"DEFINE.MIC -- Microword Definitions for Raven Microcode"
+.TOC	"Revision 2.3"
+
+;	Bob Supnik
+
+;	Assembly directives
+
+.ecode
+.hexadecimal
+.rtol
+.allmemfields
+.random
+.width/64				; microword length with bcs pseudo field
+;.width/60				; microword length after postprocessing
+.nobin
+.nocref
+
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    3 14-Feb-90 RMS	Removed DST.WDR restriction on write physical.
+;    2 14-Dec-89 RMS	Swapped DECODE NEXT IF definitions.
+;    1 29-Nov-89 RMS	Halved size of TB.
+; (2)0 15-Nov-89 RMS	Revised for simplified decoder.
+;   14 13-Nov-89 RMS	Editorial changes.
+;   13 06-Nov-89 RMS	Added PSL.FU, LAST CYCLE IF LONG definition.
+;   12 02-Nov-89 RMS	Revised memory management error interface.
+;   11 30-Oct-89 RMS	Revised A port mux selects.
+;   10 09-Oct-89 RMS	Editorial changes.
+;    9 26-Sep-89 RMS	Revised IREG offset definition.
+;    8 23-Sep-89 RMS	Added restriction against reads in last cycle.
+;    7 11-Sep-89 RMS	Revised absolute I/O space offsets.
+;    6 16-Aug-89 RMS	Added restriction on SEXT.B source.
+;    5 08-Jul-89 RMS	Revised interrupt vectors, SC case latency.
+;    4 02-Jul-89 RMS	Removed microcode restrictions on PC updates.
+;    3 30-Jun-89 RMS	Documented VA case latency.
+;    2 22-Jun-89 RMS	Removed Vrn.
+;    1 21-Jun-89 RMS	Revised, added definitions for initialization.
+; (1)0 12-Jun-89 RMS	Revised right shifts and for release to CMS.
+;    9 07-Jun-89 RMS	Added IB parity error, change read with read check.
+;    8 24-May-89 RMS	Revised machine check codes, added new functions.
+;    7 28-Apr-89 RMS	Added additional X chip, test definitions.
+;    6 26-Apr-89 RMS	Corrected SID definition.
+;    5 17-Apr-89 RMS	Added restriction on RLOG and cache requests.
+;    4 12-Apr-89 RMS	Revised definition of IB, relaxed VA A-B restriction.
+;    3 07-Apr-89 RMS	Revised branch recipes to zero unused bits.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 26-Sep-88 RMS	First edit for Raven.
+.TOC	"	Introduction"
+
+;	The Raven microword consists of 60 bits divided into two major sections.
+;	Bits <59:16> control the data path.   Bits <15:0> control the microsequencer.
+;
+;	The formats are defined in the Control Fields Summary of the Raven Specification.
+.TOC	"	Notes"
+
+;	Hardware control equations:
+;
+;	AAbus mux select:		A<5:0>				select
+;					------				------
+;					0xxxxx + 100xxx			register file[0:39]
+;					101xxx				indirect register file selects
+;					111xxx				non-register file mux inputs
+;
+;	Abbus mux select:		LIT	B<4:0>			select
+;					---	------			------
+;					0	0xxxx + 10xxx + 110xx	register file[0:27]
+;					0	111xx			non-register file mux inputs
+;					1	xxxxx			microcode constant
+;
+;	T3 IntWbus/Wbus cc mux select:	ALU.SHF<4>			select
+;					----------      		------
+;					0				ALU
+;					1				shifter
+;
+;	T3 Wbus mux select:		CRQ<4:3>	ALU.SHF<4:3>	select
+;					--------      	------------	------
+;					0x + 10		0x + 10		IntWbus
+;					0x + 10		11		FPU or error register
+;					11		xx		cache
+;
+;	Register file write length:	CRQ	LEN	spec length	select
+;					---	---	-----------	------
+;					0	00	xx		byte
+;					0	01	xx		word
+;					0	10	xx		long
+;					0	11	00		byte
+;					0	11	01		word
+;					0	11	1x		long
+;					~0	xx	xx		long
+
+.TOC	"	Microword Format"
+
+;	The microword format on this page represents the final microword after
+;	post-processing by the allocator.  
+;
+;
+;	Data path control
+;
+;		 59 58 57 56 55 54 53 52 51 50 49 48 47 46 45 44 43 42 41 40 39 38 37 36
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+; 		|  ADR   |    ALU.SHF   |     CACHE    | 0|      B       | SHIFT VALUE  |
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;					               | 1| POS |     CONSTANT VALUE    |
+;					               +--+--+--+--+--+--+--+--+--+--+--+
+;
+;		 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;		|RS| LEN |       DST       |        A        |    MISC      |
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;
+;
+;	Microsequencer control
+;
+;		 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+; JUMP		| 0|OR|  MUX   |         JUMP ADDRESS           |
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;
+;		 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+; BRANCH	| 1|OR|  MUX   |BR COND SEL|   BRANCH OFFSET    |
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;
+;	Pseudo fields:	<63:60>		Branch condition select
+.TOC	"	Data Path Control"
+
+;	The fields for data path control are:
+;
+;	ADR/		address unit operation
+;	ALU.SHF/	alu or shifter operation
+;	CRQ/		cache operation
+;	LIT/		format control
+; either:
+;	B/		ABbus select
+;	VAL/		shift value
+; or:
+;	POS/		constant position
+;	CONST/		constant value
+; end select
+;	RS/		retry flag control
+;	LEN/		length control
+;	DST/		destination select
+;	A/		AAbus select
+;	MISC/		miscellaneous
+
+;	Data path control, continued.
+
+;	This field defines the address unit function.
+;	Except for a specifier cycle stall on Rn generated by hardware, the address unit
+;	does not generate stalls for data forwarding problems.  Thus, the microcode must
+;	assure that inputs to the address unit were not written in the previous cycle.
+
+ADR/=<59:57>,.DEFAULT=<ADR/NOP>
+
+;	        Function	  Val           Validity		      Operation
+;	-----------------------  ----	-------------------------	-------------------------
+	NOP			=  00					; VA unchanged
+;				=  01
+	A.PLUS.B		=  02,.VALIDITY=<ADR.A.PLUS.B>		; VA <-- A + B
+	PASS.B			=  03,.VALIDITY=<ADR.B>			; VA <-- B
+	PASS.A			=  04,.VALIDITY=<ADR.A>			; VA <-- A
+	A.MINUS.B		=  05,.VALIDITY=<ADR.A.MINUS.B>		; VA <-- A - B
+        A.PLUS.4		=  06,.VALIDITY=<ADR.A>			; VA <-- A + 4
+	A.MINUS.4		=  07,.VALIDITY=<ADR.A>			; VA <-- A - 4
+
+;	Data path control, continued.
+
+;	This field defines the ALU or shifter operation to perform.  Either the ALU or the
+;	shifter can drive the IntWbus; they do not operate simultaneously.  Inputs to the ALU
+;	and the shifter are selected by the A and B field decodes; the result on the IntWbus is
+;	further multiplexed with FPU, control, error, or cache data and stored as selected by the
+;	DST field decode.
+
+ALU.SHF/=<56:52>,.DEFAULT=<ALU.SHF/PASS.A>
+
+;	        Function	  Val           Operation                       Comments
+;	-----------------------  ----	--------------------------	--------------------------
+;				=  00
+	ZEXTW.A			=  01	; Wbus <-- zero extend word A
+	PASS.A			=  02	; Wbus <-- A
+	PASS.B			=  03	; Wbus <-- B
+	A.AND.B			=  04	; Wbus <-- A .AND. B
+	A.AND.NOT.B		=  05	; Wbus <-- A .AND. ~B
+	A.OR.B			=  06	; Wbus <-- A .OR. B
+	A.XOR.B			=  07	; Wbus <-- A .XOR. B
+
+	A.PLUS.B		=  08	; Wbus <-- A + B
+	A.PLUS.B.PLUS.1		=  09	; Wbus <-- A + B + 1
+	A.MINUS.B.MINUS.1	=  0A	; Wbus <-- A - B - 1
+	A.MINUS.B		=  0B	; Wbus <-- A - B
+;				=  0C
+	B.MINUS.A		=  0D	; Wbus <-- B - A
+	NEG.B			=  0E	; Wbus <-- - B
+;				=  0F
+
+	LEFT.VA			=  10	; Wbus <-- A'B lsh (VA)		shift count = VA<1:0>'000
+	LEFT.SC			=  11	; Wbus <-- A'B lsh (SC)		shift count = SC<4:0>
+	LEFT.DL			=  12	; Wbus <-- A'B lsh (DL)		shift count = 000'DL<1:0>
+	LEFT.VAL		=  13	; Wbus <-- A'B lsh (VAL)	shift count = uword VAL<4:0>
+	LEFT.32-VA		=  14	; Wbus <-- A'B lsh (32-VA)	shift count = 32 - VA<1:0>'000; if 0, then shift 32
+	LEFT.SC.1-32		=  15	; Wbus <-- A'B lsh (SC)		shift count = SC<4:0>; if 0, then shift 32
+;				=  16
+;				=  17
+
+;				=  18
+;				=  19
+;				=  1A
+;				=  1B
+	CTRL.FLAGS		=  1C	; get control flags
+	ERROR.REG		=  1D	; get error register
+	FPU.RESULT.1		=  1E	; get first result from FPU
+	FPU.RESULT.2		=  1F	; get second result from FPU
+
+;	Data path control, continued.
+
+;	This field defines the cache request function.  As such, it selects the function, address type, and access check.
+;	The address comes from the address unit.
+
+;	The high order bits of this field specify whether the cache drives the Wbus, or the IntWbus, FPU result,
+;	control flags, or error register drives the Wbus. If the field is non-zero, the register write enables
+;	are forced to long.
+
+CRQ/=<51:47>,.DEFAULT=<CRQ/NOP>
+
+;								Function		Addr	Access 
+;	       Command		 Val	Validity checks		Description		Type	check  
+;	-----------------------  --- -------------------------- -----------------------+-------+-------
+	NOP			= 00				; no op			none	none  
+	CLEAR.LOCK		= 01				; clear lock		virt	none
+	PROBE.V.RCHK		= 02,.VALIDITY=<CRQ.ALIGN>	; probe			virt	read
+	PROBE.V.WCHK		= 03,.VALIDITY=<CRQ.ALIGN>	; probe			virt	write
+	LOAD.PC			= 04				; load PC		virt	read
+	COND.LOAD.PC     	= 05				; cond load PC		virt	read
+	FLUSH.IB		= 06				; flush IB in trap	virt	read
+	LOAD.PIBA		= 07				; load PIBA 		virt	read
+
+	CRQ.RESTART		= 08				; restart cache request
+	CRQ.RESTART.ALIGN	= 09				; restart cache request, no xpage
+	PCACHE.INVAL		= 0A				; invalidate Pcache entry
+	PCACHE.WRITE		= 0B				; write Pcache entry
+	TB.INVAL		= 0C				; invalidate TB entry
+	TB.WRITE		= 0D				; write TB entry
+	LOAD.MAPEN.STATUS	= 0E				; load MAPEN, STATUS	none	none
+	FLUSH.WRITE.BUFFERS	= 0F				; flush write buffers	none	none
+
+;				= 10
+	WRITE.V.WCHK		= 11				; write			virt	write
+;				= 12
+	WRITE.UNLOCK.V.WCHK	= 13,.VALIDITY=<DST.WDR>	; write unlock		virt	write
+	WRITE.BLOCK.P.NOCHK	= 14,.VALIDITY=<CRQ.ALIGN>	; write block		phys	none
+;				= 15
+	WRITE.V.NOCHK		= 16,.VALIDITY=<DST.WDR>	; write			virt	none
+		WRITE.V.PPTE	= 16				; write PPTE
+	WRITE.P.NOCHK		= 17				; write			phys	none
+		WRITE.P.SPTE	= 17				; write SPTE
+		
+;				= 18
+	READ.V.WCHK		= 19,.VALIDITY=<DST.READ>	; read			virt	read
+	READ.MOD.V.WCHK		= 1A,.VALIDITY=<DST.READ>	; read modify		virt	write
+	READ.LOCK.V.WCHK	= 1B,.VALIDITY=<DST.READ>	; read lock		virt	write
+	READ.V.ATCHK		= 1C,.VALIDITY=<DST.READ>	; read			virt	read or mod
+	READ.V.RCHK		= 1D,.VALIDITY=<DST.READ>	; read			virt	read
+	READ.V.NOCHK		= 1E,.VALIDITY=<DST.READ>	; read			virt	none
+		READ.V.PPTE	= 1E,.VALIDITY=<DST.READ>	; read PPTE
+	READ.P.NOCHK		= 1F,.VALIDITY=<DST.READ>	; read			phys	none
+		READ.P.SPTE	= 1F,.VALIDITY=<DST.READ>	; read SPTE
+
+;	Data path control, continued.
+
+;	This field controls the interpretation of the next 10b of the microword.
+;	If clear, the next 10b supply an ABbus select and a shift amount.
+;	If set, the next 10b supply the position and data for a ABbus literal.
+
+LIT/=<46>,.DEFAULT=<LIT/BREG>
+
+	BREG			=  0	; format is ABbus select/shift amount
+	LIT			=  1	; format is position/constant
+
+
+;	When LIT specifies an ABbus select and a shift amount, this field controls the ABbus select.
+
+B/=<45:41>,.DEFAULT=<B/K0>
+
+;	        Function	  Val                Operation		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	R0			= 00	; R0
+	R1			= 01	; R1
+	R2			= 02	; R2
+	R3			= 03	; R3
+	R4			= 04	; R4
+	R5			= 05	; R5
+	R6			= 06	; R6
+	R7			= 07	; R7
+	R8			= 08	; R8
+	R9			= 09	; R9
+	R10			= 0A	; R10
+	R11			= 0B	; R11
+	R12			= 0C	; R12
+		AP		= 0C	; argument pointer
+	R13			= 0D	; R13
+		FP		= 0D	; frame pointer
+	R14			= 0E	; R14
+		SP		= 0E	; stack pointer
+	TSPEC			= 0F	; temporary				specifier flow temporary
+
+	W0			= 10	; W0
+	W1			= 11	; W1
+	W2			= 12	; W2
+	W3			= 13	; W3
+	W4			= 14	; W4
+	W5			= 15	; W5
+	W6			= 16	; W6
+	WDR			= 17	; write data register			must be dest for all utrappable writes
+	MMGT0			= 18	; mem mgt temp 0
+		SAVEPC		= 18	; saved PC for console
+	MMGT1			= 19	; mem mgt temp 1
+		SAVEPSL		= 19	; saved PSL for console
+	MMGT2			= 1A	; mem mgt temp 2
+	PSL			= 1B	; PSL					<tp,n,z,v,c> maintained in hardware
+	IB			= 1C	; instruction buffer			mux input
+;				= 1D
+	K0			= 1E	; constant 0				mux input
+	KDL			= 1F	; constant 2**dl			mux input
+
+
+;	When LIT specifies an ABbus select and a shift amount, this field supplies the shift amount.
+
+VAL/=<40:36>,.DEFAULT=<VAL/0>
+
+
+;	When LIT specifies position/constant, this field selects the byte position of the constant specified
+;	by the CONST field in the longword.  The remaining 3 bytes of the longword are forced to zero.
+
+POS/=<45:44>
+
+;	Selection        	  Val       Resulting constant
+;	---------		 ----	-------------------------
+	BYTE0			=  00	; 000000cc  (bits <7:0>)
+	BYTE1			=  01	; 0000cc00  (bits <15:8>)
+	BYTE2			=  02	; 00cc0000  (bits <23:16>)
+	BYTE3			=  03	; cc000000  (bits <31:24>)
+
+;	Data path control, continued.
+
+;	This field specifies the 8-bit constant value.
+
+CONST/=<43:36>
+
+;	    Constant		  Val		Interpretation or use
+;	-----------------------	 ----	-----------------------------------------------
+;	PCB offsets.
+
+	PCB.R0			= 010	; start of register block
+
+;	SCB offsets.
+
+	SCB.MACHCHK		= 004	; SCB vector, machine check
+	SCB.KSNV		= 008	; SCB vector, kernel stack not valid
+	SCB.PWRFL		= 00C	; SCB vector, power fail
+	SCB.RESPRIV		= 010   ; SCB vector, reserved/priv instruction
+	SCB.XFC			= 014	; SCB vector, XFC instruction
+	SCB.RESOP		= 018	; SCB vector, reserved operand
+	SCB.RESADD		= 01C	; SCB vector, reserved addressing mode
+	SCB.ACV			= 020	; SCB vector, access control violation
+	SCB.TNV			= 024	; SCB vector, translation not valid
+	SCB.TP			= 028	; SCB vector, trace pending
+	SCB.BPT			= 02C	; SCB vector, breakpoint trace
+	SCB.ARITH		= 034	; SCB vector, arithmetic fault
+	SCB.VM			= 038	; SCB vector, VM trap
+	SCB.MODIFY		= 03C	; SCB vector, modify fault
+	SCB.CHMK		= 040 	; SCB vector, change mode to kernel
+	SCB.CHME		= 044 	; SCB vector, change mode to executive
+	SCB.CHMS		= 048 	; SCB vector, change mode to supervisor
+	SCB.CHMU		= 04C 	; SCB vector, change mode to user
+	SCB.MEM.SERR		= 050	; SCB vector, memory soft error interrupt
+	SCB.IO.SERR		= 054	; SCB vector, I/O soft error interrupt
+	SCB.PCHIP.SERR		= 058	; SCB vector, memory soft error interrupt
+	SCB.CF.HERR		= 05C	; SCB vector, CF chip hard error interrupt
+	SCB.IO.HERR		= 060	; SCB vector, I/O hard error interrupt
+	SCB.MEM.HERR		= 064	; SCB vector, memory hard error interrupt
+	SCB.VECT.DISABLED	= 068	; SCB vector, vector unit disabled exception
+	SCB.ARB.HERR		= 06C	; SCB vector, arb hard error interrupt
+	SCB.PWRSYS		= 070	; SCB vector, power system interrupt
+	SCB.IP			= 080	; SCB vector, interprocessor interrupt
+	SCB.IPLSOFT		= 080	; SCB vector, base of software interrupts
+	SCB.INTTIM		= 0C0	; SCB vector, interval timer interrupt
+	SCB.EMULATE		= 0C8	; SCB vector, emulation
+	SCB.EMULFPD		= 0CC	; SCB vector, emulation with FPD set
+
+;	Data path control, continued.
+
+;	CONST field, continued.
+
+;	    Constant		  Val		Interpretation or use
+;	-----------------------	 ----	-----------------------------------------------
+;	PTE values.
+
+	PTE.M			= 04,.VALIDITY=<BYTE.3>		; modified flag
+
+;	PSL values.
+
+	PSL.TP			= 40,.VALIDITY=<BYTE.3>		; trace pending
+	PSL.VM			= 20,.VALIDITY=<BYTE.3>		; virtual machine
+	PSL.FPD			= 08,.VALIDITY=<BYTE.3>		; first part done
+	PSL.IS			= 04,.VALIDITY=<BYTE.3>		; interrupt stack
+	PSL.CUR.KERNEL		= 00,.VALIDITY=<BYTE.3>		; current mode kernel
+	PSL.CUR.EXEC		= 01,.VALIDITY=<BYTE.3>		; current mode exec
+	PSL.CUR.SUPER		= 02,.VALIDITY=<BYTE.3>		; current mode super
+	PSL.CUR.USER		= 03,.VALIDITY=<BYTE.3>		; current mode user
+	PSL.CUR.MASK		= 03,.VALIDITY=<BYTE.3>		; current mode mask
+	PSL.PRV.KERNEL		= 00,.VALIDITY=<BYTE.2>		; previous mode kernel
+	PSL.PRV.EXEC		= 40,.VALIDITY=<BYTE.2>		; previous mode exec
+	PSL.PRV.SUPER		= 80,.VALIDITY=<BYTE.2>		; previous mode super
+	PSL.PRV.USER		= 0C0,.VALIDITY=<BYTE.2>	; previous mode user
+	PSL.PRV.MASK		= 0C0,.VALIDITY=<BYTE.2>	; previous mode mask
+	PSL.IPL.MASK		= 1F,.VALIDITY=<BYTE.2>		; ipl mask
+	PSL.IPL.14		= 14,.VALIDITY=<BYTE.2>		; ipl 14
+	PSL.IPL.15		= 15,.VALIDITY=<BYTE.2>		; ipl 15
+	PSL.IPL.16		= 16,.VALIDITY=<BYTE.2>		; ipl 16
+	PSL.IPL.17		= 17,.VALIDITY=<BYTE.2>		; ipl 17
+	PSL.IPL.1D		= 1D,.VALIDITY=<BYTE.2>		; ipl 1D
+	PSL.IPL.1E		= 1E,.VALIDITY=<BYTE.2>		; ipl 1E
+	PSL.IPL.1F		= 1F,.VALIDITY=<BYTE.2>		; ipl 1F
+	PSL.FU			= 40,.VALIDITY=<BYTE.0>		; floating underflow enable
+
+;	AST.SISR values.
+
+	AST.INIT		= 04,.VALIDITY=<BYTE.3>		; ASTLVL initial value
+	AST.MASK		= 07,.VALIDITY=<BYTE.3>		; ASTLVL mask
+	SISR.IPL.MAX		= 0F,.VALIDITY=<BYTE.2>		; SISR ipl maximum
+	SISR.IPL.MASK		= 0F,.VALIDITY=<BYTE.2>		; SISR ipl mask
+	SISR.AST		= 04,.VALIDITY=<BYTE.0>		; SISR<ast_delivery>
+
+;	IPR values.
+
+	IPR.TODR		= 27.,.VALIDITY=<BYTE.0>	; TODR register
+	IPR.MAX			= 64.,.VALIDITY=<BYTE.0>	; IPR maximum + 1 (must be power of 2)
+
+;	Data path control, continued.
+
+;	CONST field, continued.
+
+;	    Constant		  Val		Interpretation or use
+;	-----------------------	 ----	-----------------------------------------------
+;	Console halt codes stored in bits <14:8> of SAVEPSL.
+
+	ERR.HLTPIN		=  02	; HALT_L pin asserted
+	ERR.PWRUP		=  03	; initial power up
+	ERR.INTSTK		=  04	; interrupt stack not valid
+	ERR.DOUBLE		=  05	; machine check during exception processing
+	ERR.HLTINS		=  06	; HALT instruction in kernel mode
+	ERR.ILLVEC		=  07	; illegal SCB vector (bits <1:0> = 11)
+	ERR.WCSVEC		=  08	; WCS SCB vector (bits <1:0> = 10)
+	ERR.CHMFI		=  0A	; CHMx on interrupt stack
+	ERR.IE0			=  10	; ACV/TNV during machine check processing
+	ERR.IE1			=  11	; ACV/TNV during kernel-stack-not-valid processing
+	ERR.IE2			=  12	; Machine check during machine check processing
+	ERR.IE3			=  13	; Machine check during kernel-stack-not-valid processing
+	ERR.IE.PSL.26-24.101	=  19	; PSL<26:24> = 101 during interrupt or exception
+	ERR.IE.PSL.26-24.110	=  1A	; PSL<26:24> = 110 during interrupt or exception
+	ERR.IE.PSL.26-24.111	=  1B	; PSL<26:24> = 111 during interrupt or exception
+	ERR.REI.PSL.26-24.101	=  1D	; PSL<26:24> = 101 during REI
+	ERR.REI.PSL.26-24.110	=  1E	; PSL<26:24> = 110 during REI
+	ERR.REI.PSL.26-24.111	=  1F	; PSL<26:24> = 111 during REI
+
+;	Machine check codes.
+
+	MCHK.IB.PARITY		=  01	; IB parity error
+	MCHK.ERR.PCHIP		=  02	; P chip error
+	MCHK.INT.ID.VALUE	=  03	; undefined INT.ID value
+	MCHK.UNKNOWN.CS.ADDR	=  04	; undefined control store address
+
+;	Data path control, continued.
+
+;	CONST field, continued.
+
+;	    Constant		  Val		Interpretation or use
+;	-----------------------	 ----	-----------------------------------------------
+;	System ID.
+
+	UCODE.SID		= 22.	; system ID for Raven (byte 3)
+	UCODE.VM		=  1	; option byte if VM implemented (byte 1)
+	UCODE.REV		=  0	; microcode revision (byte 0)
+
+;	Arithmetic trap and fault codes.
+
+	ARITH.TRAP.INTOVF	=  01	; integer overflow
+	ARITH.TRAP.INTDIV	=  02	; integer divide-by-zero
+	ARITH.TRAP.SUBRNG	=  07	; subscript range
+	ARITH.FAULT.FLTOVF	=  08	; floating overflow
+	ARITH.FAULT.FLTDIV	=  09	; floating divide-by-zero
+	ARITH.FAULT.FLTUND	=  0A	; floating underflow
+
+;	MMGT.STATUS values: parameter in <7:5>, new MAPEN and status in <4:0>
+
+	MM.SYSTNV		=  55 	; ppte TNV
+	MM.PROLENVIOL		=  39	; data length violation
+	MM.SYSLENVIOL		=  7D 	; ppte length violation
+
+;	MM fault parameter values.
+
+	MM.PARAM.READ		=  0	; read check flag
+	MM.PARAM.LNV		=  1	; length violation flag
+	MM.PARAM.PPTE		=  2	; process PTE flag
+	MM.PARAM.PPTE.LNV	=  3	; process PTE length violation flag
+	MM.PARAM.WRITE		=  4	; write check flag
+
+;	Data path control, continued.
+
+;	CONST field, continued.
+
+;	    Constant		  Val		Interpretation or use
+;	-----------------------	 ----	-----------------------------------------------
+;	Physical addresses.
+
+	PA.XCHIP.3		= 3E,.VALIDITY=<BYTE.3>		; start of X chip address space
+;	PA.XCHIP_GBL.2		= 00..38			; offsets for X chip #n
+;	PA.XCHIP_GBL_SSC.2	= 04..3C			; offsets for X chip #n SSC registers
+	PA.XCHIP_LOC.2		= 0F8,.VALIDITY=<BYTE.2>	; offset for local X chip
+	PA.XCHIP_LOC_SSC.2	= 0FC,.VALIDITY=<BYTE.2>	; offset for local X chip SSC registers
+;	PA.XCHIP_GRP0.1		= 00,.VALIDITY=<BYTE.1>		; offset for X chip first register group
+	 PA.XCHIP_IPL14.0	= 40,.VALIDITY=<BYTE.0>		; offset to IPL 14 vector register
+	 PA.XCHIP_IPL15.0	= 44,.VALIDITY=<BYTE.0>		; offset to IPL 15 vector register
+	 PA.XCHIP_IPL16.0	= 48,.VALIDITY=<BYTE.0>		; offset to IPL 16 vector register
+	 PA.XCHIP_IPL17.0	= 4C,.VALIDITY=<BYTE.0>		; offset to IPL 17 vector register
+	PA.XCHIP_GRP1.1		= 01,.VALIDITY=<BYTE.1>		; offset for X chip second register group
+	 PA.XCHIP_IPLSSC.0	= 20,.VALIDITY=<BYTE.0>		; offset to console IAK regsiter
+;	 PA.XCHIP_IPRCLK.0	= 60,.VALIDITY=<BYTE.0>		; offset to interval timer registers
+
+	PA.ABSIO.3		= 3F,.VALIDITY=<BYTE.3>		; start of absolute address space
+	PA.CONS.2		= 04,.VALIDITY=<BYTE.2>		; offset to console ROM
+;	PA.IPL.0		= 00,.VALIDITY=<BYTE.0>		; offset to PSL<ipl> - not used
+;	PA.IREG.0		= 04,.VALIDITY=<BYTE.0>		; offset to IREG - not used
+	PA.MREG.0		= 08,.VALIDITY=<BYTE.0>		; offset to MREG
+	PA.NODE_ID.0		= 0C,.VALIDITY=<BYTE.0>		; offset to node id
+
+;	Miscellaneous.
+
+	VAX.PSIZE		= 2,.VALIDITY=<BYTE.1>		; VAX page size in bytes
+	TB.LOOP			= 64.				; number entries in half of TB
+	PCACHE.SIZE		= 8.,.VALIDITY=<BYTE.1>		; primary cache size in bytes
+	PCACHE.LINE		= 8.,.VALIDITY=<BYTE.0>		; primary cache line size in bytes
+
+;	Data path control, continued.
+
+;	This field specifies whether the disable retry flag is set.
+
+RS/=<35>,.DEFAULT=<RS/HOLD.NO.RETRY>
+
+;	        Function	  Val                Operation		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	HOLD.NO.RETRY		=  0	; do not change disable retry flag
+	SET.NO.RETRY		=  1	; set disable retry flag
+
+
+;	This field specifies the data length for calculating ALU condition codes and for cache requests.
+;	If the cache request operation is zero, it also specifies the write selects for the register
+;	file.  For cache operations, the destination register is always written as a longword.
+
+LEN/=<34:33>,.DEFAULT=<LEN/LONG>
+
+;	        Function	  Val                Operation		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	BYTE			=  0	; byte length
+	WORD			=  1	; word length
+	LONG			=  2	; longword length
+	LEN(DL)			=  3	; length of current specifier
+
+;	Data path control, continued.
+
+;	This field defines where the result on the Wbus is written.
+
+DST/=<32:27>,.DEFAULT=<DST/WBUS>
+
+;	        Function	  Val                Operation		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	R0			= 00	; R0
+	R1			= 01	; R1
+	R2			= 02	; R2
+	R3			= 03	; R3
+	R4			= 04	; R4
+	R5			= 05	; R5
+	R6			= 06	; R6
+	R7			= 07	; R7
+	R8			= 08	; R8
+	R9			= 09	; R9
+	R10			= 0A	; R10
+	R11			= 0B	; R11
+	R12			= 0C	; R12
+		AP		= 0C	; argument pointer
+	R13			= 0D	; R13
+		FP		= 0D	; frame pointer
+	R14			= 0E	; R14
+		SP		= 0E	; stack pointer
+	TSPEC			= 0F	; temporary				specifier flow temporary
+
+	W0			= 10	; W0
+	W1			= 11	; W1
+	W2			= 12	; W2
+	W3			= 13	; W3
+	W4			= 14	; W4
+	W5			= 15	; W5
+	W6			= 16	; W6
+	WDR			= 17	; write data register			must be dest for all utrappable writes
+	MMGT0			= 18	; mem mgt temp 0
+		SAVEPC		= 18	; saved PC for console
+	MMGT1			= 19	; mem mgt temp 1
+		SAVEPSL		= 19	; saved PSL for console
+	MMGT2			= 1A	; mem mgt temp 2
+	PSL			= 1B	; PSL					<tp,n,z,v,c> maintained in hardware
+	IS			= 1C	; interrupt stack pointer
+	AST.SISR		= 1D	; <31:24> ASTLVL, <19:16> highest swre int, <15:0> SISR
+	VM.UEXC			= 1E	; virtual machine PSL<31:16>, ucode exception vector<7:0>
+	MMGT3			= 1F	; mem mgt temp 3
+
+;	No microtrappable reads to destinations > 1F (hex).
+
+	P0BR			= 20	; P0 base register
+	P0LR			= 21	; P0 length register
+	P1BR			= 22	; P1 base register
+	P1LR			= 23	; P1 length register
+	SBR			= 24	; system base register
+	SLR			= 25	; system length register
+	SCBB			= 26	; system control block base register
+	PCBB			= 27	; process control block base register	stores PCB + 4
+;				= 28
+;				= 29
+;				= 2A
+	Trn			= 2B	; [Trn]					destination at time of microtrap
+	Rrn			= 2C	; R[Rn]					R addressed by current specifier
+	Rrn+1			= 2D	; R[Rn+1]				R+1 addressed by current specifier
+	Wsn			= 2E	; W[Sn]					W for current specifier number
+	Wsn+1			= 2F	; W[Sn.OR.1]				W.or.1 for current specifier number
+
+;				= 30..3E
+	WBUS			= 3F	; null destination
+
+;	Data path control, continued.
+
+;	This field defines the AAbus select for the ALU and the shifter.
+
+A/=<26:21>,.DEFAULT=<A/K0>
+
+;	        Function	  Val                Operation		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	R0			= 00	; R0
+	R1			= 01	; R1
+	R2			= 02	; R2
+	R3			= 03	; R3
+	R4			= 04	; R4
+	R5			= 05	; R5
+	R6			= 06	; R6
+	R7			= 07	; R7
+	R8			= 08	; R8
+	R9			= 09	; R9
+	R10			= 0A	; R10
+	R11			= 0B	; R11
+	R12			= 0C	; R12
+		AP		= 0C	; argument pointer
+	R13			= 0D	; R13
+		FP		= 0D	; frame pointer
+	R14			= 0E	; R14
+		SP		= 0E	; stack pointer
+	TSPEC			= 0F	; temporary				specifier flow temporary
+
+	W0			= 10	; W0
+	W1			= 11	; W1
+	W2			= 12	; W2
+	W3			= 13	; W3
+	W4			= 14	; W4
+	W5			= 15	; W5
+	W6			= 16	; W6
+	WDR			= 17	; write data register			must be dest for all utrappable writes
+	MMGT0			= 18	; mem mgt temp 0
+		SAVEPC		= 18	; saved PC for console
+	MMGT1			= 19	; mem mgt temp 1
+		SAVEPSL		= 19	; saved PSL for console
+	MMGT2			= 1A	; mem mgt temp 2
+	PSL			= 1B	; PSL					<tp,n,z,v,c> maintained in hardware
+	IS			= 1C	; interrupt stack pointer
+	AST.SISR		= 1D	; <31:24> ASTLVL, <19:16> highest swre int, <15:0> SISR
+	VM.UEXC			= 1E	; virtual machine PSL<31:16>, ucode exception vector<7:0>
+	MMGT3			= 1F	; mem mgt temp 3
+
+	P0BR			= 20	; P0 base register
+	P0LR			= 21	; P0 length register
+	P1BR			= 22	; P1 base register
+	P1LR			= 23	; P1 length register
+	SBR			= 24	; system base register
+	SLR			= 25	; system length register
+	SCBB			= 26	; system control block base register
+	PCBB			= 27	; process control block base register	stores PCB + 4
+;				= 28
+;				= 29
+;				= 2A
+;				= 2B
+	Rrn			= 2C	; R[Rn]					R addressed by current specifier
+	Rrn+1			= 2D	; R[Rn+1]				R+1 addressed by current specifier
+;				= 2E
+;				= 2F
+
+;				= 30..37
+	SEXT.B			= 38,.VALIDITY=<SHIFT.ONLY>
+					; signextend (ABbus<31>)		only valid for shifts
+;				= 39
+;				= 3A
+;				= 3B
+	K0			= 3C	; constant 0				mux input
+	K1			= 3D	; constant 1				mux input
+	VA			= 3E	; VA register				mux input
+	PC			= 3F	; current PC				mux input
+
+;	Data path control, continued.
+
+;	This field is decoded to provide miscellaneous function control in all microword formats.
+
+MISC/=<20:16>,.DEFAULT=<MISC/NOP>
+
+;	        Function	  Val                Operation		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+    	NOP			=  00	; no operation
+	RESTORE.PC		=  01	; restore PC from backup PC		PC restore 2 cycles later
+	RLOG			=  02,.VALIDITY=<CRQ.NOP>
+					; record register change in RLOG	can't do cache request
+	READ.RLOG		=  03,.VALIDITY=<CRQ.NOP>
+					; recover register change from RLOG	can't do cache request
+	WRITE.SC		=  04	; write IntWbus<7:0> into SC
+	WRITE.PSW		=  05	; write IntWbus<5:0> into hardware <iv,t,nzvc>
+	WRITE.PSL		=  06	; write IntWbus<30,27,25:24> into hardware <tp,fpd,cur_mode>
+	WRITE.CTRL.FLAGS	=  07	; write IntWbus<x:y> into hardware control flags
+
+	SET.STATE.0		=  08	; set flag<0>
+	SET.STATE.1		=  09	; set flag<1>
+	SET.STATE.2		=  0A	; set flag<2>
+	SET.STATE.3		=  0B	; set flag<3>
+	SET.STATE.4		=  0C	; set flag<4>
+	SET.STATE.5		=  0D	; set flag<5>
+	CLR.STATE.3-0		=  0E	; clear flags<3:0>
+    	CLR.STATE.5-4		=  0F	; clear flags<4:7>
+
+	ENABLE.TRAPS		=  10	; enable microtraps
+	XMIT.FPU.LW.ENABLE	=  11	; transmit Wbus to FPU			also enables traps
+;				=  12
+;				=  13
+	DISABLE.TRAPS		=  14	; disable microtraps
+;				=  15
+;				=  16
+;				=  17
+;				=  18
+;				=  19
+	SET.PSL.CC.IIIP 	=  1A	; latch cc's based on iiip map		PSL.NZV  <--  WBUS.NZV
+ 					;					PSL.C    <--  PSL.C (unchanged)
+	SET.PSL.CC.IIIP.QUAD	=  1B	; latch cc's based on iiip quad map	PSL.NV   <--  WBUS.NV
+					;					PSL.Z    <--  PSL.Z AND WBUS.Z
+ 					;					PSL.C    <--  PSL.C (unchanged)
+	SET.PSL.CC.JIZJ		=  1C	; latch cc's based on jizj map		PSL.N    <--  WBUS.N XOR WBUS.V
+ 					; 					PSL.Z    <--  WBUS.Z
+ 					; 					PSL.V    <--  0
+ 					; 					PSL.C    <-- ~WBUS.C
+	SET.PSL.CC.IIII		=  1D	; latch cc's based on iiii map		PSL.NZVC <--  WBUS.NZVC
+	SET.PSL.CC.PPJP		=  1E	; latch cc's based on ppjp map		PSL.NZC  <--  PSL.NZC (unchanged)
+					;					PSL.V    <-- ~WBUS.Z
+	SET.PSL.CC.IIIJ		=  1F	; latch cc's based on iiij map		PSL.NZV  <--  WBUS.NZV
+ 					; 					PSL.C    <-- ~WBUS.C
+.TOC	"	Microsequencer Control Fields"
+
+;	The microsequencer is controlled by five fields.
+;
+;		1. The Format (FMT) field controls how the next address specified by the current microword is
+;		   constructed.
+;
+;		   If FMT = 0, then MUX_INPUT_NA = uword<10:0>				; JUMP format
+;		   If FMT = 1, then MUX_INPUT_NA = current uaddr<10:7>'uword<6:0>	; BRANCH format
+;
+;		   In addition, if FMT = 1, then the branch condition field selects 4b of test conditions that can
+;		   be gated with MUX_INPUT_NA in the NEXT cycle.
+;
+;		2. The Or enable (OR) field controls whether the branch conditions selected in the PREVIOUS cycle
+;		   are or'd with bits<4:1> of MUX_INPUT_NA.
+;
+;		3. The Multiplexor (MUX) field controls which next address source is used to access the control store.
+;
+;		   If MUX = 0, 1, then CS_INPUT_ADDR = MUX_INPUT_NA			; goto or call
+;		   If MUX = 2 then CS_INPUT_ADDR = TRAP_SILO				; trap silo
+;		   If MUX = 3 then CS_INPUT_ADDR = MICRO_STACK				; microstack
+;		   If MUX = 4, 5, 6, 7 then CS_INPUT_ADDR = DECODER_ADDR		; decoder next
+;
+;		   Several of the MUX options have side effects:
+;
+;		   If MUX = 2 then replay from trap silos				; exit trap
+;		   If MUX = 4, 5 then select DECODER_ADDR or MUX_INPUT_NA conditionally	; conditional decode
+;
+;		4. If FMT = 1, the Branch Condition Select (BCS) field selects 4b of test conditions that can be or'd
+;		   with MUX_INPUT_NA in the NEXT cycle; and the Branch Offset (BO) field specifies MUX_INPUT_NA<6:0>.
+;
+;		5. If FMT = 0, the Next Address Field (NA) field specifies MUX_INPUT_NA<10:0>.
+;
+;	When the current microword does a CALL, the address of the CALL is modified and then copied to
+;	the microstack for a subsequent RETURN.  Only bits <3:0> of the input address are modified.
+
+;	Microsequencer control fields, continued.
+
+;	This field defines the format of the microsequencer control fields.  The destination of a BRANCH
+;	format microinstruction must be in the same 128-location page as the branch itself.
+
+FMT/=<15>,.DEFAULT=<FMT/JUMP>
+
+	JUMP			=   0	; format is JUMP
+	BRANCH			=   1	; format is BRANCH
+
+
+;	This field define whether the OR tree is enabled on the mux next address input.
+
+OR/=<14>,.DEFAULT=<OR/NO>
+
+	NO			=   0	; OR tree off
+	YES			=   1	; OR tree on
+
+
+;	This field controls the next-address selection via the NA mux.
+
+MUX/=<13:11>,.DEFAULT=<MUX/GOTO>
+
+;	        Select		  Val              Address Source		                    Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	GOTO			=   0	; current microword			does goto function
+	CALL			=   1	; current microword			does call function
+	TRAP.SILO		=   2	; microaddress silo			empties silo for up to three consecutive
+					;					 cycles, or until I Box dispatch is found
+	STACK			=   3	; microstack				does return function
+	DEC.NEXT.L		=   4	; I Box or current microword		select DEC.NEXT if long operand
+	DEC.NEXT.BWL		=   5	; I Box or current microword		select DEC.NEXT if bwl operand
+	DEC.NEXT		=   6	; I Box					new microflow
+	LAST.CYCLE		=   6,.VALIDITY=<.NOT[<CRQ.READ>]>
+					; I Box					new microflow
+	LAST.CYCLE.OVERFLOW	=   7,.VALIDITY=<.NOT[<CRQ.READ>]>
+					; I Box					new microflow, integer overflow trap enabled
+
+;	Microsequencer control fields, continued.
+
+;	This field defines the microbranch condition which is selected for possible use in the NEXT microinstruction.
+;	In the real microword format, this field occupies the bits specified by the BCS field.  In the pre-allocator
+;	microword format, this field is placed in the BCS.1 field so that a full 11-bit next-address can be specified
+;	in all microwords, including BRANCH format microinstructions.  The BCS.1 field is moved to its proper
+;	position by the allocator.
+
+;	The comments field lists how many cycles must elapse between SETTING a condition and SELECTING a condition
+;	for testing, and whether the condition is dynamic or static.  For example, if elapsed = 1, then a condition
+;	that is set is cycle n can be selected in cycle n+1.
+
+BCS.1/=<63:60>,.DEFAULT=<BCS.1/0>	; Microbranch condition pseudo field
+
+;	       Select		  Val   Modifier bits for NA<4:1>			Comments
+;	-----------------------  ----	---------------------------------------	--------------------------------------------
+	WBUS.3-0		=  00	; IntWbus<3:0>				elapsed = 1, dynamic
+	WBUS.NZVC		=  01	; IntWbus<nzvc>				elapsed = 1, dynamic
+	SC.3-0			=  02	; sc<3:0>				elapsed = 1, latched
+	SC.7-4			=  03	; sc<7:4>				elapsed = 1, latched
+	INT.OPCODE.2-0		=  04	; int pending'opcode<2:0>		valid in execute flows, latched
+	PSL.3-0			=  05	; PSL<3:0>				elapsed = 2, latched
+	STATE.3-0		=  06	; state<3:0>				elapsed = 1, latched
+	RS.MP.STATE.5-4		=  07	; retry'mapen'state<5:4>		elapsed = 1, latched
+
+	MMGT.STATUS		=  08	; memory management status<3:0>		elapsed = 2, dynamic
+	TRAP.STATUS		=  09	; VA<31:30>'probe/mreq'rd/wr check	elapsed = 1, latched
+	ALGN.STATUS		=  0A	; restart_dl<1>'fp xfer'0'wr/rd op	valid in microtrap flows, latched
+;				=  0B
+;				=  0C
+;				=  0D
+;				=  0E
+	TP.Z.DL			=  0F	; psl<30>'0'specifier_dl<1:0>		valid in execute flows, latched
+
+
+;	This field gives the address of the next microinstruction if the current microinstruction is JUMP format.
+
+NA/=<10:0>,.NEXTADDRESS	
+
+
+;	These two fields are the post allocation branch condition select and branch offset for BRANCH format
+;	microinstructions.  These fields are never used by MICRO2.  The allocator selectively fills them in
+;	based on the format of the microinstruction.
+
+BCS/=<10:7>
+
+OFFSET/=<6:0>
+.TOC	"	Validity Expressions"
+
+;	Validity expressions for the address unit.
+
+.SET/ADR.A	=	<.AND[	<.NEQ[<A/>,<A/SEXT.B>]>,
+				<.NEQ[<A/>,<A/K1>]>		]>
+
+.SET/ADR.B	=	<.NEQ[<B/>,<B/K0>]>
+
+.SET/ADR.A.PLUS.B =	<.AND[	<ADR.A>,<ADR.B>	]>
+
+.SET/ADR.A.MINUS.B =	<.AND[	<ADR.A>,
+				<.OR[	<.EQL[<LIT/>,<LIT/LIT>]>,
+					<.EQL[<B/>,<B/KDL>]>	]>	]>
+
+;	True if ALU.SHF operation is a shift.
+
+.SET/SHIFT.ONLY	=	<.GEQ[<ALU.SHF/>,<ALU.SHF/LEFT.VA>]>
+
+;	True if destination is WDR.
+
+.SET/DST.WDR	=	<.EQL[<DST/>,<DST/WDR>]>
+
+;	True if destination is okay for a read: 5b register, or indirect register.
+
+.SET/DST.READ	=	<.OR[	<.LEQ[<DST/>,1F]>,
+				<.EQL[<DST/>,<DST/Trn>]>,
+				<.EQL[<DST/>,<DST/Wsn>]>,
+				<.EQL[<DST/>,<DST/Wsn+1>]>	]>
+
+;	True if cache request must be aligned (byte length).
+
+.SET/CRQ.ALIGN	=	<.EQL[<LEN/>,<LEN/BYTE>]>
+
+;	True if cache request is NOP.
+
+.SET/CRQ.NOP	=	<.EQL[<CRQ/>,<CRQ/NOP>]>
+
+;	True if cache request is a read.
+
+.SET/CRQ.READ	=	<.GEQ[<CRQ/>,18]>
+
+;	True if byte is used in proper position.
+
+.SET/BYTE.3	=	<.EQL[<POS/>,<POS/BYTE3>]>
+.SET/BYTE.2	=	<.EQL[<POS/>,<POS/BYTE2>]>
+.SET/BYTE.1	=	<.EQL[<POS/>,<POS/BYTE1>]>
+.SET/BYTE.0	=	<.EQL[<POS/>,<POS/BYTE0>]>
+
+.cref
+.bin
+.ecode

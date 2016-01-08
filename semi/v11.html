@@ -1,0 +1,194 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>V-11</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  V-11 (1986)
+</H1>
+<P>
+The V-11 (code name Scorpio) was DEC's first VAX microprocessor design, although
+the second to ship. &nbsp;Bill Johnson was the project manager; Ed Burdick
+was lead engineer on the IE chip, Bill Grundmann on the M chip; Dick Sites
+led the architecture and microcode teams.
+<P>
+The Scorpio program aimed at launching DEC into the VLSI design era. In addition
+V-11 itself, Scorpio encompassed a new CAD suite (CHAS) and DEC's first in-house
+process development effort (and the industry's first double-metal process),
+ZMOS. V-11 implemented a full VAX, with a robust memory and console system,
+suitable for mid-range systems as well as embedded systems.
+<P>
+V-11 consisted of four chips, one of which could be replicated: the ROM/RAM
+chip, the IE (instruction execution) chip, the M (memory management) chip,
+and the F (floating point chip). Five copies of the ROM/RAM were required
+to implement the full VAV instruction set. V-11 initially ran at 5Mhz, with
+a high-speed bin point at 6.25Mhz.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/v11_rr.jpg">ROM/RAM</A></TD>
+    <TD>DC327</TD>
+    <TD>344x285</TD>
+    <TD>208,000 sites</TD>
+    <TD>The ROM/RAM implements a slice of the V-11's patchable control store.
+      Each ROM/RAM provides 16k x 8b of control store ROM, 1k x 8b of patch store
+      RAM, and 32 patching CAMs. Five ROM/RAMs comprise the complete control store.
+      Key features include:
+      <UL>
+	<LI>
+	  16K x 8b ROM
+	<LI>
+	  1K x 8b RAM
+	<LI>
+	  32 x 14b CAM (cascadable; 160 CAMs in complete control store)
+	<LI>
+	  100ns access time
+      </UL>
+      <P>
+      Power: 1W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/v11_ie.jpg">IE</A></TD>
+    <TD>DC328</TD>
+    <TD>354x358</TD>
+    <TD>60,000</TD>
+    <TD>The IE chip implements the instruction execution kernel of the V-11 chip
+      set. It operates under control of microwords fetched from the ROM/RAM chips.
+      Its key features are:
+      <UL>
+	<LI>
+	  Instruction prefetch
+	<LI>
+	  Instruction decode for all 304 VAX instructions
+	<LI>
+	  Optimized VAX specifier parsing
+	<LI>
+	  VAX architectural registers (32b)
+	<LI>
+	  Microcode temporary registers (32b)
+	<LI>
+	  Full function 32b arithmetic/logic unit
+	<LI>
+	  Shifter
+	<LI>
+	  First level (mini) translation buffers for I- and D-stream
+	<LI>
+	  External transaction sequencer
+	<LI>
+	  Microsequencer for control store
+	<LI>
+	  Microtrap generation and control
+      </UL>
+      <P>
+      Power: 5W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/v11_m.jpg">M</A></TD>
+    <TD>DC329</TD>
+    <TD>339x332</TD>
+    <TD>54,000</TD>
+    <TD>The M chip provides the cache tag store and control, the backup translation
+      buffer and control, the address translation logic, auxiliary storage for
+      microcode temporaries, architected VAX I/O (interrupts, clock, and console),
+      and the master clock generator for the entire chip set. The chip's features
+      include:
+      <UL>
+	<LI>
+	  Cache tag store and control for 8KB direct map cache
+	<LI>
+	  Backup translation buffer tag store and control for 512 entry backup translation
+	  buffer
+	<LI>
+	  Address translation logic
+	<LI>
+	  24 auxiliary scratch registers
+	<LI>
+	  Architected I/O
+	  <UL>
+	    <LI>
+	      Interrupt controller
+	    <LI>
+	      Four serial ports
+	    <LI>
+	      Interval timer
+	    <LI>
+	      Time of year clock
+	  </UL>
+	<LI>
+	  Chip set clock generator
+      </UL>
+      <P>
+      Power: 3W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/v11_f.jpg">F</A></TD>
+    <TD>DC330</TD>
+    <TD>341x288</TD>
+    <TD>29,600</TD>
+    <TD>The F chip is a high performance, single chip, floating point unit for
+      the V-11 chip set. Its key features are:
+      <UL>
+	<LI>
+	  Acceleration for floating point instructions (5X) and integer multiply/divide
+	  (2X)
+	<LI>
+	  Support for f_floating, d_floating, and g_floating data types
+	<LI>
+	  Support for most VAX floating point instructions, including POLYf
+	<LI>
+	  Arithmetic checking and reporting
+      </UL>
+      <P>
+      Power: 2.5W</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+V-11 shipped in early 1986 in the VAX 8200 and 8300 mid-range systems. By
+that time, MicroVAX II had been out for more than six months and had captured
+the attention of the company and the customer base. A mid-life kicker, the
+VAX 8250 and 8350, based on binned parts, shipped in 1987.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+V-11 attempted to do "six impossible things before breakfast" -- new methodology,
+new CAD tools, new architecture, new process, new design team, new organization
+-- and it paid the price for being a pioneer: a long development schedule
+filled with mishaps. MicroVAX, by starting later and dropping much of the
+complexity of the VAX architecture, reaped the benefits of V-11's (bitter)
+experiences, pillaged its microarchitecture and design objects, and shipped
+first. Yet V-11 fulfilled the intentions of its creators in revolutionizing
+DEC's approach to chip design. Before V-11, DEC used partners for process
+design, did its chip design work on paper, and had a small design group capable
+of one design at a time. After V-11, DEC did its own process development,
+did its chip design work entirely via CAD tools, and had a design group capable
+of building multiple chips in parallel.
+<P>
+Once MicroVAX was on the drawing boards, the V-11 management team made a
+determined effort to simplify the design and get it out the door. V-11's
+unique F-chip was dropped in favor of a derivative of the J-11 FPA. Features
+were stripped from the IE chip to get the size and power down. Even though
+MicroVAX could be considered an internal competitor, the entire V-11 team
+was extraordinarily gracious in providing support to the MicroVAX team.
+<P>
+I became the manager of microprocessor development in October, 1984, and
+thus supervised the last 15 months of V-11. My only real contribution was
+to utilize spare space in the control store patch RAM to recode CALLS and
+CALLG for higher performance, based on studies done for CVAX.
+<P>
+V11 was presented at the 1984 International Solid State Circuits Conference.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 30-Jan-2007 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

@@ -1,0 +1,1167 @@
+.TOC	"DEFIN.MIC -- Basic Micro2 Definitions for CVAX"
+.TOC	"Revision 4.7"
+
+;	Shawn Persels, Bob Supnik
+
+.nobin
+.nocref
+.ucode
+.hexadecimal
+.rtol
+.width/45			; FAKE Microword length
+;.width/41			; REAL Microword length
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	27-Jun-89	[RMS]	Incremented microcode revision level, pass 5.0 code freeze
+;	31-Mar-88	[RMS]	Incremented microcode revision level, pass 4.5 code freeze
+;	7-Dec-87	[RMS]	Incremented microcode revision level, pass 4.4 code freeze
+;	8-Jul-87	[RMS]	Incremented microcode revision level, pass 4 code freeze
+;	26-Mar-87	[RMS]	Incremented microcode revision level, pass 3 code freeze
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+;	28-Sep-86	[RMS]	Incremented microcode revision level
+; 04	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	5-Apr-86	[RMS]	Added additional mreq locks (ECO 5DEC27RMS.1) and validity checks
+;	19-Feb-86	[RMS]	Editorial changes
+;	16-Feb-86	[RMS]	Restored SPEC.RN (ECO rescinded)
+;	31-Jan-86	[RMS]	Added more DEC.NEXT validity checks
+;	31-Jan-86	[RMS]	Changed SPEC.RN (ECO 6JAN31DWA.2)
+;	31-Jan-86	[RMS]	Removed MSER.HIGH (ECO 6JAN30PIR.1) and ATDL (ECO 6JAN31DWA.1)
+; 03	30-Jan-86	[RMS]	Added validity checks
+;	8-Jan-86	[RMS]	Changed SWAP.RN to LOAD.OLD.RN (ECO 6JAN08DWA.1)
+;	3-Jan-86	[RMS]	Added system id for RT variation
+;	29-Dec-85	[RMS]	Swizzled codes for ALU select (ECO 5DEC20TFF.1), split AST.TRAP to two registers
+;	17-Oct-85	[RMS]	Changed code for SLR select (ECO 5OCT17DS.1)
+;	25-Sep-85	[RMS]	Swizzled codes for MISC1 functions (ECO 5SEP25AO.1)
+;	25-Sep-85	[RMS]	Added yet another FPA machine check
+;	19-Sep-85	[RMS]	Added another FPA machine check
+;	19-Sep-85	[RMS]	Swizzled codes for MISC3 functions (ECO 5SEP19AO.2)
+;	19-Sep-85	[RMS]	Removed PASS.A/B.ZEXT.DL functions (ECO 5SEP19FF.1)
+;	12-Sep-85	[RMS]	Revised code for FPA.DATA function (ECO 5SEP12AO.1)
+;	12-Sep-85	[RMS]	Added CLEAR.WRITE.BUFFER function (ECO 5SEP10PIR.1)
+;	10-Sep-85	[RMS]	Changed SN+1 to SN.PLUS.1
+;	2-Sep-85	[RMS]	Added new FPA machine check
+;	28-Aug-85	[RMS]	Swizzled codes for branch/jump formats in diagrams
+;	22-Aug-85	[RMS]	Revised code for MID.BUFF function (ECO 5AUG20DS.1)
+;	2-Aug-85	[RMS]	Swizzled codes for ALU functions (ECO 5JUL15PIR.1)
+;	2-Aug-85	[RMS]	Swizzled codes for branch/jump functions (ECO 5JUL01AO.1)
+;	1-Jul-85	[RMS]	Reserved unused read/write registers
+;	24-Jun-85	[RMS]	Revised definition of WSN+1 (ECO 5JUL15PIR.2)
+;	21-Jun-85	[RMS]	Removed spurious FPA broadcasts
+; 02	18-Mar-85	[RMS]	Revised for second pass model
+; 01	19-Feb-85	[SDP]	Revised for new I Box
+; 00	10-Jan-83	[RMS]	Initial edit for CVAX
+
+.TOC	"	Introduction"
+
+;	The CVAX microword is a 41 bit encoded control structure.
+;
+;	Bits <40:13>	control the data path.
+;	Bits <12:0> 	control the microsequencer.
+;
+;	Data path control is accomplished by encoding the fields into five general formats.
+;
+;	Microsequencer control is accomplished by encoding the fields into two general formats.  
+;
+;	The formats are defined in the Control Fields Summary of the CVAX Design Specification.
+;
+
+.TOC	"	'F A K E' Microword Formats"
+
+;	Data Path Control
+
+;	    44 43 42 41 40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  CONSTANT| 1| POS |CONS.FNC|      CONST.BYTE       |DS|  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	    44 43 42 41 40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  BASIC   | 0  1  1|   BASIC.FNC  | L|     B     | DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	    44 43 42 41 40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  SHIFT   | 0  1  0|   SHIFT.VAL  |DR|     B     | DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	    44 43 42 41 40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  MEM REF | 0  0  1|  MEMREQ.FNC  | L|RW|MREQ.ACC| DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	    44 43 42 41 40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  SPECIAL | 0  0  0|     MISC1    |M2|   MISC3   | DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	Microsequencer Control
+ 
+;           16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+;          +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  BRANCH  | 1|BRNCH COND SEL|       TRUE BRANCH LABEL        |
+;          +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;   JUMP   | 0|SB|///////////|         JUMP ADDRESS           |
+;          +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	Allocation of pseudo-fields:
+;
+;		PB	<50:45>	pseudo B field for unique register numbering
+;		W	<56:51> pseudo W field for determining destination
+
+.TOC	"	'R E A L' Microword Formats"
+
+;	Data Path Control
+
+;           40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  CONSTANT| 1| POS |CONS.FNC|      CONST.BYTE       |DS|  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;           40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  BASIC   | 0  1  1|  BASIC.FNC   | L|     B     | DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;           40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  SHIFT   | 0  1  0|   SHIFT.VAL  |DR|     B     | DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;           40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  MEM REF | 0  0  1|  MEMREQ.FNC  | L|RW|MREQ.ACC| DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;           40 39 38 37 36 35 34 33 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  SPECIAL | 0  0  0|     MISC1    |M2|   MISC3   | DST |  CC |     MISC     |        A        |
+;	   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+;	Microsequencer Control
+ 
+;           12 11 10  9  8  7  6  5  4  3  2  1  0
+;          +--+--+--+--+--+--+--+--+--+--+--+--+--+
+;  BRANCH  | 1|BRNCH COND SEL|   BRANCH OFFSET    |
+;          +--+--+--+--+--+--+--+--+--+--+--+--+--+
+;   JUMP   | 0|SB|         JUMP ADDRESS           |
+;          +--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+.TOC	"	BASIC Microinstruction Format"
+
+;	The standard fields for the BASIC microinstruction are:
+;
+;	BASIC/		microopcode	=	011
+;	BASIC.FNC/	alu operation
+;	L/		length control
+;	B/		B port select
+;	DST/		destination control
+;	CC/		condition code control
+;	MISC/		miscellaneous control
+;	A/		A port select
+
+;	This field defines the current microinstruction to be a "B A S I C" format instruction.
+ 
+BASIC/=<44:42>,.DEFAULT=<BASIC/FORMAT>	; Class code
+
+	FORMAT			= 3	; select the BASIC format
+
+;	This field defines the ALU operation to be performed.
+
+BASIC.FNC/=<41:37>,.DEFAULT=<BASIC.FNC/A.PLUS.B>	; BASIC function control
+
+;				Code	Function
+;				----	--------
+	A.PLUS.B		= 00	; W_Bus <-- A_Bus + B_Bus
+	A.OR.B			= 01	; W_Bus <-- A_Bus .OR.  B_Bus
+	A.PLUS.B.PLUS.PSL.C	= 02	; W_Bus <-- A_Bus + B_Bus + PSL.C
+	A.MINUS.1		= 03	; W_Bus <-- A_Bus - 1
+	PASS.B			= 04	; W_Bus <-- B_Bus
+	A.MINUS.B.MINUS.PSL.C	= 05	; W_Bus <-- A_Bus - B_Bus - PSL.C
+	A.AND.NOT.B		= 06	; W_Bus <-- A_Bus .AND. (.NOT. B_Bus)
+;				= 07
+	NOT.B			= 08	; W_Bus <-- ~ B_Bus
+	A.XOR.B			= 09	; W_Bus <-- A_Bus .XOR. B_Bus
+	PASS.A			= 0A	; W_Bus <-- A_Bus
+;				= 0B
+	A.AND.B			= 0C	; W_Bus <-- A_Bus .AND. B_Bus
+	SMUL.STEP		= 0D,.VALIDITY=	<.NEQ[<A/>,<A/Q>]>
+					; W_Bus <-- A_Bus .smul. B_Bus
+;				= 0E
+;				= 0F
+;				= 10
+	A.PLUS.B.PLUS.1		= 11	; W_Bus <-- A_Bus + B_Bus + 1
+;				= 12
+;				= 13
+	A.MINUS.B		= 14	; W_Bus <-- A_Bus - B_Bus
+;				= 15
+	UDIV.STEP		= 16,.VALIDITY=	<.NEQ[<A/>,<A/Q>]>
+					; W_Bus <-- A_Bus .udiv. B_Bus
+;				= 17
+	B.MINUS.A		= 18	; W_Bus <-- B_Bus - A_Bus
+	A.PLUS.1		= 19	; W_Bus <-- A_Bus + 1
+	NEG.B			= 1A	; W_Bus <-- - B_Bus
+;				= 1B
+;				= 1C
+;				= 1D
+;				= 1E
+;				= 1F
+
+;	BASIC microinstruction format, continued.
+
+;	This field defines the length control.
+
+L/=<36>,.DEFAULT=<L/LONG>		; Length control
+
+;				Code	Function
+;				----	--------
+	LONG			= 0	; length is long
+	LEN(DL)			= 1,.VALIDITY=	<BASIC.OR.MEMREQ>
+					; length is len(dl)
+
+;	This fake field is used to define the B port select.
+
+PB/=<50:45>,.DEFAULT=<PB/0>		; B_Bus control
+
+;				Code	Register
+;				----	--------
+	W0			= 20	; W0
+	W1			= 21	; W1
+	W2			= 22	; W2
+	W3			= 23	; W3
+	W4			= 24	; W4
+	W5			= 25	; W5
+;	W6			= 26	; W6
+		WMMGT		= 26	; reserved for memory management
+;	W7			= 27	; W7
+		SC		= 27	;  shift control
+
+	WSN			= 28	; W[SN]
+	WSN.PLUS.1		= 29	; W[SN.PLUS.1]
+;	reserved		= 2A:39
+	MID.BUFF		= 3A	; ib data
+	MKDL			= 3B	; k(dl) in bytes
+	VA			= 3C	; virtual address register
+	VAP			= 3D	; virtual address prime register
+	VIBA			= 3E	; virtual instruction buffer register
+;				= 3F
+
+;	This field is the real B port select.
+
+B/=<35:32>,.DEFAULT=<B/0>
+
+;	This field defines the destination control.
+
+DST/=<31:30>,.DEFAULT=<DST/0>		; Destination control
+
+;				Code	Destination
+;				----	-----------
+	DST.ZILCH		= 0	; destination is bit bucket
+	DST.A			= 1	; destination is A port select
+	DST.WSN			= 2	; destination is W[SN]
+	DST.B			= 3	; destination is B port select
+
+;	This field defines the condition code control.
+
+CC/=<29:28>,.DEFAULT=<CC/0>		; Condition code control
+
+;				Code	Function
+;				----	--------
+	HOLD.ALU.CC		= 0	; don't alter CCs
+	LOAD.ALU.CC		= 1	; change ALU CCs
+	LOAD.PSL.CC		= 2,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; change PSL CCs
+	LOAD.ALU.CC&PSL.CC	= 3,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; change ALU CCs and PSL CCs
+
+;	BASIC microinstruction format, continued.
+
+;	This field defines the miscellaneous control functions.
+
+MISC/=<27:23>,.DEFAULT=<MISC/0>		; Miscellaneous control
+
+;				Code	Function
+;				----	--------
+    	NOP			= 00	; no operation
+	WRITE.VA		= 01,.VALIDITY=	<.NOT[<DST.VA>]>
+					; VA <-- W_Bus
+	WRITE.VAP		= 02,.VALIDITY=	<.NOT[<DST.VAP>]>
+					; VA' <-- W_Bus
+	WRITE.SC		= 03,.VALIDITY=	<.NOT[<DST.SC>]>
+					; SC <-- W_Bus
+	CLEAR.WRITE.BUFFER	= 04	; clear write buffer
+	RESTART.PREFETCH	= 05	; clear hwre and ucode prefetch disable
+	DISABLE.IB.PREFETCH	= 06	; set ucode prefetch disable
+	ENABLE.IB.PREFETCH	= 07	; clear ucode prefetch disable
+	CLEAR.RN		= 08	; clear RN
+    	RN.MINUS.1	     	= 09,.VALIDITY=	<.NOT[<MEMREQ.UTRAP>]>
+					; decrement RN
+    	RN.PLUS.1		= 0A,.VALIDITY=	<.NOT[<MEMREQ.UTRAP>]>
+					; increment RN
+	RN.PLUS.DL.Q		= 0B,.VALIDITY=	<.NOT[<MEMREQ.UTRAP>]>
+					; increment RN if quadword
+	DL.BYTE			= 0C	; DL<--byte
+	DL.WORD			= 0D	; DL<--word
+	DL.LONG			= 0E	; DL<--long
+	DL.QUAD			= 0F	; DL<--quad
+
+	CLEAR.STATE.3-0		= 10	; clear flags<3:0>
+    	SET.STATE.0		= 11    ; set flag<0>
+	SET.STATE.1		= 12	; set flag<1>
+	SET.STATE.2		= 13	; set flag<2>
+	SET.REEXECUTE		= 14	; set REEXECUTE
+	CLEAR.MMGT.TD		= 15	; clear MMGT.TD
+	LOAD.V&PC		= 16,.VALIDITY=	<LOAD.VIBA.PC.OK>
+					; unconditional load VIBA and PC
+	LOAD.OLD.RN		= 17	; load RN from RN.OLD
+	IF.BCOND.LOAD.V&PC.TRAP	= 18,.VALIDITY=	<LOAD.VIBA.PC.OK>
+					; if BCOND then load VIBA and PC and utrap
+	IF.BCOND.LOAD.V&PC	= 19,.VALIDITY=	<LOAD.VIBA.PC.OK>
+					; if BCOND then load VIBA and PC
+	OLD.Z			= 1A,.VALIDITY=	<.NEQ[<CC/>,<CC/HOLD.ALU.CC>]>
+					; use previous value of <z>
+	SHIFT.DL		= 1B,.VALIDITY=	<SHIFT.LEFT>
+					; use DL for shift control
+	RLOG			= 1C,.VALIDITY=	<BASIC.OR.CONST>
+					; invoke RLOG
+;					; PSL map defaults to iiip
+	MAP.JIZJ		= 1D	; set PSL map to jizj
+	MAP.IIII		= 1E	; set PSL map to iiii
+	MAP.IIIJ		= 1F	; set PSL map to iiij
+
+;	BASIC microinstruction format, continued.
+
+;	This field defines the A port select.
+
+A/=<22:17>,.DEFAULT=<A/0>		; A_Bus control
+
+;				Code	Register
+;				----	--------
+	G0			= 00	; R0
+	G1			= 01	; R1
+	G2			= 02	; R2
+	G3			= 03	; R3
+	G4			= 04	; R4
+	G5			= 05	; R5
+	G6			= 06	; R6
+	G7			= 07	; R7
+	G8			= 08	; R8
+	G9			= 09	; R9
+	G10			= 0A	; R10
+	G11			= 0B	; R11
+	G12			= 0C	; R12
+		AP		= 0C	;  argument pointer
+	G13			= 0D	; R13
+		FP		= 0D	;  frame pointer
+;	G14			= 0E	; R14
+		SP		= 0E	;  stack pointer
+;	G15			= 0F	; R15
+		PC		= 0F	;  program counter
+
+	KSP			= 10	; kernel stack pointer
+	ESP			= 11	; executive stack pointer
+	SSP			= 12	; supervisor stack pointer
+	USP			= 13	; user stack pointer
+	IS			= 14	; interrupt stack pointer
+	SAVEPSL			= 15	; saved PSL for console
+	SAVEPC			= 16	; saved PC for console
+	TRAP			= 16	; trap number
+	ASTLVL			= 17	; AST level
+	TXPAGE			= 18	; reserved for cross page handler
+	TMMGT			= 19	; reserved for memory management
+	SCBB			= 1A	; system control block base
+	PCBB			= 1B	; process control block base
+	P0BR			= 1C	; P0 base register
+	P1BR			= 1D	; P1 base register
+	SBR			= 1E	; system base register
+	SISR			= 1F	; software interrupt summary register
+
+	W0			= 20	; W0
+	W1			= 21	; W1
+	W2			= 22	; W2
+	W3			= 23	; W3
+	W4			= 24	; W4
+	W5			= 25	; W5
+;	W6			= 26	; W6
+		WMMGT		= 26	;  reserved for memory management
+;	W7			= 27	; W7
+		SC		= 27	;  shift control
+
+	WSN			= 28	; W[SN]
+	WSN.PLUS.1		= 29	; W[SN.PLUS.1]
+	GRN			= 2A	; G[RN]
+	PSL			= 2B	; processor status longword
+	Q			= 2C	; Q register
+;				= 2D
+	K1			= 2E	; constant 1
+	SEXTN			= 2F	; sext(alu.n)
+
+;				= 30
+;				= 31
+;				= 32
+;				= 33
+;				= 34
+;				= 35
+;				= 36
+;				= 37
+	WSN.BR			= 38	; W[SN] and broadcast to FPA
+	WSN.PLUS.1.BR		= 39	; W[SN.PLUS.1] and broadcast to FPA
+	GRN.BR			= 3A	; G[RN] and broadcast to FPA
+;	reserved		= 3B
+;	reserved		= 3C
+;	reserved		= 3D
+;	reserved		= 3E
+;	reserved		= 3F
+
+;	BASIC microinstruction format, continued.
+
+;	This fake field is used to make up the DST field selection.
+
+W/=<56:51>,.DEFAULT=<W/WBUS>		; W_Bus select
+
+;				Code	Register
+;				----	--------
+	G0			= 00	; R0						A ONLY
+	G1			= 01	; R1						A ONLY
+	G2			= 02	; R2						A ONLY
+	G3			= 03	; R3						A ONLY
+	G4			= 04	; R4						A ONLY
+	G5			= 05	; R5						A ONLY
+	G6			= 06	; R6						A ONLY
+	G7			= 07	; R7						A ONLY
+	G8			= 08	; R8						A ONLY
+	G9			= 09	; R9						A ONLY
+	G10			= 0A	; R10						A ONLY
+	G11			= 0B	; R11						A ONLY
+	G12			= 0C	; R12						A ONLY
+		AP		= 0C	;  argument pointer				A ONLY
+	G13			= 0D	; R13						A ONLY
+		FP		= 0D	;  frame pointer				A ONLY
+;	G14			= 0E	; R14						A ONLY
+		SP		= 0E	;  stack pointer				A ONLY
+;				= 0F
+
+	KSP			= 10	; kernel stack pointer				A ONLY
+	ESP			= 11	; executive stack pointer			A ONLY
+	SSP			= 12	; supervisor stack pointer			A ONLY
+	USP			= 13	; user stack pointer				A ONLY
+	IS			= 14	; interrupt stack pointer			A ONLY
+	SAVEPSL			= 15	; saved PSL for console				A ONLY
+	SAVEPC			= 16	; saved PC for console				A ONLY
+	TRAP			= 16	; trap number					A ONLY
+	ASTLVL			= 17	; AST level					A ONLY
+	TXPAGE			= 18	; reserved for cross page handler		A ONLY
+	TMMGT			= 19	; reserved for memory management		A ONLY
+	SCBB			= 1A	; system control block base			A ONLY
+	PCBB			= 1B	; process control block base			A ONLY
+	P0BR			= 1C	; P0 base register				A ONLY
+	P1BR			= 1D	; P1 base register				A ONLY
+	SBR			= 1E	; system base register				A ONLY
+	SISR			= 1F	; software interrupt summary register		A ONLY
+
+	W0			= 20	; W0						A or B
+	W1			= 21	; W1						A or B
+	W2			= 22	; W2						A or B
+	W3			= 23	; W3						A or B
+	W4			= 24	; W4						A or B
+	W5			= 25	; W5						A or B
+;	W6			= 26	; W6						A or B
+		WMMGT		= 26	;  reserved for memory management		A or B
+;	W7			= 27	; W7						A or B
+		SC		= 27	;  shift control				A or B
+	WSN			= 28	; W[SN]						A or B
+	WSN.PLUS.1		= 29	; W[SN.PLUS.1]					A or B
+	GRN			= 2A	; G[RN]						A ONLY
+	PSL			= 2B	; processor status longword			A ONLY
+	Q			= 2C	; Q register					A ONLY
+;				= 2D
+;				= 2E
+;				= 2F
+
+;				= 30
+;				= 31
+;				= 32
+;				= 33
+;				= 34
+;				= 35
+;				= 36
+;				= 37
+	WSN.BR			= 38	; W[SN] and broadcast to FPA			A ONLY
+	WSN.PLUS.1.BR		= 39	; W[SN.PLUS.1] and broadcast to FPA		A ONLY
+	GRN.BR			= 3A	; G[RN] and broadcast to FPA			A ONLY
+;				= 3B
+	VA			= 3C	; virtual address register			B ONLY
+	VAP			= 3D	; virtual address prime				B ONLY
+	VIBA			= 3E	; virtual instruction buffer address		B ONLY
+	WBUS			= 3F	; bit bucket
+
+.TOC	"	CONSTANT Microinstruction Format"
+
+;	The standard fields for the CONSTANT microinstruction are:
+;
+;	CONST/		microopcode	=	1
+;	CONST.POS/	constant position
+;	CONST.FNC/	alu operation
+;	CONST.BYTE/	constant
+;	CONST.DST/	destination control
+;	CC/		condition code control
+;	MISC/		miscellaneous control
+;	A/		A port select
+
+;	This field defines the current microinstruction to be a "C O N S T A N T" format instruction.
+
+CONST/=<44>,.DEFAULT=<CONST/FORMAT>	; Class code
+
+	FORMAT			= 1	; select the CONSTANT format
+
+;	This field defines the position of the constant on the B_Bus.
+
+CONST.POS/=<43:42>,.DEFAULT=<CONST.POS/BYTE0>	; CONSTANT position
+
+;				Code	Position
+;				----	--------
+	BYTE0			= 0	; bits<7:0>
+	BYTE1			= 1	; bits<15:8>
+	BYTE2			= 2	; bits<23:16>
+	BYTE3			= 3	; bits<31:24>
+
+;	This field defines the function to be performed in the data path.
+
+CONST.FNC/=<41:39>,.DEFAULT=<CONST.FNC/A.PLUS.CONST>	; CONSTANT function control
+
+;				Code	Function
+;				----	--------
+	A.MINUS.CONST		= 0	; W_Bus <-- A_Bus - constant
+	CONST.MINUS.A		= 1	; W_Bus <-- constant - A_Bus
+	A.PLUS.CONST		= 2	; W_Bus <-- A_Bus + constant 
+	A.AND.CONST		= 3	; W_Bus <-- A_Bus .AND. constant
+	A.OR.CONST		= 4	; W_Bus <-- A_Bus .OR. constant
+	CONST			= 5	; W_Bus <-- constant
+	A.AND.NOT.CONST		= 6	; W_Bus <-- A_Bus .AND. (.NOT. constant)
+	A.XOR.CONST		= 7	; W_Bus <-- A_Bus .XOR. constant
+
+;	CONSTANT microinstruction format, continued.
+
+;	This field defines the actual constant.
+
+CONST.BYTE/=<38:31>,.DEFAULT=<CONST.BYTE/0>	; CONSTANT data byte
+
+;				Const	Definition
+;				-----	----------
+	CVAX.SID		= 10.	; system ID
+	RTCVAX.SID		= 15.	; system ID, real time variant
+	CVAX.UREV		= 6	; microcode revision level
+
+	SCB.PASSIVE		= 000	; SCB vector, passive release
+	SCB.MACHCHK		= 004	; SCB vector, machine check
+	SCB.KSNV		= 008	; SCB vector, kernel stack not valid
+	SCB.PWRFL		= 00C	; SCB vector, power fail
+	SCB.RESPRIV		= 010   ; SCB vector, reserved/priv instruction
+	SCB.XFC			= 014	; SCB vector, XFC instruction
+	SCB.RESOP		= 018	; SCB vector, reserved operand
+	SCB.RESADD		= 01C	; SCB vector, reserved addressing mode
+	SCB.ACV			= 020	; SCB vector, access control violation
+	SCB.TNV			= 024	; SCB vector, translation not valid
+	SCB.TP			= 028	; SCB vector, trace pending
+	SCB.BPT			= 02C	; SCB vector, breakpoint trace
+	SCB.ARITH		= 034	; SCB vector, arithmetic fault
+	SCB.CHMK		= 040 	; SCB vector, change mode to kernel
+	SCB.CHME		= 044 	; SCB vector, change mode to executive
+	SCB.CHMS		= 048 	; SCB vector, change mode to supervisor
+	SCB.CHMU		= 04C 	; SCB vector, change mode to user
+	SCB.CRD			= 054	; SCB vector, corrected read data interrupt
+	SCB.MEMERR		= 060	; SCB vector, memory error interrupt
+	SCB.IPLSOFT		= 080	; SCB vector, software interrupts
+	SCB.INTTIM		= 0C0	; SCB vector, interval timer interrupt
+	SCB.EMULATE		= 0C8	; SCB vector, emulation
+	SCB.EMULFPD		= 0CC	; SCB vector, emulation with FPD set
+
+;				= 00	; Console restart values --
+;				= 01
+	ERR.HLTPIN		= 02	; halt pin
+	ERR.PWRUP		= 03	; power up
+	ERR.INTSTK		= 04	; interrupt stack not valid
+	ERR.DOUBLE		= 05	; double fatal error
+	ERR.HLTINS		= 06	; halt instruction
+	ERR.ILLVEC		= 07	; illegal vector
+	ERR.WCSVEC		= 08	; vector to WCS
+	ERR.CHMFI		= 0A	; CHMx on interrupt stack
+	ERR.CHMTI		= 0B	; CHMx to interrupt stack
+	ERR.IE0			= 10	; implementation dependant, microcode
+	ERR.IE1			= 11	; inconsistency in interrupt or exception
+	ERR.IE2			= 12	;
+	ERR.IE3			= 13	;
+	ERR.IE.PSL26-24.101	= 19	; PSL<26:24> = 101 during interrupt or exception
+	ERR.IE.PSL26-24.110	= 1A	; PSL<26:24> = 110 during interrupt or exception
+	ERR.IE.PSL26-24.111	= 1B	; PSL<26:24> = 111 during interrupt or exception
+	ERR.REI.PSL26-24.101	= 1D	; PSL<26:24> = 101 during REI
+	ERR.REI.PSL26-24.110	= 1E	; PSL<26:24> = 110 during REI
+	ERR.REI.PSL26-24.111	= 1F	; PSL<26:24> = 111 during REI
+
+;				= 00	; Machine check values --
+	MCHK.FP.STATUS.0	= 01	; floating point protocol error
+	MCHK.FP.STATUS.1	= 02	; floating point reserved instruction
+	MCHK.FP.STATUS.6	= 03	; floating point unknown error
+	MCHK.FP.STATUS.7	= 04	; floating point unknown error
+	MCHK.TBM.PPTE.P0	= 05	; PPTE in P0 space
+	MCHK.TBM.PPTE.P1	= 06	; PPTE in P1 space
+	MCHK.M0.PPTE.P0		= 07	; PPTE in P0 space
+	MCHK.M0.PPTE.P1		= 08	; PPTE in P1 space
+	MCHK.INT.IPL.VALUE	= 09	; undefined INT.ID value
+	MCHK.MOVC.STATUS	= 0A	; undefined MOVCx state
+	MCHK.BUSERR.READ.VIRT	= 80	; read error, virtual
+	MCHK.BUSERR.READ.PHYS	= 81	; read error, physical
+	MCHK.BUSERR.WRITE.VIRT	= 82	; write error, virtual
+	MCHK.BUSERR.WRITE.PHYS	= 83	; write error, physical
+
+	MM.PROACV		= 0	; Memory management status -- data ACV
+	MM.PROLENVIOL		= 1	; data length violation
+;	MM.SYSACV		= 2	; ppte ACV -- no longer possible per VAXB ECO
+	MM.SYSLENVIOL		= 3	; ppte length violation
+	MM.PROTNV		= 4	; data TNV
+	MM.TBMISS		= 5	; TB miss
+	MM.SYSTNV		= 6	; ppte TNV
+	MM.OK			= 7	; reference ok
+
+;	This field defines the destination control.
+
+CONST.DST/=<30>,.DEFAULT=<CONST.DST/0>	; CONSTANT destination control
+
+;				Code	Destination
+;				----	-----------
+	DST.ZILCH		= 0	; destination is bit bucket
+	DST.A			= 1	; destination is A port select
+
+.TOC	"	SHIFT Microinstruction Format"
+
+;	The standard fields for the SHIFT microinstruction are:
+;
+;	SHIFT/		microopcode	=	010
+;	SHIFT.VAL/	shift value
+;	SHIFT.DIR/	direction control
+;	B/		B port select
+;	DST/		destination control
+;	CC/		condition code control
+;	MISC/		miscellaneous control
+;	A/		A port select
+
+;	This field defines the current microinstruction to be a "S H I F T" format instruction.
+ 
+SHIFT/=<44:42>,.DEFAULT=<SHIFT/FORMAT>	; Class code
+
+	FORMAT			= 2	; select the SHIFT format
+
+;	This field defines the direct shift value, if non zero.
+
+SHIFT.VAL/=<41:37>,.DEFAULT=<SHIFT.VAL/0>	; SHIFT value
+
+;	This field defines the shift direction.
+
+SHIFT.DIR/=<36>,.DEFAULT=<SHIFT.DIR/0>	; SHIFT direction
+
+;				Code	Direction
+;				----	---------
+	RIGHT			= 0	; right shift
+	LEFT			= 1	; left shift
+
+;	Note that there is an interaction between the direction and destination fields
+;	which controls the actual shift function.  In certain combinations, either
+;	the A_Bus or B_Bus is zeroed:
+;
+;				Dir	Dst	A_Bus	B_Bus	Dest	Dir	Shift	Reg if SV = 0
+;				---	---	-----	-----	----	---	-----	-------------
+;	A.B..ZILCH...R(SC)	R	DST.Z	 A	 B	none	right	SV	SC
+;	A.B..ZILCH...L(SC)	L	DST.Z	 A	 B	none	left	32-SV	SC
+;	0.B..A...R(SC)		R	DST.A	 #0	 B	 A	right	SV	SC
+;	A.B..A...L(SC)		L	DST.A	 A	 B	 A	left	32-SV	SC
+;	A.B..WSN..R(SC)		R	DST.WSN	 A	 B	 WSN	right	SV	SC
+;	A.B..WSN..L(SC)		L	DST.WSN	 A	 B	 WSN	left	32-SV	SC
+;	A.B..B...R(SC)		R	DST.B	 A	 B	 B	right	SV	SC
+;	A.0..B...L(SC)		L	DST.B	 A	 #0	 B	left	32-SV	SC
+
+.TOC	"	MEM REQ Microinstruction Format"
+
+;	The standard fields for the IO XFER microinstruction are:
+;
+;	MEMREQ/		microopcode	=	001
+;	MEMREQ.FNC/	main function code
+;	L/		length control
+;	MEMREQ.RW/	read/write control
+;	MEMREQ.ACC/	access check control, OR
+;	MEMREQ.REG.xx/	state and misc processor register select, OR
+;	MEMREQ.PR/	memory management length register select
+;	DST/		destination control
+;	CC/		condition code control
+;	MISC/		miscellaneous control
+;	A/		A port select
+
+;	This field defines the current microinstruction to be a "M E M  R E Q" format instruction.
+ 
+MEMREQ/=<44:42>,.DEFAULT=<MEMREQ/FORMAT>	; Class code
+
+	FORMAT			= 1	; select the MEM REQ format
+
+;	This field defines the MEM REQ function to be performed.
+
+MEMREQ.FNC/=<41:37>,.DEFAULT=<MEMREQ.FNC/0>	; MEM REQ function code
+
+;	Memory access functions.
+
+;								Reference	Address		VA' After
+;				Code	Function		Type		Source		Reference
+;				----	--------		---------	-------		---------
+	MEM.VIRT.VA		= 00	; read/write virtual	virtual		VA		VA+4
+;				= 01
+	MEM.VIRT.VA.LOCK	= 02	; read lock/write unlock virtual	VA		VA+4
+;				= 03
+	MEM.VIRT.VAP		= 04	; read/write virtual	virtual		VA'		VA'+4
+	MEM.VIRT.VAP.PTE	= 05	; read process PTE	virtual		VA'		VA'+4
+	MEM.VIRT.VAP.LOCK	= 06	; read lock/write unlock virtual	VA'		VA'+4
+;				= 07
+	MEM.PHYS.VA		= 08	; read/write physical	physical	VA		VA+4
+;				= 09
+	MEM.PHYS.VA.LOCK	= 0A	; read lock/write unlock physical	VA		VA+4
+	MEM.PHYS.VA.IPR		= 0B	; read/write registers	physical	VA		VA+4
+	MEM.PHYS.VAP		= 0C	; read/write physical	physical	VA'		VA'+4
+	MEM.PHYS.VAP.PTE	= 0D	; read system PTE	physical	VA'		VA'+4
+	MEM.PHYS.VAP.LOCK	= 0E	; read lock/write unlock physical	VA'		VA'+4
+	MEM.PHYS.VAP.INTVEC	= 0F	; read int vector	physical	VA'		VA'+4
+
+;	MEM REQ microinstruction format, continued.
+
+;	Probes.
+
+;								Reference	Address		VA' After
+;				Code	Function		Type		Source		Reference
+;				----	--------		---------	-------		---------
+	PROBE.VIRT.VA		= 10	; probe virtual		virtual		VA		unchanged
+;				= 11
+;				= 12
+;				= 13
+	PROBE.VIRT.VAP		= 14	; probe virtual		virtual		VA'		unchanged
+;				= 15
+;				= 16
+;				= 17
+
+;	Interchip/intrachip transfer functions.
+
+;				Code	Function
+;				----	--------
+	FPA.DATA		= 18	; FPA data transfer
+;				= 19
+;				= 1A
+;				= 1B
+;				= 1C
+	MXPR			= 1D	; processor register transfer (M Box length registers)
+	MXPS0			= 1E	; spur transfer, group 0
+	MXPS1			= 1F	; spur transfer, group 1
+
+;	MEM REQ microinstruction format, continued.
+
+;	This field defines the direction of operation (read or write).
+
+MEMREQ.RW/=<35>,.DEFAULT=<MEMREQ.RW/0>	; MEM REQ read/write control
+
+;				Code	Function
+;				----	--------
+	READ			= 0,.VALIDITY=	<.NOT[<DST.PSL.OR.Q>]>
+					; read
+	WRITE			= 1	; write
+
+;	This field defines the access check for the function to be performed
+;	(virtual mreqs and probes ONLY).  Note that a valid check is always performed.
+
+MEMREQ.ACC/=<34:32>,.DEFAULT=<MEMREQ.ACC/0>	; MEM REQ access check control
+
+;				Code	Priv Check	Access Mode
+;				----	----------	-----------
+	NONE			= 0	; none		current
+;				= 1
+	RCHK.CURR		= 2	; read		current
+	RCHK.MODE		= 3	; read		mode
+	WCHK.CURR		= 4	; write		current
+	WCHK.MODE		= 5	; write		mode
+	AT.CURR			= 6	; AT = m	current
+;				= 7
+
+;	This field defines registers accessable with the MXPR instruction.
+;	All are read/write.
+
+MEMREQ.PR/=<34:32>,.DEFAULT=<MEMREQ.PR/0>	; MEM REQ MXPR register number
+
+;				Code	Register
+;				----	--------
+;				= 0	; nop
+	P0LR			= 1	; P0 length register
+	P1LR			= 2	; P1 length register
+;				= 3
+	SLR			= 4	; system length register
+;				= 5
+;				= 6
+;				= 7
+
+;	MEM REQ microinstruction format, continued.
+
+;	This field defines register numbers which are readable from the
+;	spur in an MXPS0 internal operation.
+
+MEMREQ.REG.RD.0/=<34:32>,.DEFAULT=<MEMREQ.REG.RD.0/0>	; MEM REQ MXPS0 read register number
+
+;				Code	Register
+;				----	--------
+;				= 0
+	MSER			= 1	; memory system error reg in bits<7:0>	ro
+	INT.ID			= 2	; highest interrupt in bits<4:0>	ro
+	OPCODE			= 3	; opcode register in bits<7:0>		ro
+	SPEC.RN			= 4	; specifier'RN in bits<7:0>		ro/rw
+;				= 5
+	HSIR			= 6	; highest swre int req in bits<3:0>	rw
+;				= 7
+
+;	This field defines register numbers which are readable from the
+;	spur in an MXPS1 internal operation.
+
+MEMREQ.REG.RD.1/=<34:32>,.DEFAULT=<MEMREQ.REG.RD.1/0>	; MEM REQ MXPS1 read register number
+
+;				Code	Register
+;				----	--------
+	ICCS			= 0	; ICCS<6> in bit<6>			rw
+	CADR			= 1	; cache disable register in bits<7:0>	rw
+	EBOX.STATE		= 2	; STATE<5:0> in bits<5:0>		ro
+	EBOX.CCS		= 3	; RESTART, alu cc's in bits<7,3:0>	ro
+	RLOG.STACK		= 4	; RLOG[0]<7:0> in bits<7:0>		ro
+	MAPEN			= 5	; MAPEN in bit<0>			rw
+;				= 6
+;				= 7
+
+;	MEM REQ microinstruction format, continued.
+
+;	This field defines register numbers which are writeable from the
+;	spur in an MXPS0 internal operation.
+
+MEMREQ.REG.WR.0/=<34:32>,.DEFAULT=<MEMREQ.REG.WR.0/0>	; MEM REQ MXPS0 write register number
+
+;				Code	Register
+;				----	--------
+;				= 0
+	MSER.CLEAR		= 1	; MSER clear				wc
+;				= 2
+;				= 3
+	RN			= 4	; RN in bits<3:0>			rw
+;				= 5
+	HSIR			= 6	; highest swre int req in bits<3:0>	rw
+;				= 7
+
+;	This field defines register numbers which are writeable from the
+;	spur in an MXPS1 internal operation.
+
+MEMREQ.REG.WR.1/=<34:32>,.DEFAULT=<MEMREQ.REG.WR.1/0>	; MEM REQ MXPS1 write register number
+
+;				Code	Register
+;				----	--------
+	ICCS			= 0	; ICCS<6> in bit<6>			rw
+	CADR			= 1	; cache disable register in bits<7:0>	rw
+;				= 2
+;				= 3
+;				= 4
+	MAPEN			= 5	; MAPEN in bit<0>			rw
+	MMGT.STATUS		= 6	; MMGT.STATUS in bits<2:0>		wo
+	PROBE.MODE		= 7	; alternate probe mode in bits<1:0>	wo
+
+.TOC	"	SPECIAL Microinstruction Format"
+
+;	The standard fields for the SPECIAL microinstruction are:
+;
+;	SPECIAL/	microopcode	=	000
+;	SPECIAL.MISC1/	misc 1 operation
+;	SPECIAL.MISC2/	misc 2 operation
+;	SPECIAL.MISC3/	misc 3 operation
+;	DST/		destination control
+;	CC/		condition code control
+;	MISC/		miscellaneous control
+;	A/		A port select
+
+;	This field defines the current microinstruction to be a "S P E C I A L" format instruction.
+ 
+SPECIAL/=<44:42>,.DEFAULT=<SPECIAL/FORMAT>	; Class code
+
+	FORMAT			= 0	; select the SPECIAL format
+
+;	This field defines the MISC1 operation.
+
+SPECIAL.MISC1/=<41:37>,.DEFAULT=<SPECIAL.MISC1/0>	; SPECIAL misc1 operation
+
+;				Code	Function
+;				----	--------
+	NOP			= 00	; nop
+	ZAP.TB			= 01	; invalidate translation buffer
+	SET.VAX.TRAP.REQUEST	= 02	; set VAX trap request
+;				= 03
+	SET.REPROBE		= 04	; set REPROBE
+;				= 05
+;				= 06
+;				= 07
+	SET.MMGT.TD		= 08	; set MMGT.TD
+;				= 09
+;				= 0A
+;				= 0B
+;				= 0C
+;				= 0D
+;				= 0E
+;				= 0F
+
+	HALT			= 10	; simulator halt
+	ZAP.TB(HIT).IF.HIT	= 11	; invalidate tb[hit] on hit
+	CLEAR.VAX.TRAP.REQUEST	= 12	; clear VAX trap request
+;				= 13
+;				= 14
+;				= 15
+;				= 16
+;				= 17
+;				= 18
+;				= 19
+;				= 1A
+;				= 1B
+;				= 1C
+;				= 1D
+;				= 1E
+;				= 1F
+
+;	SPECIAL microinstruction format, continued.
+
+;	This field defines the MISC2 operation.
+
+SPECIAL.MISC2/=<36>,.DEFAULT=<SPECIAL.MISC2/NOP>	; SPECIAL misc2 operation
+
+;				Code	Function
+;				----	--------
+	NOP			= 0	; nop
+	LOAD.PC.FROM.BPC	= 1,.VALIDITY=	<.NOT[<MISC.LOAD.PC>]>
+					; copy backup PC to PC
+
+;	SPECIAL microinstruction format, continued.
+
+;	This field defines the MISC3 operation.
+
+SPECIAL.MISC3/=<35:32>,.DEFAULT=<SPECIAL.MISC3/0>	; SPECIAL misc3 operation
+
+;				Code	Function
+;				----	--------
+	NOP			= 00
+	CLEAR.STATE.5-4		= 01	; clear state<5:4>
+	SET.STATE.3		= 02,.VALIDITY=	<.NEQ[<MISC/>,<MISC/CLEAR.STATE.3-0>]>
+					; set state<3>
+;				= 03
+	SET.STATE.4		= 04	; set state<4>
+;				= 05
+;				= 06
+;				= 07
+	SET.STATE.5		= 08	; set state<5>
+;				= 09		
+;				= 0A		
+;				= 0B		
+;				= 0C		
+;				= 0D		
+;				= 0E		
+;				= 0F
+
+.TOC	"	BRANCH Microinstruction Format"
+
+;	This field defines the microsequencer control to be BRANCH type.
+
+BRANCH/=<16>				; Class code
+
+	FORMAT	 		= 1	; select the BRANCH type
+
+.CREF					; enable Cref as this is an interesting field
+
+BR.BCS/=<15:11>
+
+;				Code	Function
+;				----	--------
+;				= 00
+;				= 01
+;				= 02
+;				= 03
+	RET			= 04	; return from microsubroutine/microtrap
+;				= 05
+;				= 06
+;				= 07
+
+	SPEC.NEXT		= 08,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; decode next specifier
+	DEC.NEXT		= 08,.VALIDITY=	<DEC.NEXT.OK>
+					; decode next instruction
+;				= 09	; 
+	DL.BWL.AT.RVM_SPEC.NEXT	= 0A,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; if DL.BWL and AT.RVM then decode next specifier else goto
+	AT.RVM_SPEC.NEXT	= 0B,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; if AT.RVM then decode next specifier else goto
+	DL.BWL.AT.R_SPEC.NEXT	= 0C,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; if DL.BWL and AT.R then decode next specifier else goto
+	AT.R_SPEC.NEXT		= 0D,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; if AT.R then decode next specifier else goto
+	AT.AV_SPEC.NEXT		= 0E,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; if AT.AV then decode next specifier else goto
+	DL.BWL_SPEC.NEXT	= 0F,.VALIDITY=	<.NOT[<DST.PSL>]>
+					; if DL.BWL then decode next specifier else goto
+	DL.BWL_DEC.NEXT		= 0F,.VALIDITY=	<DEC.NEXT.OK>
+					; if DL.BWL then decode next instruction else goto
+
+	ALU.NZV			= 10	; ALU.NZV		case
+	ALU.NZC			= 11	; ALU.NZC		case
+	SC2-0			= 12	; SC<2:0>		case
+	SC5-3			= 13	; SC<5:3>		case
+;				= 14
+	PSL26-24		= 15	; PSL<26:24>		case
+	STATE2-0		= 16	; STATE<2:0>		case
+	STATE5-3		= 17	; STATE<5:3>		case
+
+	MBOX.STATUS		= 18	; mem mgt status 1	case	(read/write'p0/p1/sys/lnv)
+	MMGT.STATUS		= 19	; mem mgt status 2	case
+	MREF.STATUS		= 1A	; mem mgt status 3	case	(RT/CVAX vs CVAX'VIBA ok'mref ok)
+	FPA.DL			= 1B	; FPA, DL		case	(fpa present'dl<1:0>)
+	INT.RM			= 1C	; interrupt, rmode	case	(interrupt'prev rmode'curr rmode)
+	OPCODE2-0		= 1D	; OPCODE<2:0>		case
+	ID.LOAD			= 1E	; AT, ID load		case	(at<1>'id<--ib.len(dl)<1:0>)
+;				= 1F
+
+BR64T.OFF/=<10:0>,.NEXTADDRESS		; BRANCH offset address
+
+	SELF=<.>
+
+.NOCREF					; not interesting anymore
+
+.TOC	"	JUMP Microinstruction Format"
+
+;	This field defines the current microinstruction's 'NEXTADDRESS' to be a "J U M P" type.
+
+JUMP/=<16>,.DEFAULT=<JUMP/FORMAT>	; Class code
+
+	FORMAT			= 0	; select the JUMP type
+
+;	This field defines the jump address.
+
+JMP.ADD/=<10:0>,.DEFAULT=<BR64T.OFF/>	; JUMP jump address control
+
+;	This field defines the subroutine call bit.
+
+JMP.SUB/=<15>,.DEFAULT=<JMP.SUB/NOCALL>	; JUMP subroutine control
+
+	NOCALL			= 0	; don't call
+	CALL			= 1	; call
+
+.TOC	"	Validity Expressions"
+
+;	Expression DST.x is TRUE if dst = register x.
+
+.SET/DST.SC=		<.OR[	<.AND[	<.EQL[<CONST/>,<CONST/FORMAT>]>,
+					<.EQL[<CONST.DST/>,<CONST.DST/DST.A>]>,
+					<.EQL[<A/>,<A/SC>]>	]>,
+				<.AND[	<.NEQ[<CONST/>,<CONST/FORMAT>]>,
+					<.EQL[<DST/>,<DST/DST.A>]>,
+					<.EQL[<A/>,<A/SC>]>	]>	]>
+
+.SET/DST.PSL=		<.OR[	<.AND[	<.EQL[<CONST/>,<CONST/FORMAT>]>,
+					<.EQL[<CONST.DST/>,<CONST.DST/DST.A>]>,
+					<.EQL[<A/>,<A/PSL>]>	]>,
+				<.AND[	<.NEQ[<CONST/>,<CONST/FORMAT>]>,
+					<.EQL[<DST/>,<DST/DST.A>]>,
+					<.EQL[<A/>,<A/PSL>]>	]>	]>
+
+.SET/DST.Q=		<.OR[	<.AND[	<.EQL[<CONST/>,<CONST/FORMAT>]>,
+					<.EQL[<CONST.DST/>,<CONST.DST/DST.A>]>,
+					<.EQL[<A/>,<A/Q>]>	]>,
+				<.AND[	<.NEQ[<CONST/>,<CONST/FORMAT>]>,
+					<.EQL[<DST/>,<DST/DST.A>]>,
+					<.EQL[<A/>,<A/Q>]>	]>	]>
+
+.SET/DST.VA=		<.AND[	<.NEQ[<CONST/>,<CONST/FORMAT>]>,
+				<.EQL[<DST/>,<DST/DST.B>]>,
+				<.EQL[<PB/>,<PB/VA>]>	]>
+
+.SET/DST.VAP=		<.AND[	<.NEQ[<CONST/>,<CONST/FORMAT>]>,
+				<.EQL[<DST/>,<DST/DST.B>]>,
+				<.EQL[<PB/>,<PB/VAP>]>	]>
+
+.SET/DST.VIBA=		<.AND[	<.NEQ[<CONST/>,<CONST/FORMAT>]>,
+				<.EQL[<DST/>,<DST/DST.B>]>,
+				<.EQL[<PB/>,<PB/VIBA>]>	]>
+
+;	Expression DST.PSL.OR.Q is true if dst = PSL or Q.
+
+.SET/DST.PSL.OR.Q=	<.OR[	<DST.PSL>,<DST.Q>	]>
+
+;	Expression BASIC.OR.CONST is true if the microinstruction is a basic or constant.
+
+.SET/BASIC.OR.CONST=	<.OR[	<.EQL[<BASIC/>,<BASIC/FORMAT>]>,
+				<.EQL[<CONST/>,<CONST/FORMAT>]>		]>
+
+;	Expression BASIC.OR.MEMREQ is true if the microinstruction is a basic or memreq.
+
+.SET/BASIC.OR.MEMREQ=	<.OR[	<.EQL[<BASIC/>,<BASIC/FORMAT>]>,
+				<.EQL[<MEMREQ/>,<MEMREQ/FORMAT>]>	]>
+
+;	Expression MEMREQ.UTRAP is true if the microinstruction can microtrap.
+
+.SET/MEMREQ.UTRAP=	<.AND[	<.EQL[<MEMREQ/>,<MEMREQ/FORMAT>]>,
+				<.EQL[<.AND[<MEMREQ.FNC/>,0C]>,0]>	]>
+
+;	Expression MEMREQ.READ is true if the microinstruction is a memreq read.
+
+.SET/MEMREQ.READ=	<.AND[	<.EQL[<MEMREQ/>,<MEMREQ/FORMAT>]>,
+				<.LEQ[<MEMREQ.FNC/>,0F]>,
+				<.EQL[<MEMREQ.RW/>,<MEMREQ.RW/READ>]>	]>
+
+;	Expression MEMREQ.MXPS is true if the microinstruction is a memreq MXPS.
+
+.SET/MEMREQ.MXPS=	<.AND[	<.EQL[<MEMREQ/>,<MEMREQ/FORMAT>]>,
+				<.GEQ[<MEMREQ.FNC/>,1C]>		]>
+
+;	Expression SHIFT.LEFT is true if the microinstruction is a left shift.
+
+.SET/SHIFT.LEFT=	<.AND[	<.EQL[<SHIFT/>,<SHIFT/FORMAT>]>,
+				<.EQL[<SHIFT.DIR/>,<SHIFT.DIR/LEFT>]>	]>
+
+;	Expression MISC.LOAD.PC is true if the misc field loads VIBA and PC.
+
+.SET/MISC.LOAD.PC=	<.OR[	<.EQL[<MISC/>,<MISC/LOAD.V&PC>]>,
+				<.EQL[<MISC/>,<MISC/IF.BCOND.LOAD.V&PC>]>,
+				<.EQL[<MISC/>,<MISC/IF.BCOND.LOAD.V&PC.TRAP>]>	]>
+
+;	Expression LOAD.VIBA.PC.OK is true if it is okay to load VIBA and PC.
+
+.SET/LOAD.VIBA.PC.OK=	<.AND[	<.NOT[<DST.VIBA>]>,
+				<.NEQ[<MEMREQ/>,<MEMREQ/FORMAT>]>,
+				<.NEQ[<SPECIAL/>,<SPECIAL/FORMAT>]>	]>
+
+;	Expression DEC.NEXT.OK is true if it is okay to decode the next instruction.
+
+.SET/DEC.NEXT.OK=	<.AND[	<.NOT[<DST.PSL>]>,
+				<.NOT[<MEMREQ.READ>]>,
+				<.NOT[<MEMREQ.MXPS>]>	]>
+
+.cref
+.bin
+.ucode

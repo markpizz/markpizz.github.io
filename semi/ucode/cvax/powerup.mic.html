@@ -1,0 +1,256 @@
+.TOC	"POWERUP.MIC -- Powerup Initialization"
+.TOC    "Revision 3.1"
+
+;       Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC 	"	Revision History"
+
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 03	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	24-Jun-86	[RMS]	Documented additional PSL restriction (ECO 6JUN18DWA.1)
+;	20-May-86	[RMS]	Revised to clear write buffer at console entry (ECO 6MAY14RMS.2)
+;	24-Feb-86	[RMS]	Revised to set cc map to known state
+;	19-Feb-86	[RMS]	Revised to create one line subroutine
+;	7-Jan-86	[RMS]	Documented MAPEN restriction (ECO 6JAN07DS.1)
+;	29-Dec-85	[RMS]	Separated ASTLVL and TRAP
+;	17-Dec-85	[RMS]	Revised to clear CADR twice during powerup
+;	5-Sep-85	[RMS]	Documented additional PSL<cur_mode> restriction (ECO 5SEP05AO.1)
+;	2-Sep-85	[RMS]	Revised to save word
+; 02	29-Jul-85	[RMS]	Editorial changes
+;	26-Jul-85	[RMS]	Documented additional PSL restrictions
+; 01	18-Mar-85	[RMS]	Revised for second pass model
+; 00	2-May-84	[RMS]	First edit for CVAX
+
+.bin
+
+;= BEGIN POWERUP
+
+.nobin
+.TOC	"	Powerup Initialization"
+
+;	This module contains the power up initialization code for CVAX.
+
+;	At power up, the microcode must assure that:
+;
+;		1.  SISR is initialized to a known state =	0
+;		2.  ICCS is initialized to a known state =	0
+;		3.  CADR is initialized to a known state =	0
+;		4.  MSER is initialized to a known state =	0
+;		5.  ASTLVL is initialized to a known state =	4
+;		6.  The cache is flushed.
+;		7.  The console is passed the initial halt code (power up).
+;
+;	Note that CADR must be cleared twice:  if the diagnostic mode bit
+;	powers up in the set state, the first clear will not flush the cache.
+
+;	There is an alternate entry point to this module (CONSOLE.HALT),
+;	which is used for passing control to the console after an error.  It
+;	does the following:
+;
+;		1.  Saves PC in [SAVEPC]
+;		2.  Saves PSL in [SAVEPSL]<31:16,7:0>
+;		3.  Saves MAPEN in [SAVEPSL]<15>
+;		4.  Saves the halt code in [SAVEPSL]<13:8>
+;		5.  Saves SP in the current mode stack pointer
+;		6.  Sets PSL	= 041F0000
+;		7.  Sets PC	= 20040000
+;		8.  Sets MAPEN	= 0
+;		9.  Loads SP from the interrupt stack pointer
+;		10. Clears all internal funny flags.
+;
+.bin
+
+;	Power up sequence for CVAX.
+
+;= AT 0
+
+POWERUP:
+	;---------------------------------------;
+	[SISR]<--K[0],				; clear SISR
+	DISABLE.IB.PREFETCH,			; disable prefetching
+	CALL[CLEAR.W0]				; clear W0
+
+	;---------------------------------------;
+	MXPS1[ICCS]<--[W0],			; clear interval timer interrupt enable
+	CALL[WRITE.HSIR.W0]			; clear highest pri swre int request
+						; >>HSIR update, no decode for two cycles
+
+	;---------------------------------------;
+	MXPS0[MSER.CLEAR]<--[W0],		; clear memory system error register
+	CALL[WRITE.CADR.W0]			; clear CADR, flush cache
+
+	;---------------------------------------;
+	[ASTLVL]<--K[04]000,			; set ASTLVL = 4 --> no AST pending
+	CALL[WRITE.CADR.W0]			; clear CADR, flush cache
+
+	;---------------------------------------;
+	CONSOLE.HALT[ERR.PWRUP]			; power up, invoke console
+
+;	One line subroutine to update CADR and flush cache.
+
+WRITE.CADR.W0:
+	;---------------------------------------;
+	MXPS1[CADR]<--[W0],			; clear cache disable register, flush cache
+	RETURN					; return to caller
+
+;	Console halt entry point.
+
+;	At this point,
+;		[SAVEPSL]<13:8>	=	console halt code
+
+CONSOLE.HALT:
+	;---------------------------------------;
+	[W0]<--[SP],				; get current SP
+	DISABLE.IB.PREFETCH			; disable prefetching if enabled
+
+	;---------------------------------------;
+	[W1]<--[PC],				; get current PC
+						; >>PC read, not written in prev cycle
+	CLEAR.WRITE.BUFFER			; clear write buffers
+
+	;---------------------------------------;
+	[SC]<--MXPS1[MAPEN],			; get MAPEN to SC<0>
+						; >>spur read, prev dst was W1
+	CALL[COPY.PSL.TO.W2]			; get current PSL
+						; >>PSL read, not written in prev cycle
+
+	;---------------------------------------;
+	[SAVEPC]<--B.[W1],			; save PC in SAVEPC
+	CASE2[SC2-0].AT.[CONSOLE.MAP.OFF]	; case on MAPEN = SC<0>
+
+;= ALIGNLIST 110*	(CONSOLE.MAP.OFF,	CONSOLE.MAP.ON)
+
+CONSOLE.MAP.ON:
+	;---------------------------------------; SC<0> = 1:
+	[SAVEPSL]<--[SAVEPSL].OR.K[80]0		; mapping was on, set SAVEPSL<15>
+
+CONSOLE.MAP.OFF:
+	;---------------------------------------; SC<0> = 0:
+	[SAVEPSL]<--[SAVEPSL].OR.[W2],		; or PSL into SAVEPSL
+	CASE8[PSL26-24].AT.[CONSOLE.PSL.000]	; case on current PSL<26:24>
+
+;	PC, PSL, MAPEN saved.
+;	Save current stack, load interrupt stack.
+
+;	At this point,
+;		W0	=	current SP
+
+;= ALIGNLIST 000*	(CONSOLE.PSL.000,	CONSOLE.PSL.001,
+;=			 CONSOLE.PSL.010,	CONSOLE.PSL.011,
+;=			 CONSOLE.PSL.100,	CONSOLE.PSL.101,
+;=			 CONSOLE.PSL.110,	CONSOLE.PSL.111)
+
+CONSOLE.PSL.000:
+	;---------------------------------------; PSL<26:24> = 000:
+	[KSP]<--B.[W0],				; save SP in KSP
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.001:
+	;---------------------------------------; PSL<26:24> = 001:
+	[ESP]<--B.[W0],				; save SP in ESP
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.010:
+	;---------------------------------------; PSL<26:24> = 010:
+	[SSP]<--B.[W0],				; save SP in SSP
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.011:
+	;---------------------------------------; PSL<26:24> = 011:
+	[USP]<--B.[W0],				; save SP in USP
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.100:
+	;---------------------------------------; PSL<26:24> = 100:
+	[IS]<--B.[W0],				; save SP in ISP
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.101:
+	;---------------------------------------; PSL<26:24> = 101:
+	[SAVEPSL]<--[SAVEPSL].OR.K[40]0,	; mark corrupted PSL, set SAVEPSL<14>
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.110:
+	;---------------------------------------; PSL<26:24> = 110:
+	[SAVEPSL]<--[SAVEPSL].OR.K[40]0,	; mark corrupted PSL, set SAVEPSL<14>
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+CONSOLE.PSL.111:
+	;---------------------------------------; PSL<26:24> = 111:
+	[SAVEPSL]<--[SAVEPSL].OR.K[40]0,	; mark corrupted PSL, set SAVEPSL<14>
+	GOTO[CONSOLE.LOAD.SP]			; go load ISP
+
+;	PC, PSL, MAPEN, current SP saved.
+;	Load new SP, enable all machine flags.
+
+CONSOLE.LOAD.SP:
+	;---------------------------------------;
+	[PSL]<--K[1F]00,			; PSL = 001F0000
+						; >>PSL update, no decode for two cycles
+						; >>CM update, no I/O in next cycle
+	MAP.JIZJ				; set cc map to jizj to disable int ovflo
+
+	;---------------------------------------;
+	[W1]<--K[04]00,				; set up bits <23:16> of power up addr
+	CALL[SET.PSL.IS]			; PSL<is> = 1
+						; >>PSL read, not written in prev cycle
+						; >>PSL update, no decode for two cycles
+
+	;---------------------------------------;
+	MXPS1[MAPEN]<--[W1]			; clear MAPEN (W1<0> = 0)
+						; >>MAPEN write, prefetching is disabled
+
+	;---------------------------------------;
+	[WBUS]<--[W1].OR.K[20]000,		; set up bits <31:24> of power up addr
+	LOAD.V&PC				; load VIBA and PC, flush IB
+						; >>PC update, no decode in next cycle
+
+	;---------------------------------------;
+	[W0]<--[IS]				; get ISP to load into SP
+
+	;---------------------------------------;
+	[SP]<--B.[W0],				; load new SP
+	CLEAR.MMGT.TD,				; rearm memory management microtraps
+	GOTO[IE.EXIT]				; go clear flags, enable prefetch, decode
+
+;	One line subroutine to copy PSL to W2.
+;	Caller must assure PSL not written in previous cycle.
+
+COPY.PSL.TO.W2:
+	;---------------------------------------;
+	[W2]<--[PSL], RETURN			; copy PSL to W2, return to caller
+						; >>PSL read, not written in prev cycle
+
+;	One line subroutine to set PSL<is>.
+;	Caller must assure PSL not written in previous cycle.
+
+SET.PSL.IS:
+	;---------------------------------------;
+	[PSL]<--[PSL].OR.K[04]000, RETURN	; set PSL<is> = 1, return to caller
+						; >>PSL read, not written in prev cycle
+						; >>PSL update, no decode for two cycles
+
+;= END POWERUP

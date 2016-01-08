@@ -1,0 +1,544 @@
+.TOC	"SELFTEST.MIC -- Simple Powerup Selftest"
+.TOC	"Revision 3.8"
+
+;	Mike Uhler, Rick Calcagni
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1986, 1987, 1988, 1989 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    8 02-Nov-89 REC	Convert 6 spare microwords for MM.IB.FAULT.. fix
+;    7 09-May-89 REC	Convert 1 spare microword to SPEC.AV.REG.DISPATCH
+;    6 31-Mar-89 REC	Convert 1 spare microword to IE.BACKUP.PC
+;    5 06-Mar-89 REC	Separated Rigel and Mariah modules
+;    4 30-Aug-88 REC	Removed two spare microwords for use in MM.IB.ERROR..
+;    3 25-Apr-88 GMU	Removed spare microword for use in VECTOR.MIC.
+;    2 28-Dec-87 GMU	Added conditional assembly to remove microwords
+;			for Mariah variant.
+; (3)1 25-Aug-87 REC	Added selftest code; pass 1 code freeze
+;
+; (2)1 06-Apr-87 GMU	Microcode template.
+
+.bin
+;= BEGIN SELFTEST
+.nobin
+
+;	This module implements a simple powerup selftest to check the
+;	operation of the chip at powerup.
+;
+;	This code is called as a subroutine by the main-line powerup
+;	code.  If selftest is sucessful, this routine returns to the
+;	main-line code.  If selftest fails, this routine exits through
+;	(SELFTEST.FAILED) which causes a console halt with the selftest
+;	failed halt code.  The failing subtest number in stored in R0.
+;
+;	An important consideration during powerup is the use of MD registers.
+;	As the MD valid bits may powerup in an indeterminate state, no MD
+;	may be referenced without writing it first.  In addition, there must
+;	be at least one microinstruction between the first W-bus write of an
+;	MD and a subsequent read.  If an MD, whose valid bit is clear, is
+;	written and then read in the next microinstruction, the reference
+;	will stall the entire pipeline, preventing the MD write from completing,
+;	and resulting in deadlock.  Selftest currently does not write to
+;	or read from any MD registers.
+;
+;	Another consideration during powerup is the preservation of user
+;	visible state.  In the event of a system reset, the powerup flow
+;	(including selftest) must preserve state which can be examined
+;	via the system console.  This state includes the GPRs, PSL, and
+;	MAPEN.  On failure, selftest assumes that machine state is unreliable
+;	anyway, and overwrites R0 with the failing subtest number so that it
+;	can be examined via the console.
+
+;	The goal of microcoded powerup selftest is to provide a minimum level
+;	of confidence that the machine is capable of decoding and executing
+;	microinstructions.  The test is targeted primarily at the microsequencer
+;	logic.  Obviously the microsequencer must be able to fetch and decode
+;	some instructions to even get this far.
+;
+;	Powerup selftest focuses on the micro-branch logic in the REX520
+;	chip microsequencer.  Only a subset of all possible micro-branch
+;	conditions are tested because many of the REX520 chip states are
+;	indeterminate at powerup.  The test flow is divided into subtests.
+;	Each subtest issues a branch/format instruction with micro-branch
+;	conditions selected by the SEQ.COND field of the microword.  The
+;	different values for SEQ.COND used in selftest attempt to isolate
+;	possible decode problems, although a full 'walking ones' and 'walking
+;	zeros' test of this field is not possible.
+;
+;	The micro-branch logic works by driving a group of three states,
+;	selected by the SEQ.COND field of the microcoword, onto the utest bus.
+;	The utest bus is then OR'd with bits<3:1> of the case target address
+;	to select the next microword.  Wherever it is practical in selftest,
+;	states NOT being selected during a particular subtest are set to values
+;	different from the states being driven.  The setup of these states is
+;	often implicit in the test flow and the selection of data values.
+;	Explicit setup of these states is commented as 'for paranoia'.
+;
+;	The results of each subtest are checked in a general purpose case target
+;	routine.  Each branch destination in the case target routine subtracts
+;	the actual value of the utest bus for that location from an expected
+;	value previously stored in TRAP.  To save microwords, this expected
+;	value is actually a modified version of the subtest count in SAVEPC.
+;	Selftest is designed so that the expected utest bus value always
+;	corresponds to the lower three bits of (subtest number - 1).
+;
+;	As a side effect of setting up and verifying state for the micro-
+;	branch logic tests, some functionality of the REX520 chip datapath
+;	is verified as well.  Instructions are chosen to generate data and
+;	check results using as much of this functionality as possible while
+;	keeping code size minimal.  In addition, the setting and clearing of
+;	STATE4 and STATE5 are explicitly tested as these states are vital to
+;	the error reporting mechanisms of the machine.
+
+;	Subtests
+;	--------
+;
+;	  1		SC2-0 = 000
+;			This subtest uses a constant/format instruction to
+;			write SC.  The value 000000F8 puts 1's in the other
+;			possible case bits in SC.
+;
+;	  2		WBUS.NZC = 001  (V = 0)
+;			This subtest uses a basic/format ALU add to set the
+;			condition codes.  This instruction, in the routine
+;			(WAIT.CHECK.CASE), adds the value previously stored
+;			in SC E0000000#16 to the constant value 40000000#16
+;			exactly three cycles before before the case branch.
+;
+;	  3		STATE5-3 = 010
+;			This subtest checks that STATE4 can be set by a
+;			special/format instruction.  This state was initially
+;			cleared by reset to the chip.
+;
+;	  4		SC8-6 = 011
+;			This subtest uses a constant/format instruction to
+;			write SC.  The value 000000C0 puts all 0's in the other
+;			possible case bits in SC.
+;
+;	  5		PSL26-24 = 100
+;			This subtest uses a shift/format left shift to generate
+;			the value written to PSL.  Old PSL must be saved and
+;			restored if selftest passes since we need to preserve
+;			visible state on powerup.
+;
+;	  6		WBUS.NZV = 101  (C = 0)
+;			This subtest uses a basic/format ALU add to set the
+;			condition codes.  This instruction, in the routine
+;			(WAIT.CHECK.CASE), adds the value previously stored
+;			in SC 60000000#16 to the constant value 40000000#16
+;			exactly three cycles before before the case branch.
+;
+;
+;	  7		STATE5-3 = 110
+;			This subtest checks that STATE5 can be set by a
+;			special/format instruction.  This state was initially
+;			cleared by reset to the chip.
+;
+;	  8		SC2-0 = 111
+;			This subtest uses a basic/format ALU OR to write SC.
+;
+;	  9		STATE5-3 = 000
+;			This subtest checks that STATE5-4 can be cleared by a
+;			special/format instruction.
+;			
+
+.bin
+.TOC	"	Main Selftest Flow"
+
+;	Called from powerup microcode.
+
+;	The subtest count in SAVEPC is initialized to zero.  Each subtest consists
+;	of the setup of appropriate machine state, followed by a CALL to one of the
+;	general case branch instructions.  To save microwords, state for the next
+;	subtest is setup in parallel with the call for the current subtest.
+;	The last subtest does a GOTO instead of a CALL, which causes a return to
+;	the powerup flow on pass.
+
+SELFTEST:
+	;---------------------------------------;
+	[SC] <-- 000000[0F8],			; setup subtest [1]
+	DL <-- QUAD				; FPU.DL = ?11, for paranoia
+						; >> SC write, don't case in next 2 cycles
+
+	;---------------------------------------;
+	[SAVEPC] <-- [K0]			; initialize subtest number
+
+	;---------------------------------------;
+	[SC] <-- [0E0]000000,			; setup subtest [2]
+	STATE1 <-- 1,				; STATE2-0 = ?1?, for paranoia
+	CALL [SC20.CASE]			; subtest [1], SC2-0 = 000
+
+;	Subtest [2] depends upon exactly 2 microinstructions between the add in
+;	(WAIT.CHECK.CASE) and the branch in (NZC.CASE).
+
+	;---------------------------------------;
+	[SAVEPSL] <-- S[PSL],			; save old PSL
+	STATE4 <-- 1,				; setup subtest [3]
+	STATE3-0 <-- 0,				; clear STATE3 for the next case
+	CALL [NZC.CASE]				; subtest [2], WBUS.NZC = 001
+
+	;---------------------------------------;
+	[SC] <-- 000000[0C0],			; setup subtest [4]
+	DL <-- BYTE,				; FPU.DL = ?00, for paranoia
+	CALL [STATE53.CASE]			; subtest [3], STATE5-3 = 010
+
+	;---------------------------------------;
+	[PSL] <-- [K1] LSH [26.],		; setup subtest [5]
+	CALL [SC86.CASE]			; subtest [4], SC8-6 = 011
+
+	;---------------------------------------;
+	[SC] <-- [SC] RROT [9.],		; setup subtest [6]
+	DL <-- QUAD,				; FPU.DL = ?11, for paranoia
+	CALL [PSL.CASE]				; subtest [5], PSL<26:24> = 100
+
+;	Subtest [6] depends upon exactly 2 microinstructions between the add in
+;	(WAIT.CHECK.CASE) and the case in (NZV.CASE).
+
+	;---------------------------------------;
+	STATE5 <-- 1,				; setup subtest [7]
+	CALL [NZV.CASE]				; subtest [6], WBUS.NZV = 101
+
+	;---------------------------------------;
+	[SC] <-- [SC] OR 000000[07],		; setup subtest [8]
+	CALL [STATE53.CASE]			; subtest [7], STATE5-3 = 110
+
+;	Selftest main flow, continued.
+
+;	At this point,
+;		SAVEPC	=	current subtest number
+;		SAVEPSL	=	old PSL
+;		SC	=	60000007#16
+;		STATE5-3 =	110
+
+	;---------------------------------------;
+	STATE5-4 <-- 0,				; setup subtest [9]
+	CALL [SC20.CASE]			; subtest [8], SC2-0 = 111
+
+	;---------------------------------------;
+	[PSL] <-- [SAVEPSL],			; restore saved PSL
+	GOTO [STATE53.CASE]			; subtest [9], STATE5-3 = 000
+						; returns to powerup code on success
+.TOC	"	Case Branches"
+
+;	Each instruction cases on a different sequencer condition into the general
+;	case target routine.  TRAP gets the lower three bits of the current subtest
+;	count in SAVEPC, which is then used by the case target as the expected value of
+;	the utest bus.  These case branches are usually arrived at by a CALL from
+;	the main test flow. Successful execution of a case branch will result in
+;	a RETURN.
+
+;	At this point,
+;		SAVEPC	=	current subtest number
+
+NZV.CASE:
+	;---------------------------------------;
+	[TRAP] <-- [SAVEPC] AND 000000[07],	; mask to get expected utest
+	CASE [WBUS.NZV] AT [UTEST.CASE.000]	; NZV bits, seq.cond = 0000
+
+NZC.CASE:
+	;---------------------------------------;
+	[TRAP] <-- [SAVEPC] AND 000000[07],	; mask to get expected utest 
+	CASE [WBUS.NZC] AT [UTEST.CASE.000]	; NZC bits, seq.cond = 0001
+
+SC20.CASE:
+	;---------------------------------------;
+	[TRAP] <-- [SAVEPC] AND 000000[07],	; mask to get expected utest
+	CASE [SC2-0] AT [UTEST.CASE.000]	; SC2-0, seq.cond = 0010
+
+SC86.CASE:
+	;---------------------------------------;
+	[TRAP] <-- [SAVEPC] AND 000000[07],	; mask to get expected utest
+	CASE [SC8-6] AT [UTEST.CASE.000]	; SC8-6, seq.cond = 0100
+
+STATE53.CASE:
+	;---------------------------------------;
+	[TRAP] <-- [SAVEPC] AND 000000[07],	; mask to get expected utest
+	CASE [STATE5-3] AT [UTEST.CASE.000]	; STATE5-3, seq.cond = 0111
+
+PSL.CASE:
+	;---------------------------------------;
+	[TRAP] <-- [SAVEPC] AND 000000[07],	; mask to get expected utest
+	CASE [PSL26-24] AT [UTEST.CASE.000]	; PSL26-24, seq.cond = 1111
+
+.TOC	"	Case Target Routine"
+
+;	Each instruction subtracts the the expected value of the utest bus,
+;	stored in TRAP, from the actual utest value for that target.  This
+;	conditionally sets wbus.z for results checking 3 instructions later.
+
+;	At this point,
+;		SAVEPC	=	current subtest number
+;		TRAP	=	expected utest bus value
+
+;= ALIGNLIST 000* 	(UTEST.CASE.000, UTEST.CASE.001, UTEST.CASE.010, UTEST.CASE.011,
+;=			 UTEST.CASE.100, UTEST.CASE.101, UTEST.CASE.110, UTEST.CASE.111)
+
+UTEST.CASE.000:
+	;---------------------------------------; utest = 000:
+	[WBUS] <-- [TRAP] - 000000[00],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.001:
+	;---------------------------------------; utest = 001:
+	[WBUS] <-- [TRAP] - 000000[01],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.010:
+	;---------------------------------------; utest = 010:
+	[WBUS] <-- [TRAP] - 000000[02],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.011:
+	;---------------------------------------; utest = 011:
+	[WBUS] <-- [TRAP] - 000000[03],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.100:
+	;---------------------------------------; utest = 100:
+	[WBUS] <-- [TRAP] - 000000[04],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.101:
+	;---------------------------------------; utest = 101:
+	[WBUS] <-- [TRAP] - 000000[05],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.110:
+	;---------------------------------------; utest = 110:
+	[WBUS] <-- [TRAP] - 000000[06],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+UTEST.CASE.111:
+	;---------------------------------------; utest = 111:
+	[WBUS] <-- [TRAP] - 000000[07],		; subtract expected value
+	GOTO [WAIT.CHECK.CASE]			; checking routine, returns
+
+.TOC	"	Result Checking Routine"
+
+;	This routine waits 2 cycles for the wbus cc's to settle and then
+;	cases on wbus.z.  If wbus.z = 1, indicating that actual = expected,
+;	SELFTEST.CONTINUE executes a RETURN which returns to the main test
+;	flow.  For the last subtest, it returns to the powerup flow.
+
+;	At this point,
+;		SAVEPC	=	current subtest number
+;		SC	=	add operand if next subtest [2] or [6]
+;		WBUS.Z	=	testable in exactly 3 cycles
+
+WAIT.CHECK.CASE:
+	;---------------------------------------;
+	[SAVEPC] <-- [SAVEPC] + 1,		; increment subtest number
+	CALL [WAIT.ONE.CYCLE]			; wait for wbus.cc's
+
+	;---------------------------------------;
+	[WBUS] <-- [SC] + [40]000000,		; setup wbus.cc's for subtest [2], [6]
+	CASE [WBUS.NZV] AT [SELFTEST.FAILED]	; case on (expected - actual)
+
+;= ALIGNLIST 101* 	(SELFTEST.FAILED,	SELFTEST.CONTINUE)
+
+SELFTEST.CONTINUE:
+	;---------------------------------------; wbus.z = 1:
+	RETURN					; return to caller
+						; returns to powerup flow if done
+
+.TOC	"	Selftest Failure Code"
+
+;	Selftest failed.
+
+;	Store the subtest number in R0 as a failure code.  We can touch R0 here
+;	because selftest has failed, there is a serious problem with the
+;	basic functionality of the machine, and machine state visible to
+;	the console is possibly corrupt anyway.
+
+
+SELFTEST.FAILED:
+	;---------------------------------------;
+	[G.0] <-- [SAVEPC], LONG		; store failure code in R0
+
+	;---------------------------------------;
+	CONSOLE HALT [ERR.SELFTEST.FAILED]	; indicate failure to console
+
+.TOC	"	Spare Microwords"
+
+;	Microwords not allocated in the ROM can still be accessed by test logic
+;	in the REX520 chip for debug purposes.  Microsequencer control for these
+;	words must jump to (UNKNOWN.CS.ADDR) which causes a machine check.
+
+;	The diagnostic microwords are intended to provide visibility into internal
+;	REX520 state.  They can only be used with the REX520 in a controlled,
+;	isolated environment such as a dedicated chip tester.  The microwords
+;	are accessed by forcing a microaddress onto the XMAB with XSEL = 01.
+;	Each microword drives a unique 32 bit state onto the W_BUS.  Assertion
+;	of the FORCE_L pin forces the E-box W_LATCH to unconditionally latch
+;	the W_BUS value.  When the BIU is free, the W_LATCH is the default ID_BUS
+;	driver, which in turn is the default D_BUS driver.  Hence, the internal
+;	state accessed in the diagnostic microword is visible on the D_BUS pins.
+;
+;	To observe internal state as described above, it is necessary to insure
+;	that there are no commands pending in the BIU OUT_LAT.  Also, MD registers 
+;	should not be read if their valid bit is clear or the REX520 will stall
+;	indefinitely.
+;	
+
+;	The following microword is a copy of that which used to be at
+;	SPEC.AV.REG.., and was moved here to delay the case on DL by
+;	one cycle so that the value of DL is correct at the time of
+;	the case.
+
+;= AT 06D
+SPEC.AV.REG.DISPATCH:
+	;---------------------------------------;
+	[MD.SN] <-- S[G.RN], LONG,		; copy GPR to MD for Vfield
+	RN <-- RN + 1,				; increment to GPR+1
+	STATE2 <-- 1,				; set state 2 to flag Vfield specifier
+	CASE [FPU.DL] AT [SPEC.AV.REG.VFIELD]	; break out Vfield from EDIV
+
+
+;	The following six microwords fix a problem in the MM.IB.FAULT routine.
+
+;= AT 6A9
+MM.IB.FAULT.PROBE.VIBA:
+ 	;---------------------------------------;
+	[WBUS] <-- [VIBA],			; create faulting address
+	PROBE READ (CURMODE),			; probe will resolve TB miss
+						; without restoring I-box
+	CALL [WAIT.TWO.CYCLES],			; wait for probe status
+		sim addr [viba] [0]
+
+;= AT 6AA
+ 	;---------------------------------------;
+	CASE [MMGT.STATUS] AT [MM.IB.FAULT.OK]	; case on MMGT.STATUS
+
+
+;= AT 6B2
+MM.IB.FAULT.OK:
+ 	;---------------------------------------; mmgt.status<2:1> = 00 (address OK):
+	[VA] <-- [TRAP],			; restore VA to value at entry
+	RESTART IB PREFETCH,			; re-enable prefetch
+	GOTO [LAST.CYCLE]			; exit routine
+
+;= AT 6B6
+MM.IB.FAULT.TNV:
+ 	;---------------------------------------; mmgt.status<2:1> = 01 (TNV):
+	GOTO [MM.TNV.ACV..]			; jump to microtrap routine
+
+;= AT 6BA
+MM.IB.FAULT.ACV:
+ 	;---------------------------------------; mmgt.status<2:1> = 10 (ACV):
+	GOTO [MM.TNV.ACV..]			; jump to microtrap routine
+
+;= AT 6BE
+MM.IB.FAULT.TNV.ACV:
+ 	;---------------------------------------; mmgt.status<2:1> = 11 (TNV and ACV):
+	GOTO [MM.TNV.ACV..]			; jump to microtrap routine
+
+
+;= AT 6AB
+	;---------------------------------------;
+	[WBUS] <-- [PSL],			; read PSL
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [VA],			; read VA
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [VAP],			; read VAP
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [VIBA],			; read VIBA
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+;	The following microword is used to fix a problem where PC may get
+;	corrupted on a HALT interrupt.  The microaddress has been forced
+;	to prevent reallocation on subsequent changes to SELFTEST.MIC
+
+;= AT 6B3
+IE.BACKUP.PC:
+	;---------------------------------------;
+	PC <-- BACKUP PC,			; restore PC from BPC
+	GOTO [IE.INT.IPL1F.CONT]		; return to IE flow
+
+;	Observe MD registers.  Be careful not to read an MD if its valid bit
+;	is clear.
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T0],			; read MD0
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T1],			; read MD1
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T2],			; read MD2
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T3],			; read MD3
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4],			; read MD4
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T5],			; read MD5
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T6],			; read MD6
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.TMP],			; read MD7
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+
+;	Observe GPRs.  Iterative use of these three microwords can read all
+;	16 GPRs via the increment of RN.  A hardwire read of R0 is included
+;	for sanity checking.
+
+	;---------------------------------------;
+	[WBUS] <-- [G.0], LONG,			; read R0
+	RN <-- 0,				; initialize RN
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	RN <-- RN + 1,				; increment RN
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+	;---------------------------------------;
+	[WBUS] <-- [G.RN], LONG,		; read GPR
+	GOTO [UNKNOWN.CS.ADDR]			; can't get here
+
+UNKNOWN.CS.ADDR:
+	;---------------------------------------;
+	MACHINE CHECK [MCHK.UNKNOWN.CS.ADDR]	; all unknown microaddress go here,
+						; machine check
+
+;= END SELFTEST

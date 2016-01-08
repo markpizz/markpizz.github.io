@@ -1,0 +1,1584 @@
+.TOC	"INTLOGADR.MIC -- Integer, Logical, and Address Class Instructions"
+.TOC	"Revision 3.4"
+
+;	Rick Calcagni, Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    4 22-Aug-89 REC	Flush write buffers in ADAWI.R.. to implement
+;			NUDGE and BARRIER instructions.
+;    3 28-Dec-87 GMU	Changed CVTBI.R to use opcode case rather than
+;			a DL case.  This avoids using a DL case in an
+;			optimized entry point.
+;    2 28-Dec-87 GMU	Added restriction about .vx specifier operations.
+; (3)1 21-Aug-87 RMS	Editorial changes; pass 1 code freeze.
+;
+;    2 29-Dec-86 RMS	Saved three words, cycle in ASHQ.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+
+.bin
+;= BEGIN INTLOG
+.nobin
+
+;	This module implements the integer and logical class, and address class, instructions,
+;	except for multiply and divide.  The instructions in these classes are:
+;
+;
+;	Integer and Logical Instructions
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	58	 ADAWI add.rw, sum.mw						* * * *		iov
+;
+;	80	 ADDB2 add.rb, sum.mb						* * * *		iov
+;	C0	 ADDL2 add.rl, sum.ml						* * * *		iov
+;	A0	 ADDW2 add.rw, sum.mw						* * * *		iov
+;
+;	81	 ADDB3 add1.rb, add2.rb, sum.wb					* * * *		iov
+;	C1	 ADDL3 add1.rl, add2.rl, sum.wl					* * * *		iov
+;	A1	 ADDW3 add1.rw, add2.rw, sum.ww					* * * *		iov
+;
+;	D8	 ADWC add.rl, sum.ml						* * * *		iov
+;
+;	78	 ASHL cnt.rb, src.rl, dst.wl					* * * 0		iov
+;	79	 ASHQ cnt.rb, src.rq, dst.wq					* * * 0		iov
+;
+;	8A	 BICB2 mask.rb, dst.mb						* * 0 -
+;	CA	 BICL2 mask.rl, dst.ml						* * 0 -
+;	AA	 BICW2 mask.rw, dst.mw						* * 0 -
+;
+;	8B	 BICB3 mask.rb, src.rb, dst.wb					* * 0 -
+;	CB	 BICL3 mask.rl, src.rl, dst.wl					* * 0 -
+;	AB	 BICW3 mask.rw, src.rw, dst.ww					* * 0 -
+;
+;	88	 BISB2 mask.rb, dst.mb						* * 0 -
+;	C8	 BISL2 mask.rl, dst.ml						* * 0 -
+;	A8	 BISW2 mask.rw, dst.mw						* * 0 -
+;
+;	89	 BISB3 mask.rb, src.rb, dst.wb					* * 0 -
+;	C9	 BISL3 mask.rl, src.rl, dst.wl					* * 0 -
+;	A9	 BISW3 mask.rw, src.rw, dst.ww					* * 0 -
+;
+;	93	 BITB mask.rb, src.rb						* * 0 -
+;	D3	 BITL mask.rl, src.rl						* * 0 -
+;	B3	 BITW mask.rw, src.rw						* * 0 -
+;
+;	94	 CLRB dst.wb							0 1 0 -
+;	D4	 CLRL{=F} dst.wl						0 1 0 -
+;	7C	 CLRQ{=D=G} dst.wq						0 1 0 -
+;	B4	 CLRW dst.ww							0 1 0 -
+;
+;	91	 CMPB src1.rb, src2.rb						* * 0 *
+;	D1	 CMPL src1.rl, src2.rl						* * 0 *
+;	B1	 CMPW src1.rw, src2.rw						* * 0 *
+;
+;	98	 CVTBL src.rb, dst.wl						* * 0 0
+;	99	 CVTBW src.rb, dst.wl						* * 0 0
+;	F6	 CVTLB src.rl, dst.wb						* * * 0		iov
+;	F7	 CVTLW src.rl, dst.ww						* * * 0		iov
+;	33	 CVTWB src.rw, dst.wb						* * * 0		iov
+;	32	 CVTWL src.rw, dst.wl						* * 0 0
+;
+;	97	 DECB dif.mb							* * * *		iov
+;	D7	 DECL dif.ml							* * * *		iov
+;	B7	 DECW dif.mw							* * * *		iov
+;
+;	96	 INCB sum.mb							* * * *		iov
+;	D6	 INCL sum.ml							* * * *		iov
+;	B6	 INCW sum.mw							* * * *		iov
+;
+;	92	 MCOMB src.rb, dst.wb						* * 0 -
+;	D2	 MCOML src.rl, dst.wl						* * 0 -
+;	B2	 MCOMW src.rw, dst.ww						* * 0 -
+;
+;	8E	 MNEGB src.rb, dst.wb						* * * *		iov
+;	CE	 MNEGL src.rl, dst.wl						* * * *		iov
+;	AE	 MNEGW src.rw, dst.ww						* * * *		iov
+;
+;	90	 MOVB src.rb, dst.wb						* * 0 -
+;	D0	 MOVL src.rl, dst.wl						* * 0 -
+;	7D	 MOVQ src.rq, dst.wq						* * 0 -
+;	B0	 MOVW src.rw, dst.ww						* * 0 -
+;
+;	9A	 MOVZBW src.rb, dst.wb						0 * 0 -
+;	9B	 MOVZBL src.rb, dst.wl						0 * 0 -
+;	3C	 MOVZWL src.rw, dst.ww						0 * 0 -
+;
+;	DD	 PUSHL src.rl, {-(SP).wl}					* * 0 -
+;
+;	9C	 ROTL cnt.rb, src.rl, dst.wl					* * 0 -
+;
+;	D9	 SBWC sub.rl, dif.ml						* * * *		iov
+;
+;	82	 SUBB2 sub.rb, dif.mb						* * * *		iov
+;	C2	 SUBL2 sub.rl, dif.ml						* * * *		iov
+;	A2	 SUBW2 sub.rw, dif.mw						* * * *		iov
+;
+;	83	 SUBB3 sub.rb, min.rb, dif.wb					* * * *		iov
+;	C3	 SUBL3 sub.rl, min.rl, dif.wl					* * * *		iov
+;	A3	 SUBW3 sub.rw, min.rw, dif.ww					* * * *		iov
+;
+;	95	 TSTB src.rb							* * 0 0
+;	D5	 TSTL src.rl							* * 0 0
+;	B5	 TSTW src.rw							* * 0 0
+;
+;	8C	 XORB2 mask.rb, dst.mb						* * 0 -
+;	CC	 XORL2 mask.rl, dst.ml						* * 0 -
+;	AC	 XORW2 mask.rw, dst.mw						* * 0 -
+;
+;	8D	 XORB3 mask.rb, src.rb, dst.wb					* * 0 -
+;	CD	 XORL3 mask.rl, src.rl, dst.wl					* * 0 -
+;	AD	 XORW3 mask.rw, src.rw, dst.ww					* * 0 -
+;
+;
+;	Address Instructions
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	9E	 MOVAB src.ab, dst.wl						* * 0 -
+;	DE	 MOVAL{=F} src.al, dst.wl					* * 0 -
+;	7E	 MOVAQ{=D=G} src.aq, dst.wl					* * 0 -
+;	3E	 MOVAW src.aw, dst.wl						* * 0 -
+;
+;	9F	 PUSHAB src.ab, {-(SP).wl}					* * 0 -
+;	DF	 PUSHAL{=F} src.al, {-(SP).wl}					* * 0 -
+;	7F	 PUSHAQ{=D=G} src.aq, {-(SP).wl}				* * 0 -
+;	3F	 PUSHAW src.aw, {-(SP).wl}					* * 0 -
+;
+.bin
+
+.nobin
+.TOC	"	TSTx"
+
+;	These instructions test the source operand against zero.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	TSTB		95	src.rb - 0				1	r/b	iiii	TSTX..		--
+;	TSTW		B5	src.rw - 0				1	r/w	iiii	TSTX..		--
+;	TSTL		D5	src.rl - 0				1	r/l	iiii	TSTX..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		DL	=	data type of first operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	TSTx operation:
+;
+;		src.rx - 0
+
+TSTX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1],			; test source operand
+	SET PSL CC, LEN(DL), MAP.IIII,		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	INCx, DECx"
+
+;	These instructions increment or decrement the destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	INCB		96	dst.mb <-- dst.mb + 1			1	m/b	iiii	INCX..		--
+;	INCW		B6	dst.mw <-- dst.mw + 1			1	m/w	iiii	INCX..		--
+;	INCL		D6	dst.ml <-- dst.ml + 1			1	m/l	iiii	INCX..		--
+;
+;	DECB		97	dst.mb <-- dst.mb - 1			1	m/b	iiij	DECX..		--
+;	DECW		B7	dst.mw <-- dst.mw - 1			1	m/w	iiij	DECX..		--
+;	DECL		D7	dst.ml <-- dst.ml - 1			1	m/l	iiij	DECX..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (dst) operand
+;		VA	=	address of first operand, if memory
+;		RN	=	register number of first specifier
+;		DL	=	data type of first operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		(INCx)			(DECx)
+;		N <-- dst lss 0		N <-- dst lss 0
+;		Z <-- dst eql 0		Z <-- dst eql 0
+;		V <-- overflow		V <-- overflow		[Integer overflow trap enabled by iiii/iiij maps.]
+;		C <-- carry out		C <-- borrow out
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	INCx operation:
+;
+;		dst.mx <-- dst.mx + 1
+
+INCX..:
+	;********** Hardware Dispatch **********;
+	[MD.T0] <-- [MD.S1] + 1,		; increment operand
+	SET PSL CC, LEN(DL), MAP.IIII,		; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [WRITE.MEM]		; go write result memory or register
+
+
+;	DECx operation:
+;
+;		dst.mx <-- dst.mx - 1
+
+DECX..:
+	;********** Hardware Dispatch **********;
+	[MD.T0] <-- [MD.S1] - 1,		; decrement operand
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+.nobin
+.TOC	"	CLRx"
+
+;	These instructions clear the destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CLRB		94	dst.wb <-- 0				1	w/b	iiip	CLRX..		--
+;	CLRW		B4	dst.ww <-- 0				1	w/w	iiip	CLRX..		--
+;	CLRL		D4	dst.wl <-- 0				1	w/l	iiip	CLRX..		--
+;	CLRQ		7C	dst.wq <-- 0				1	w/q	iiip	CLRX..		--
+;
+;	Entry conditions from specifier flows:
+;		VA	=	address of first (dst) operand, if memory
+;		RN	=	register number of first (dst) specifier
+;		DL	=	data type of first operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;               N <-- 0
+;               Z <-- 1 
+;               V <-- 0			[Integer overflow trap cannot occur.]
+;               C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	CLRx operation:
+;
+;		dst.wx <-- 0
+
+CLRX..:
+	;********** Hardware Dispatch **********;
+	[MD.T1] <-- [K0],			; get zero in MD.T1
+	SET PSL CC, LEN(DL),			; psl map defaults to iiip
+	CASE [INT.RMODE] AT [CLRX.MEMORY]	; case on memory vs register
+
+;= ALIGNLIST 110*	(CLRX.MEMORY,		CLRX.REGISTER)
+
+CLRX.MEMORY:
+	;---------------------------------------; int.rmode<0> = 0:
+	MEM (VA)&, [WBUS] <-- [MD.T1], LEN(DL),	; write result to memory
+	LAST CYCLE IF DL.BWL,			; if bwl, decode next instruction
+	GOTO [MOVX.QW]				; else go write remaining result
+
+CLRX.REGISTER:
+	;---------------------------------------; int.rmode<0> = 1:
+	[G.RN] <-- [MD.T1], LEN(DL),		; write result to register
+	RN <-- RN + 1,				; increment RN
+	LAST CYCLE IF DL.BWL,			; if bwl, decode next instruction
+	GOTO [MOVX.R.QW]			; else go write remaining result
+
+.nobin
+.TOC	"	CMPx, BITx"
+
+;	These instructions operate on two read only sources.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CMPB		91	src1.rb - src2.rb 			2o	rr/bb	jizj	CMPI..		--
+;	CMPW		B1	src1.rw - src2.rw 			2o	rr/ww	jizj	CMPI..		--
+;	CMPL		D1	src1.rl - src2.rl			2o	rr/ll	jizj	CMPI..		--
+;
+;	BITB		93	src1.rb and src2.rb			2o	rr/bb	iiip	BITX..		--
+;	BITW		B3	src1.rw and src2.rw			2o	rr/ww	iiip	BITX..		--
+;	BITL		D3	src1.rl and src2.rl			2o	rr/ll	iiip	BITX..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src1) operand
+;		MD.S2	=	second (src2) operand, if memory
+;		RN	=	register number of second (src2) specifier
+;		DL	=	data type of second operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		(CMPx)			(BITx)
+;		N <-- src1 lss src2	N <-- dst lss 0
+;		Z <-- src1 eql src2	Z <-- dst eql 0
+;		V <-- 0			V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- src1 lssu src2	C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	CMPx operation:
+;
+;		src1.rx - src2.rx
+
+CMPI..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- (-[MD.S2] + [MD.S1]),	; compare operands
+	SET PSL CC, LEN(DL), MAP.JIZJ,		; set psl cc's, map is jizj
+	LAST CYCLE				; decode next instruction
+
+CMPI.R..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- (-[G.RN] + [MD.S1]),		; compare operands
+	SET PSL CC, LEN(DL), MAP.JIZJ,		; set psl cc's, map is jizj
+	LAST CYCLE				; decode next instruction
+
+
+;	BITx operation:
+;
+;		src1.rx and src2.rx
+
+BITX..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S2] AND [MD.S1], 	; and operands
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+BITX.R..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [G.RN] AND [MD.S1],		; and operands
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	ADDx2, SUBx2, BISx2, BICx2, XORx2, ADWC, SBWC"
+
+;	These instructions operate on a source operand and a destination operand, and store the result in
+;	the destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ADDB2		80	dst.mb <-- src.rb + dst.mb 		2o	rm/bb	iiii	ADDI2..		--
+;	ADDW2		A0	dst.mw <-- src.rw + dst.mw 		2o	rm/ww	iiii	ADDI2..		--
+;	ADDL2		C0	dst.ml <-- src.rl + dst.ml		2o	rm/ll	iiii	ADDI2..		--
+;
+;	SUBB2		82	dst.mb <-- dst.mb - src.rb		2o	rm/bb	iiij	SUBI2..		--
+;	SUBB2		A2	dst.mw <-- dst.mw - src.rw		2o	rm/ww	iiij	SUBI2..		--
+;	SUBB2		C2	dst.ml <-- dst.ml - src.rl		2o	rm/ll	iiij	SUBI2..		--
+;
+;	BISB2		88	dst.mb <-- src.rb or dst.mb		2o	rm/bb	iiip	BISX2..		--
+;	BISW2		A8	dst.mw <-- src.rw or dst.mw		2o	rm/ww	iiip	BISX2..		--
+;	BISL2		C8	dst.ml <-- src.rl or dst.ml		2o	rm/ll	iiip	BISX2..		--
+;
+;	BICB2		8A	dst.mb <-- ~src.rb and dst.mb		2o	rm/bb	iiip	BICX2..		--
+;	BICW2		AA	dst.mw <-- ~src.rw and dst.mw		2o	rm/ww	iiip	BICX2..		--
+;	BICL2		CA	dst.ml <-- ~src.rl and dst.ml		2o	rm/ll	iiip	BICX2..		--
+;
+;	XORB2		8C	dst.mb <-- src.rb xor dst.mb		2o	rm/bb	iiip	XORX2..		--
+;	XORL2		AC	dst.mw <-- src.rw xor dst.mw		2o	rm/ww	iiip	XORX2..		--
+;	XORW2		CC	dst.ml <-- src.rl xor dst.ml		2o	rm/ll	iiip	XORX2..		--
+;
+;	ADWC		D8	dst.ml <-- src.rl + dst.ml + C		2o	rm/ll	iiii	ADWC..		--
+;
+;	SBWC		D9	dst.ml <-- dst.ml - src.rl - C		2o	rm/ll	iiij	SBWC..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		MD.S2	=	second (dst) operand, if memory
+;		VA	=	address of second operand, if memory
+;		RN	=	register number of second (dst) specifier
+;		DL	=	data type of second operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		(ADDx2, ADWC)		(SUBx2, SBWC)
+;		N <-- dst lss 0		N <-- dst lss 0
+;		Z <-- dst eql 0		Z <-- dst eql 0
+;		V <-- overflow		V <-- overflow		[Integer overflow trap enabled by iiii/iiij maps.]
+;		C <-- carry out		C <-- borrow out
+;
+;		(BISx2, BICx2, XORx2)
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0						[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		Optimized entry points in ADWC and SBWC cost 4 microwords but save 1 cycle.
+;
+.bin
+
+;	ADDx2 operation:
+;
+;		dst.mx <-- dst.mx + src.rx
+
+ADDI2..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] + [MD.S1],; compute result
+	SET PSL CC, LEN(DL), MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+ADDI2.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] + [MD.S1],		; compute result
+	SET PSL CC, LEN(DL), MAP.IIII,		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+
+;	SUBx2 operation:
+;
+;		dst.mx <-- dst.mx - src.rx
+
+SUBI2..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] - [MD.S1],; compute result
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+SUBI2.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] - [MD.S1],		; compute result
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+;	BISx2 operation:
+;
+;		dst.mx <-- dst.mx or src.rx
+
+BISX2..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] OR [MD.S1], ; compute result
+	SET PSL CC, LEN(DL), 			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+BISX2.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] OR [MD.S1],		; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+
+;	BICx2 operation:
+;
+;		dst.mx <-- dst.mx andnot src.rx
+
+BICX2..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] ANDNOT [MD.S1], ; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+BICX2.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] ANDNOT [MD.S1],	; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+;	XORx2 operation:
+;
+;		dst.mx <-- dst.mx xor src.rx
+
+XORX2..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] XOR [MD.S1], ; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+XORX2.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] XOR [MD.S1],		; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+;	The ADWC and SBWC execution flows are implemented with optmized
+;	register dst dispatches to avoid a wasted cycle casing on the rmode bit.
+;	However, because the optimized dispatch is taken one cycle earlier,
+;	psl.c from the previous macroinstruction may not yet be valid
+;	(due to micro-pipeline limitations).  Therefore, we have to waste
+;	a cycle in the register dst flow to insure that psl.c is correct.
+;	The advantage in using an optimized register dispatch is that for
+;	the same number of microinstructions we save one cycle in the memory
+;	dst flow and are no worse off in the register dst flow.
+
+;	ADWC operation:
+;		dst.ml <-- dst.ml + src.rl + psl.c
+
+ADWC..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] +  [MD.S1] + PSL(C), ; compute result
+	SET PSL CC, LEN(DL), MAP.IIII,		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+ADWC.R..:
+	;********** Hardware Dispatch **********;
+	NOP					; optimized dispatch gets here too fast
+						; wait a cycle for psl.c
+
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [MD.S1] + PSL(C),	; compute result
+	SET PSL CC, LEN(DL), MAP.IIII,		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+
+;	SBWC operation:
+;		dst.ml <-- dst.ml - src.rl - psl.c
+
+SBWC..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] - [MD.S1] - PSL(C), ; compute result
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+SBWC.R..:
+	;********** Hardware Dispatch **********;
+	NOP					; optimized dispatch gets here too fast
+						; wait a cycle for psl.c
+
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] - [MD.S1] - PSL(C),	; compute result
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	MOVx, MOVAx, MOVZxy, MCOMx, MNEGx"
+
+;	These instructions move or operate on a source operand and store the result in a destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MOVB		90	dst.wb <-- src.rb			2o	rw/bb	iiip	MOVX..		--
+;	MOVW		B0	dst.ww <-- src.rw			2o	rw/ww	iiip	MOVX..		--
+;	MOVL		D0	dst.wl <-- src.rl			2o	rw/ll	iiip	MOVX..		--
+;	MOVQ		7D	dst.wq <-- src.rq			2o	rw/qq	iiip	MOVX..		--
+;
+;	MOVAB		9E	dst.wl <-- src.ab			2o	aw/bl	iiip	MOVX..		--
+;	MOVAW		3E	dst.wl <-- src.aw			2o	aw/wl	iiip	MOVX..		--
+;	MOVAL		DE	dst.wl <-- src.al			2o	aw/ll	iiip	MOVX..		--
+;	MOVAQ		7E	dst.wl <-- src.aq			2o	aw/ql	iiip	MOVX..		--
+;
+;	MOVZBL		9A	dst.wl <-- zext(src.rb)			2o	rw/bl	iiip	MOVX..		--
+;	MOVZBW		9B	dst.ww <-- zext(src.rb)			2o	rw/bw	iiip	MOVX..		--
+;	MOVZWL		3C	dst.wl <-- zext(src.rw)			2o	rw/wl	iiip	MOVX..		--
+;
+;	MCOMB		92	dst.wb <-- ~src.rb			2o	rw/bb	iiip	MCOMX..		--
+;	MCOMW		B2	dst.ww <-- ~src.rw			2o	rw/ww	iiip	MCOMX..		--
+;	MCOML		D2	dst.wl <-- ~src.rl			2o	rw/ll	iiip	MCOMX..		--
+;
+;	MNEGB		8E	dst.wb <-- -src.rb			2o	rw/bb	iiij	MNEGX..		--
+;	MNEGL		AE	dst.ww <-- -src.rw			2o	rw/ww	iiij	MNEGX..		--
+;	MNEGW		CE	dst.wl <-- -src.rl			2o	rw/ll	iiij	MNEGX..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		MD.S2	=	address of second (dst) operand, if memory
+;		VA	=	address of second (dst) operand, if memory
+;		RN	=	register number of second (dst) specifier
+;		DL	=	data type of second operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination register or memory location.
+;
+;	Condition codes:
+;		(MOVx, MOVAx, MOVZxy, MCOMx):
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0				[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;		(MNEGx):
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- overflow			[Integer overflow trap enabled by iiij map.]
+;		C <-- borrow out
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	MOVx, MOVAx, MOVZxy operation:
+;
+;		dst.wx <-- {zext} src.rx [src.ax]
+
+;	Note that MOVX.. doubles as general entry point WRITE.MEM.SET.PSL.CC.
+;	For this to work, MOVX.. and MOVX.R.. must be constrained as 110* and
+;	111*, respectively, in ALIGN.MIC.
+
+MOVX..:
+WRITE.MEM.SET.PSL.CC:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S1],		; write source to destination
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE IF DL.BWL			; if bwl, decode next instruction
+
+MOVX.QW:
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- [MD.S1+1], LONG,	; write second lw of source to destination
+	SET PSL CC, PSL(Z) <-- PSL(Z) AND WBUS(Z), ; set psl cc's, override default map for z
+	LAST CYCLE				; decode next instruction
+
+
+MOVX.R..:
+WRITE.REG.SET.PSL.CC:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [MD.S1], RN <-- RN + 1,	; write source to destination
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE IF DL.BWL			; if bwl, decode next instruction
+
+MOVX.R.QW:
+	;---------------------------------------;
+	[G.RN] <-- [MD.S1+1], LONG,		; move second lw of source to destination
+	SET PSL CC, PSL(Z) <-- PSL(Z) AND WBUS(Z), ; set psl cc's, override default map for z
+	LAST CYCLE				; decode next instruction
+
+;	MCOMx operation:
+;
+;		dst.wx <-- ~src.rx
+
+MCOMX..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- NOT [MD.S1],	; complement source operand
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+MCOMX.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- NOT [MD.S1],			; complement source operand
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+
+;	MNEGx operation:
+;
+;		dst.wx <-- -src.rx
+
+MNEGX..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- -[MD.S1],		; negate source operand
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+MNEGX.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- -[MD.S1],			; negate source operand
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	ADDx3, SUBx3, BISx3, BICx3, XORx3"
+
+;	These instructions operate on two read only source operands and store the result in a destination
+;	operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ADDB3		81	dst.wb <-- src1.rb + src2.rb 		3o	rrw/bbb	iiii	ADDI3..		--
+;	ADDW3		A1	dst.ww <-- src1.rw + src2.rw 		3o	rrw/www	iiii	ADDI3..		--
+;	ADDL3		C1	dst.wl <-- src1.rl + src2.rl		3o	rrw/lll	iiii	ADDI3..		--
+;
+;	SUBB3		83	dst.wb <-- src2.rb - src1.rb		3o	rrw/bbb	iiij	SUBI3..		--
+;	SUBB3		A3	dst.ww <-- src2.rw - src1.rw		3o	rrw/www	iiij	SUBI3..		--
+;	SUBB3		C3	dst.wl <-- src2.rl - src1.rl		3o	rrw/lll	iiij	SUBI3..		--
+;
+;	BISB3		89	dst.wb <-- src1.rb or src2.rb		3o	rrw/bbb	iiip	BISX3..		--
+;	BISW3		A9	dst.ww <-- src1.rw or src2.rw		3o	rrw/www	iiip	BISX3..		--
+;	BISL3		C9	dst.wl <-- src1.rl or src2.rl		3o	rrw/lll	iiip	BISX3..		--
+;
+;	BICB3		8B	dst.wb <-- ~src1.rb and src2.rb		3o	rrw/bbb	iiip	BICX3..		--
+;	BICW3		AB	dst.ww <-- ~src1.rw and src2.rw		3o	rrw/www	iiip	BICX3..		--
+;	BICL3		CB	dst.wl <-- ~src1.rl and src2.rl		3o	rrw/lll	iiip	BICX3..		--
+;
+;	XORB3		8D	dst.wb <-- src1.rb xor src2.rb		3o	rrw/bbb	iiip	XORX3..		--
+;	XORL3		AD	dst.ww <-- src1.rw xor src2.rw		3o	rrw/www	iiip	XORX3..		--
+;	XORW3		CD	dst.wl <-- src1.rl xor src2.rl		3o	rrw/lll	iiip	XORX3..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src1) operand
+;		MD.S2	=	second (src2) operand
+;		VA	=	address of third (dst) operand, if memory
+;		RN	=	register number of third (dst) specifier
+;		DL	=	data type of third operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination register or memory location.
+;
+;	Condition codes:
+;		(ADDx3)			(SUBx3)
+;		N <-- dst lss 0		N <-- dst lss 0
+;		Z <-- dst eql 0		Z <-- dst eql 0
+;		V <-- overflow		V <-- overflow		[Integer overflow trap enabled by iiii/iiij maps.]
+;		C <-- carry out		C <-- borrow out
+;
+;		(BISx3, BICx3, XORx3)
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0						[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	ADDx3 operation:
+;
+;		dst.wx <-- src2.rx + src1.rx
+
+ADDI3..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] + [MD.S1],; compute result
+	SET PSL CC, LEN(DL), MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+ADDI3.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [MD.S2] + [MD.S1],		; compute result
+	SET PSL CC, LEN(DL), MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+
+;	SUBx3 operation:
+;
+;		dst.wx <-- src2.rx - src1.rx
+
+SUBI3..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] - [MD.S1],; compute result
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+SUBI3.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [MD.S2] - [MD.S1],		; compute result
+	SET PSL CC, LEN(DL), MAP.IIIJ,		; set psl cc's, map is iiij
+	LAST CYCLE				; decode next instruction
+
+;	BISx3 operation:
+;
+;		dst.wx <-- src2.rx or src1.rx
+
+BISX3..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] OR [MD.S1], ; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+BISX3.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [MD.S2] OR [MD.S1],		; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+
+;	BICx3 operation:
+;
+;		dst.wx <-- src2.rx andnot src1.rx
+
+BICX3..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] ANDNOT [MD.S1], ; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+BICX3.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [MD.S2] ANDNOT [MD.S1],	; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+;	XORx3 operation:
+;
+;		dst.wx <-- src2.rx xor src1.rx
+
+XORX3..:
+	;********** Hardware Dispatch **********;
+	MEM (VA)&, [WBUS] <-- [MD.S2] XOR [MD.S1], ; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+XORX3.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [MD.S2] XOR [MD.S1],		; compute result
+	SET PSL CC, LEN(DL),			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	PUSHL, PUSHAx"
+
+;	These instructions push a data item or address onto the stack.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	PUSHL		DD	-(sp) <-- src.rl			1	r/l	iiip	PUSHX..		--
+;
+;	PUSHAB		9F	-(sp) <-- src.ab			1	a/b	iiip	PUSHX..		--
+;	PUSHAW		3F	-(sp) <-- src.aw			1	a/w	iiip	PUSHX..		--
+;	PUSHAL		DF	-(sp) <-- src.al			1	a/l	iiip	PUSHX..		--
+;	PUSHAQ		7F	-(sp) <-- src.aq			1	a/q	iiip	PUSHX..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		DL	=	data type of first operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The source has been pushed on the stack.
+;
+;	Condition codes:
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	PUSHL, PUSHAx operation:
+;
+;		-(sp) <-- src.rl [src.ax]
+
+PUSHX..:
+	;********** Hardware Dispatch **********;
+	VA.WCHK&, [VA.BUS] <-- [SP] - 4, LONG,	; write address, decremented SP
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.S1],		; write operand to memory
+	SET PSL CC, LONG			; set psl cc's, default map is iiip
+
+	;---------------------------------------;
+	[SP] <-- [SP] - 4,			; write completed, now update SP
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	ADAWI"
+
+;	This instruction does an interlocked add to an aligned word in memory.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ADAWI		58	dst.mw <-- src.rw + dst.mw		2o	rv/ww	iiii	ADAWI..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		MD.S2	=	address of second (dst) operand, if memory
+;		VA	=	address of second (dst) operand, if memory
+;		RN	=	register number of second (dst) specifier
+;		DL	=	word
+;		STATE<2>=	1 if last operand is a register, 0 otherwise
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;               N <-- dst lss 0
+;               Z <-- dst eql 0
+;               V <-- overflow		[Integer overflow trap enabled by iiii map.]
+;               C <-- carry out
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	ADAWI operation:
+;
+;		dst.mw <-- src.rw + dst.mw, interlocked
+
+ADAWI..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S2] AND 000000[01], LONG,; test bit<0> of dest address
+	CALL [WAIT.TWO.CYCLES],			; wait for wbus cc's
+		sim wbus.nzvc <-- k[4]
+
+	;---------------------------------------;
+	CASE [WBUS.NZV] AT [ADAWI.NOT.WORD.ALIGNED] ; if not word aligned, reserved operand
+
+
+;= ALIGNLIST *0**	(ADAWI.NOT.WORD.ALIGNED,	ADAWI.WORD.ALIGNED)
+;  WBUS.NZVC set by AND with 1 --> N = V = C = 0
+
+ADAWI.NOT.WORD.ALIGNED:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; reserved operand fault
+
+;	No prefetch is allowed between the read lock and
+;	the write unlock.  No DISABLE IB PREFETCH is required
+;	in this case because the read lock stays in the IA latch
+;	until the data returns from memory, which keeps the
+;	M-box from starting a prefetch.
+
+ADAWI.WORD.ALIGNED:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T5] <-- MEM.LOCK ([MD.S2]), LEN(DL),; read destination operand, lock bus
+		sim addr [ea] [2]
+
+	;---------------------------------------;
+	MEM.UNLOCK (VA)&, [WBUS] <-- [MD.S1] + [MD.T5], ; write to memory, unlock the bus
+	SET PSL CC, LEN(DL), MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+
+;	The NUDGE and BARRIER instructions are implemented as follows:
+;
+;	  NUDGE  -	ADAWI	S^#0,R0
+;	  BARRIER  -	ADAWI	S^#0,R1
+;
+;	These instructions are used by software to guarantee that all preceding writes
+;	by the CPU will complete in a bounded amount of time. 
+
+ADAWI.R..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] + [MD.S1],		; perform add, no interlock for rmode
+	FLUSH WRITE BUFFERS,			; flush write buffers for NUDGE and BARRIER
+	SET PSL CC, LEN(DL), MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+ 						; >> no case on DL this cycle
+
+.nobin
+.TOC	"	CVTBW, CVTBL, CVTWL"
+
+;	These instructions sign extend and move a data item from the first
+;	(source) operand to the second (destination) operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CVTBW		99	dst.ww <-- src.rb			2o	rw/bw	iiii	CVTBI..		--
+;	CVTBL		98	dst.wl <-- src.rb			2o	rw/bl	iiii	CVTBI..		--
+;	CVTWL		32	dst.wl <-- src.rw			2o	rw/wl	iiii	CVTWL..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		VA	=	address of second (dst) operand, if memory
+;		RN	=	register number of second (dst) specifier
+;		DL	=	data type of second operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Optimized entry points add 4 words but save 2 cycles in the .rx case.
+
+.bin
+
+;	CVTBW, CVTBL, CVTWL operation:
+;
+;		dst.wy <-- sext(src.wx)
+
+CVTBI..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1] LSH [24.]		; left justify original byte
+
+	;---------------------------------------;
+	[MD.T0] <-- SEXT.[SC] RSH [24.],	; sign extend byte to longword
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [WRITE.MEM]			; write result and exit
+
+CVTBI.R..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1] LSH [24.],		; left justify original byte
+	CASE [OPCODE2-0] AT [CVTBL]		; shift format implies dl = long,
+						; so can't store directly to GPR
+						; for CVTBW
+
+;= ALIGNLIST **0*	(CVTBL,			CVTBW)
+;  Opcodes = 98, 99 --> opcode<2:0> = 00?
+
+CVTBW:
+	;---------------------------------------; opcode<0>=1 --> CVTBW:
+	[MD.T0] <-- SEXT.[SC] RSH [24.],	; sign extend byte to longword
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [WRITE.REG]			; write result and exit
+
+CVTBL:
+	;---------------------------------------; opcode<0>=0 --> CVTBL:
+	[G.RN] <-- SEXT.[SC] RSH [24.],		; sign extend byte to longword
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+CVTWL..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1] LSH [16.]		; left justify original word
+
+	;---------------------------------------;
+	[MD.T0] <-- SEXT.[SC] RSH [16.],	; sign extend word to longword
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [WRITE.MEM]			; write result and exit
+
+CVTWL.R..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1] LSH [16.]		; left justify original word
+
+	;---------------------------------------;
+	[G.RN] <-- SEXT.[SC] RSH [16.],		; sign extend word to longword
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	CVTWB, CVTLB, CVTLW"
+
+;	These instructions truncate and move a data item from the first
+;	(source) operand to the second (destination) operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CVTWB		33	dst.wb <-- src.rw			2o	rw/wb	iiii	CVTIB..		--
+;	CVTLB		F6	dst.wb <-- src.rl			2o	rw/lb	iiii	CVTIB..		--
+;	CVTLW		F7	dst.ww <-- src.rl			2o	rw/lw	iiii	CVTLW..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (src) operand
+;		VA	=	address of second (dst) operand, if memory
+;		RN	=	register number of second (dst) specifier
+;		DL	=	data type of second operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- overflow		[Integer overflow trap enabled by iiii map.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Optimized entry points add one instruction and save one cycle for the .rx case.
+;
+.bin
+
+;	CVTWB, CVTLB, CVTLW operation:
+;
+;		dst.wy <-- trunc(src.rx)
+
+CVTIB..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1] LSH [24.],		; set shifter sign from operand bit<7>
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [CVTIB.COMMON]
+
+CVTIB.R..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1] LSH [24.],		; set shifter sign from operand bit<7>
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [CVTIB.COMMON]
+
+CVTIB.COMMON:
+	;---------------------------------------;
+	[SC] <-- SEXT.[MD.S1] RSH [8.],		; shift in 8 bits of sign for CVTLB
+	CASE [OPCODE2-0] AT [CVTWB]		; case on word vs lw source
+
+
+CVTLW..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1] LSH [16.],		; set shifter sign from operand bit<15>
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [CVTLW.COMMON]
+
+CVTLW.R..:
+	;********** Hardware Dispatch **********;
+	[WBUS] <-- [MD.S1] LSH [16.],		; set shifter sign from operand bit<15>
+	SET PSL CC, LONG, MAP.IIII, 		; set psl cc's, map is iiii
+	GOTO [CVTLW.COMMON]
+
+CVTLW.COMMON:
+	;---------------------------------------;
+	[SC] <-- SEXT.[MD.S1] RSH [16.]		; shift in 16 bits of sign
+
+;= ALIGNLIST 011*	(CVTWB,	CVTLB)
+
+CVTWB:
+	;---------------------------------------; opcode<2:0> = 011:
+	[WBUS] <-- [SHIFTER.SIGN] XOR [SC],	; CVTWB: compare src<15:8> with SEXT(src<7>)
+						; CVTLW: compare src<31:16> with
+						;        SEXT(src<15>)
+	LEN(DL), PSL(V) <-- NOT WBUS(Z),	; set psl v
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+CVTLB:
+	;---------------------------------------; opcode<2:0> = 110:
+	[WBUS] <-- [SHIFTER.SIGN] XOR [SC],	; CVTLB: compare src<31:8> with SEXT(src<7>)
+	LONG, PSL(V) <-- NOT WBUS(Z),		; set psl v
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+;	Common exit to write destination.
+
+;	At this point,
+;		MD.T0	=	result
+;		MD.T1	=	2nd lw of result, if quad
+;		DL 	=	data type of result
+;		VA	=	write-checked address of destination, unless register mode
+;		RN	=	register number of destination
+
+;= ALIGNLIST 110*	(WRITE.MEM,	WRITE.REG)
+
+WRITE.MEM:
+	;---------------------------------------; int.rmode<0> = 0:
+	MEM (VA)&, [WBUS] <-- [MD.T0], LEN(DL),	; write MD.T0 to memory
+	LAST CYCLE IF DL.BWL,			; if bwl, decode next instruction
+	GOTO [WRITE.MEM.QW]
+
+WRITE.MEM.QW:
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- [MD.T1], LONG,	; write MD.T1 to memory
+	LAST CYCLE				; decode next instruction
+
+WRITE.REG:
+	;---------------------------------------; int.rmode<0> = 1:
+	[G.RN] <-- [MD.T0], LEN(DL),		; write MD.T0 to register
+	RN <-- RN + 1,				; increment RN for quad result
+	LAST CYCLE IF DL.BWL,			; if bwl, decode next instruction
+	GOTO [WRITE.REG.QW]
+
+WRITE.REG.QW:
+	;---------------------------------------;
+	[G.RN] <-- [MD.T1], LONG,		; write MD.T1 to register
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	ROTL"
+
+;	This instruction rotates a longword source operand left or right and stores
+;	the result in the destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ROTL		9C	dst.wl <-- src.rl rot cnt.rb		3o	rrw/bll	iiip	ROTL..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.S1	=	first (cnt) operand
+;		MD.S2	=	second (src) operand
+;		VA	=	address of third (dst) operand, if memory
+;		RN	=	register number of third (dst) specifier
+;		DL	=	data type of third operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		An optimized entry points adds one instruction and saves two cycles for the .rx case.
+;
+.bin
+
+;	ROTL operation:
+;
+;		dst.wl <-- src.rl rot cnt.rb
+
+ROTL..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1],			; move rotate count to SC
+	CALL [WAIT.ONE.CYCLE]			; >> SC load, no shift next cycle
+
+	;---------------------------------------;
+	[MD.T0] <-- [MD.S2] LROT (SC),		; rotate source operand
+	SET PSL CC, LONG,			; set psl cc's, default map is iiip
+	GOTO [WRITE.MEM]			; go store result
+
+ROTL.R..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [MD.S1],			; move rotate count to SC
+	CALL [WAIT.ONE.CYCLE]			; >> SC load, no shift next cycle
+
+	;---------------------------------------;
+	[G.RN] <-- [MD.S2] LROT (SC),		; rotate and write result to register
+	SET PSL CC, LONG,			; set psl cc's, default map is iiip
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	ASHx"
+
+;	These instructions shift a source operand left or right and store
+;	the result in the destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ASHL		78	dst.wl <-- src.rl shift cnt.rb		3o	rrw/bll	iiii	ASHL..		--
+;	ASHQ		79	dst.wq <-- src.rq shift cnt.rb		3o	rrw/bqq	iiii	ASHQ..		--
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(=S1) =	first (cnt) operand
+;		MD.T2(=S2) =	second (src) operand (ASHL)
+;		MD.T2(=S2) =	low lw of second (src) operand (ASHQ)
+;		MD.T3(=S2+1) =	high lw of second (src) operand (ASHQ)
+;		VA	=	address of third (dst) operand, if memory
+;		RN	=	register number of third (dst) specifier
+;		DL	=	data type of third operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- dst lss 0
+;		Z <-- dst eql 0
+;		V <-- overflow		[Integer overflow trap enabled by iiii map.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Optimized entry points add one instruction and save one cycle for the .rx case.
+;
+.bin
+
+;	ASHx operation:
+;
+;		dst.wx <-- src.rx shift cnt.rb
+
+ASHX..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- ZEXT.[MD.T0] RSH [5],		; copy shift count <7:5> to SC<2:0> for test
+	GOTO [ASHX.COMMON],			; join common code
+		sim sc <-- ashx count
+
+ASHX.R..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- ZEXT.[MD.T0] RSH [5],		; copy shift count <7:5> to SC<2:0> for test
+	GOTO [ASHX.COMMON],			; join common code
+		sim sc <-- ashx count
+
+ASHX.COMMON:
+	;---------------------------------------;
+	[SC] <-- [MD.T0]			; copy shift count to SC for shift
+
+	;---------------------------------------; ASHL: assume shift count >= 32,
+	[MD.T0] <-- [K0],			; ASHQ: assume shift count >= 64,
+ 						;       set result to zero
+	SET PSL CC, LONG, MAP.IIII,		; set psl cc's, map is iiii
+	CASE [OPCODE2-0] AT [ASHL]		; case on ASHL vs ASHQ
+
+;	ASHL left shift cases:  [0,31] is the only important case.
+;
+;	At this point,
+;		MD.T0	=	0
+;		MD.T2	=	source operand
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+;= ALIGNLIST **0*	(ASHL,		ASHQ)
+;  Opcodes = 78, 79 --> opcode<2:0> = 00?
+
+ASHL:
+	;---------------------------------------; opcode<2:0> = 000 (ASHL):
+	[WBUS] <-- ZEXT.[MD.T2] RSH [0], LONG,	; latch sign of src for right shift case
+	CASE [SC2-0] AT [ASHL.LEFT.1.31]	; case on PREVIOUS SC = shift count<7:5>
+
+;= ALIGNLIST 000*	(ASHL.LEFT.1.31,	ASHL.LEFT.32.63,
+;=			 ASHL.LEFT.64.95,	ASHL.LEFT.96.127,
+;=			 ASHL.RIGHT.128.97,	ASHL.RIGHT.96.65,
+;=			 ASHL.RIGHT.64.33,	ASHL.RIGHT.32.1)
+
+ASHL.LEFT.1.31:
+	;---------------------------------------; 0 <= sc <= 31:
+	[MD.T1] <-- [MD.T2] LSH (SC), 		; shift source operand left by count
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CALL [T4_T1.RSH.SC]			; do [MD.T4] <-- SEXT.[MD.T1] RSH (SC)
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] XOR [MD.T2],		; compare unshifted original with
+						;  sign-extended result
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if they are not equal
+	CASE [INT.RMODE] AT [CLRX.MEMORY]	; case on memory vs register
+
+ASHL.LEFT.32.63:
+	;---------------------------------------; 32 <= sc <= 63:
+	[WBUS] <-- [MD.T2],			; test src operand
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if not equal to zero
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+ASHL.LEFT.64.95:
+	;---------------------------------------; 64 <= sc <= 95:
+	[WBUS] <-- [MD.T2],			; test src operand
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if not equal to zero
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+ASHL.LEFT.96.127:
+	;---------------------------------------; 96 <= sc <= 127:
+	[WBUS] <-- [MD.T2],			; test src operand
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if not equal to zero
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+;	ASHL right shift cases:	[-32,-1] is the only important case.
+
+;	At this point,
+;		MD.T0	=	0
+;		MD.T2	=	source operand
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+;	The right shift case [-32,-1] takes advantage of a peculiar property of the shifter.
+;	The shifter can shift up to 32 bits to the right, but shift values are interpreted
+;	modulo 32.  This limits normal shifts to 31 bits.  However, the shifter can receive
+;	a shift value of 32 through the use of the (32-SC) option.
+
+;	Note that for shifting, only SC<4:0> is examined.  Thus, -32 is 111<00000>, and
+;	32-SC will cause a right shift of 32;  while -1 is 111<11111>, and 32-SC will
+;	cause a right shift of 1.
+
+ASHL.RIGHT.128.97:
+	;---------------------------------------; -128 <= sc <= -97:
+	[MD.T0] <-- SEXT.[MD.T2] RSH [31.],	; result is sign of source
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+ASHL.RIGHT.96.65:
+	;---------------------------------------; -96 <= sc <= -65:
+	[MD.T0] <-- SEXT.[MD.T2] RSH [31.],	; result is sign of source
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+ASHL.RIGHT.64.33:
+	;---------------------------------------; -64 <= sc <= -33:
+	[MD.T0] <-- SEXT.[MD.T2] RSH [31.],	; result is sign of source
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+ASHL.RIGHT.32.1:
+	;---------------------------------------; -32 <= sc <= -1:
+	[MD.T0] <-- SEXT.[MD.T2] RSH (32-SC),	; shift right, inverting shift count
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+;	ASHQ left shift cases:	[0,31].
+
+;	At this point,
+;		MD.T3 = 	high order source
+;		MD.T2	=	low order source
+;		MD.T0	=	0
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+ASHQ:
+	;---------------------------------------; opcode<2:0> = 001 (ASHQ):
+	[WBUS] <-- ZEXT.[MD.T3] RSH [0], LONG,	; latch sign of src for right shift case
+	CASE [SC2-0] AT [ASHQ.LEFT.1.31]	; case on PREVIOUS SC = shift count<7:5>
+
+;= ALIGNLIST 000*	(ASHQ.LEFT.1.31,	ASHQ.LEFT.32.63,
+;=			 ASHQ.LEFT.64.95,	ASHQ.LEFT.96.127,
+;=			 ASHQ.RIGHT.128.97,	ASHQ.RIGHT.96.65,
+;=			 ASHQ.RIGHT.64.33,	ASHQ.RIGHT.32.1)
+
+ASHQ.LEFT.1.31:
+	;---------------------------------------; 0 <= sc <= 31:
+	[MD.T0] <-- [MD.T2] LSH (SC),		; shift quadword source left, get low result
+	SET PSL CC, LONG			; set psl cc's, map is iiii
+
+	;---------------------------------------;
+	[MD.T1] <-- [MD.T3]!![MD.T2] LSH (SC),	; shift qw source left, get high result
+	SET PSL CC, PSL(Z) <-- PSL(Z) AND WBUS(Z), ; set psl cc's, map is iiii
+	LONG,					; psl.z = old and new z
+	CALL [T4_T1.RSH.SC]			; do [MD.T4] <-- SEXT.[MD.T1] RSH (SC)
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] XOR [MD.T3],		; compare unshifted original with
+						; sign-extended result
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if they are not equal
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+;	ASHQ left shift cases:	[32,63].
+
+;	At this point,
+;		MD.T3 = 	high order source
+;		MD.T2	=	low order source
+;		MD.T0	=	0
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+ASHQ.LEFT.32.63:
+	;---------------------------------------; 32 <= sc <=63:
+	[MD.T1] <-- [MD.T2] LSH (SC), 		; shift low source by shift mod 32,
+						; move to high result
+	SET PSL CC, LONG			; set psl cc's, map is iiii
+
+	;---------------------------------------;
+	[MD.T5] <-- [SHIFTER.SIGN] XOR [MD.T3],	; compare high source with sign of result
+						; for overflow check
+	CALL [T4_T1.RSH.SC]			; do [MD.T4] <-- SEXT.[MD.T1] RSH (SC)
+
+	;---------------------------------------;
+	[MD.T4] <-- [MD.T4] XOR [MD.T2]		; compare unshifted original with
+						; sign-extended result
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] OR [MD.T5],		; check previous compares
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if they are not zero
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+
+; 	One-line subroutine to right-shift MD.T1 by SC and store in MD.T4.
+
+T4_T1.RSH.SC:
+	;---------------------------------------;
+	[MD.T4] <-- SEXT.[MD.T1] RSH (SC),	; shift value right, sign extending
+	RETURN
+
+;	ASHQ left shift cases:	[64,127] yield result of zero.
+
+;	At this point,
+;		MD.T3 = 	high order source
+;		MD.T2	=	low order source
+;		MD.T0	=	0
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+ASHQ.LEFT.64.95:
+	;---------------------------------------; 64 <= sc <= 95:
+	[WBUS] <-- [MD.T3] OR [MD.T2],		; test src operands
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if they are not equal to zero
+	GOTO [ASHQ.LEFT.COMMON]			; go set low result
+
+ASHQ.LEFT.96.127:
+	;---------------------------------------; 96 <= sc <= 127:
+	[WBUS] <-- [MD.T3] OR [MD.T2],		; test src operands
+	PSL(V) <-- NOT WBUS(Z), LONG,		; set overflow if they are not equal to zero
+	GOTO [ASHQ.LEFT.COMMON]			; go set low result
+
+ASHQ.LEFT.COMMON:
+	;---------------------------------------;
+	[MD.T1] <-- [K0],			; high result is zero
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+;	ASHQ right shift cases:	[-128,-65] yield sign of source.
+
+;	At this point,
+;		MD.T3 = 	high order source
+;		MD.T2	=	low order source
+;		MD.T0	=	0
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+ASHQ.RIGHT.128.97:
+	;---------------------------------------; -128 <= sc <= -97:
+	[MD.T1] <-- SEXT.[MD.T3] RSH [31.],	; high result is sign of source
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [CLRX.MEMORY]	; case on memory vs register
+						; use CLRX code to write a quadword
+
+ASHQ.RIGHT.96.65:
+	;---------------------------------------; -96 <= sc <= -65:
+	[MD.T1] <-- SEXT.[MD.T3] RSH [31.],	; high result is sign of source
+	SET PSL CC, LONG,			; set psl cc's, map is iiii
+	CASE [INT.RMODE] AT [CLRX.MEMORY]	; case on memory vs register
+						; use CLRX code to write a quadword
+
+;	ASHQ right shift cases:	[-64,-33].
+
+;	At this point,
+;		MD.T3 = 	high order source
+;		MD.T2	=	low order source
+;		MD.T0	=	0
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+;	As in ASHL, the ASHQ right shift cases take advantage of the shifter's ability
+;	to do a 32-bit shift using the 32-SC option, and its use of only SC<4:0> in
+;	calculating the shift value.
+;
+;	Note that the condition codes can be calculated from the low order result alone:
+;	since the shift count is <= -33, bit<31> of the low order result reflects the
+;	sign of the quadword, and bits<31:0> the zero test.
+
+ASHQ.RIGHT.64.33:
+	;---------------------------------------; -64 <= sc <= -33:
+	[MD.T0] <-- SEXT.[MD.T3] RSH (32-SC),	; shift high source by shift mod 32,
+						; move to low result
+	SET PSL CC, LONG			; set psl cc's, map is iiii
+
+	;---------------------------------------;
+	[MD.T1] <-- SEXT.[MD.T3] RSH [31.],	; high result is sign of source
+	CASE [INT.RMODE] AT [WRITE.MEM]		; case on memory vs register
+
+;	ASHQ right shift cases:	[-32,-1].
+
+;	At this point,
+;		MD.T3	=	high order source
+;		MD.T2	=	low order source
+;		MD.T0	=	0
+;		PSL CC'S  =	set from MD.T0
+;		VA	=	address of third operand if memory
+;		RN	=	register number of third operand if register
+
+ASHQ.RIGHT.32.1:
+	;---------------------------------------; 31 <= sc <= -1:
+	[MD.T1] <-- SEXT.[MD.T3] RSH (32-SC),	; shift high source to right
+	LONG					;
+
+	;---------------------------------------;
+	[MD.T0] <-- [MD.T3]!![MD.T2] RSH (32-SC), ; shift low source to right
+	LONG,					;
+	CASE [INT.RMODE] AT [WRITE.MEM.SET.PSL.CC] ; case on mem vs reg, set psl cc's
+
+;= END INTLOG

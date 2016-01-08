@@ -1,0 +1,1857 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                  CVAX CPU Chip Microcode Documentation
+                                  DC 341
+                              (21-24674-01)
+
+
+                         Rev 1.00 (January, 1987)
+
+
+
+                  C O M P A N Y  C O N F I D E N T I A L
+
+
+
+Copyright (C) 1985, 1986, 1987 by Digital Equipment Corporation
+
+The information in this document is subject to change without  notice  and
+should  not be construed as a commitment by Digital Equipment Corporation.
+Digital Equipment Corporation assumes no  responsibility  for  any  errors
+that may occur in this document.
+
+This specification does not describe  any  program  or  product  which  is
+currently  available from Digital Equipment Corporation.  Nor does Digital
+Equipment Corporation  commit  to  implement  this  specification  in  any
+product  or  program.   Digital  Equipment Corporation makes no commitment
+that this document accurately describes any product it might ever make.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)              Page 2
+TABLE OF CONTENTS                                              12 September 1988
+
+
+                                   CONTENTS
+
+        1       NOTES ON THE CVAX MICROCODE  . . . . . . . . . . . . 4
+        1.1       Code Module Organization . . . . . . . . . . . . . 4
+        1.2       Assembly And Allocation  . . . . . . . . . . . . . 4
+        1.3       Size Budget  . . . . . . . . . . . . . . . . . . . 5
+        1.4       Microtraps . . . . . . . . . . . . . . . . . . . . 7
+        1.5       Interrupt And Exception Entry Points . . . . . . . 7
+        1.6       Micromachine Resource Allocation . . . . . . . . . 9
+        1.7       Interrupts . . . . . . . . . . . . . . . . . . .  10
+        1.7.1     Hardware Interrupts  . . . . . . . . . . . . . .  10
+        1.7.2     Software Interrupts  . . . . . . . . . . . . . .  10
+        1.7.3     Asynchronous System Traps (AST's)  . . . . . . .  10
+        1.8       Microcode Decisions  . . . . . . . . . . . . . .  11
+        2       CVAX MACHINE CHECK SPECIFICATION . . . . . . . . .  13
+        2.1       Types Of Errors  . . . . . . . . . . . . . . . .  13
+        2.1.1     FPA Protocol Error . . . . . . . . . . . . . . .  13
+        2.1.2     Impossible Situations In Memory Management . . .  13
+        2.1.3     Unused IPL Request . . . . . . . . . . . . . . .  14
+        2.1.4     Impossible Situations In The Microcode . . . . .  14
+        2.1.5     Bus (Memory) Errors  . . . . . . . . . . . . . .  14
+        2.1.6     Multiple Errors  . . . . . . . . . . . . . . . .  15
+        2.2       Machine Check Processing . . . . . . . . . . . .  15
+        2.2.1     Microcode Actions  . . . . . . . . . . . . . . .  15
+        2.3       Processor Restart  . . . . . . . . . . . . . . .  17
+        3       CVAX CONSOLE SUPPORT . . . . . . . . . . . . . . .  19
+        3.1       Entry Protocol . . . . . . . . . . . . . . . . .  19
+        3.2       Console Processing . . . . . . . . . . . . . . .  20
+        3.3       Console Exit . . . . . . . . . . . . . . . . . .  20
+        4       CVAX INSTRUCTION TIMING  . . . . . . . . . . . . .  22
+        4.1       Specifier Timing . . . . . . . . . . . . . . . .  23
+        4.1.1     Specifier Timing (Not The Last Specifier)  . . .  23
+        4.1.2     Specifier Timing (Last Specifier)  . . . . . . .  24
+        4.2       Execute, Fetch Timing  . . . . . . . . . . . . .  26
+        4.2.1     Integer Arithmetic And Logical Instructions  . .  26
+        4.2.2     Address Instructions . . . . . . . . . . . . . .  29
+        4.2.3     Variable Length Bit Field Instructions . . . . .  29
+        4.2.4     Control Instructions . . . . . . . . . . . . . .  30
+        4.2.5     Procedure Call Instructions  . . . . . . . . . .  31
+        4.2.6     Miscellaneous Instructions . . . . . . . . . . .  32
+        4.2.7     Queue Instructions . . . . . . . . . . . . . . .  32
+        4.2.8     Character String Instructions  . . . . . . . . .  33
+        4.2.9     Operating System Support Instructions  . . . . .  33
+        4.2.10    Floating Point Instructions  . . . . . . . . . .  34
+        4.2.11    Microcode-Assisted Emulated Instructions . . . .  36
+        4.3       Other Timings  . . . . . . . . . . . . . . . . .  38
+        4.4       Examples . . . . . . . . . . . . . . . . . . . .  39
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 3
+REVISION HISTORY                                             12 September 1988
+
+
+                             REVISION HISTORY
+                             ----------------
+
+Rev     Date            Purpose
+---     ----            -------
+1.00    Jan, 1987       CVAX pass 2 release.
+
+0.00    WORKING DRAFT   Preliminary release.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 4
+INTRODUCTION                                                 12 September 1988
+
+
+The purpose of this document is to  provide  information  about  the  CVAX
+microcode  implementation.   It  includes  information about the microcode
+itself, as well as details  on  implementation  specific  topics  such  as
+machine checks and the console interface.
+
+
+
+1  NOTES ON THE CVAX MICROCODE
+
+This section provides some general documentation and  notes  on  the  CVAX
+microcode.
+
+
+
+1.1  Code Module Organization
+
+The CVAX microcode consists of the following code modules:
+
+Definition Modules
+------------------
+
+        DEFIN.MIC       -       micromachine definitions
+        MACRO.MIC       -       microcode macroes
+        ALIGN.MIC       -       alignment lists for hardware dispatches
+
+Central Routine Modules
+-----------------------
+
+        POWERUP.MIC     -       power up
+        MEMMGT.MIC      -       memory management
+        INTEXC.MIC      -       interrupts and exceptions
+        SPEC.MIC        -       specifier flows
+
+Instruction Routine Modules
+---------------------------
+
+        INTLOGADR.MIC   -       integer, logical, and address instructions
+        VFIELD.MIC      -       variable length bit field instructions
+        CTRL.MIC        -       control instructions
+        MULDIV.MIC      -       multiply and divide instructions
+        CALRET.MIC      -       procedure call instructions
+        MISC.MIC        -       miscellaneous instructions
+        QUEUE.MIC       -       queue instructions
+        CSTRING.MIC     -       character string instructions
+        OPSYS.MIC       -       operating system support instructions
+        FPOINT.MIC      -       floating point instructions
+        EMULAT.MIC      -       emulation support
+
+
+
+1.2  Assembly And Allocation
+
+The CVAX  microcode  is  assembled  with  version  1M(01)  of  the  MICRO2
+assembler, as follows:
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 5
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+
+$ MICRO2 :==[microcode.tools]MICRO2                     ; define comma
+                                                        ; for assembler
+
+$ MICRO2 DEFIN+MACRO+ALIGN+POWERUP+FMEMMGT+SPEC+-
+        INTEXC+INTLOGADR+VFIELD+CTRL+MULDIV+CALRET+-
+        MISC+QUEUE+OPSYS+CSTRING+FPOINT+EMULAT-
+        /LIST=CVAX/ULD=CVAX                             ; main assembly
+
+The assembled modules are then processed with the special  CVAX  allocator
+and converted into .MEM files for DECSIM and other CAD programs (note that
+[microcode.tools] should be changed to point to the CVAX  tools  directory
+being used):
+
+$ DEFINE calloc1$pat [microcode.tools]calloc1.pat
+$ RUN [microcode.tools]calloc1.exe
+cvax
+<CR>
+$ RUN [microcode.tools]calloc2.exe
+cvax
+$ DEFINE calloc3$pat [microcode.tools]calloc3.pat
+$ RUN [microcode.tools]calloc3.exe
+cvax
+<CR>
+<CR>
+1
+$ purge
+$ del cvax.adr.,cvax.con.,cvax.dmp.,cvax.ext.
+
+
+
+1.3  Size Budget
+
+The CVAX microcode size budget is as follows:
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 6
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+
+        module          MicroVAX pass 5.0           CVAX pass 2
+        ------          -----------------           -----------
+
+        POWERUP.MIC               24                      28
+        MEMMGT.MIC                67                      72
+        SPEC.MIC                 160                      50
+        INTEXC.MIC               133                     155
+        INTLOGADR.MIC            104                     115
+        VFIELD.MIC                79                      87
+        CTRL.MIC                 106                      82
+        MULDIV.MIC               140                     111
+        CALRET.MIC                83                     153
+        MISC.MIC                  51                      68
+        QUEUE.MIC                 98                     113
+        OPSYS.MIC                246                     286
+        CSTRING.MIC               94                     162
+        FPOINT.MIC               135                      75
+        EMULAT.MIC                58                      30
+                                ----                    ----
+                                1578                    1587
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 7
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+1.4  Microtraps
+
+The following table lists all microtraps in the microcode.
+
+Entry Point             Module          Addr    Comments
+-----------             ------          ----    -------
+IE.COND.BRANCH          INTEXC.MIC       100    conditional branch taken
+IE.INTOV                INTEXC.MIC       110    integer overflow
+MM.TBM                  FMEMMGT.MIC      120    TB miss
+MM.M0                   FMEMMGT.MIC      122    m = 0
+MM.ACV.TNV              FMEMMGT.MIC      124    ACV/TNV
+MM.CPB                  FMEMMGT.MIC      126    cross page
+IE.BUSERR.READ.VIRT     INTEXC.MIC       130    read virtual bus error
+IE.BUSERR.READ.PHYS     INTEXC.MIC       132    read physical bus error
+IE.BUSERR.READ.IPR      INTEXC.MIC       134    read proc register error
+IE.BUSERR.INT.VEC       INTEXC.MIC       136    interrupt vector bus error
+IE.BUSERR.WRITE.VIRT    INTEXC.MIC       138    write virtual bus error
+IE.BUSERR.WRITE.PHYS    INTEXC.MIC       13A    write physical bus error
+FP.PROT.ERROR           FPOINT.MIC       140    FPA protocol error
+FP.RSRV.INST            FPOINT.MIC       142    FPA reserved instruction
+FP.RSRV.OPER            FPOINT.MIC       144    floating reserved operand
+FP.OVERFLOW             FPOINT.MIC       146    floating overflow
+FP.UNDERFLOW            FPOINT.MIC       148    floating underflow
+FP.DIVIDE.BY.ZERO       FPOINT.MIC       14A    floating divide by zero
+FP.UNKNOWN.6            FPOINT.MIC       14C    FPA unknown error
+FP.UNKNOWN.7            FPOINT.MIC       14E    FPA unknown error
+
+
+
+1.5  Interrupt And Exception Entry Points
+
+The following table lists all entry points into module  INTEXC  from  both
+hardware dispatches and from other microcode modules.
+
+Hardware dispatches:
+
+Entry Point             From            Comments
+-----------             ----            --------
+IE.COND.BRANCH          microtrap       conditional branch taken
+IE.INTOV                microtrap       alu.v = PSL<iv> = 1
+IE.BUSERR.READ.VIRT     microtrap       read virtual bus error
+IE.BUSERR.READ.PHYS     microtrap       read physical bus error
+IE.BUSERR.READ.IPR      microtrap       read ipr bus error
+IE.BUSERR.WRITE.VIRT    microtrap       write virtual bus error
+IE.BUSERR.WRITE.PHYS    microtrap       write physical bus error
+IE.BUSERR.INT.VEC       microtrap       interrupt vector bus error
+
+IE.VAX.TRACE.TRAP       init DEC.NEXT   trace trap
+IE.VAX.INTERRUPT        init DEC.NEXT   interrupt
+IE.VAX.ARITH.TRAP       init DEC.NEXT   arith trap, TRAP = trap type
+
+BPT                     init DEC.NEXT   BPT instruction
+XFC                     init DEC.NEXT   XFC instruction
+FPD                     init DEC.NEXT   FPD set in PSL
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 8
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+XFD                     init DEC.NEXT   XFD instruction
+RSRV.INST.FLT           init DEC.NEXT   reserved instruction fault
+                        or OPSYS.MIC    privileged instruction fault
+
+IE.IID.STALL            DEC.NEXT        prefetcher halted
+DEC.NEXT.STALL          DEC.NEXT        prefetcher stalled
+DEC.NEXT.HALTED         DEC.NEXT        prefetcher halted
+
+Microcode dispatches:
+
+Entry Point             From            Comments
+-----------             ----            --------
+ID.LOAD.HALTED          various         prefetcher halted
+RSRV.ADDR.FLT           SPEC.MIC        reserved addressing fault
+FP.ARITH.FLT            FPOINT.MIC      fp arith fault, W5 = fault type
+RSRV.OPER.FLT           various         reserved operand fault
+MACHINE.CHECK           various         machine check fault, TMMGT = fault code
+IE.ACV                  FMEMMGT.MIC     ACV fault, TMMGT = fault type
+IE.TNV                  FMEMMGT.MIC     TNV fault, TMMGT = fault type
+IE.INTERRUPT            various         interrupt in mid instruction
+                                          (treat as fault)
+IE.CHM.EXCEPT           OPSYS.MIC       CHM exception,
+                                          W1 = minu(W1, PSL<cur_mode> * 4)
+                                          W4 = sp_W1
+                                          W5 = sext(operand)
+                                          VA = SCB vector address
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)            Page 9
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+1.6  Micromachine Resource Allocation
+
+The resources available to  the  microcode  include  the  general  purpose
+registers (G's), temporary registers (T's), working registers (W's), state
+flags (STATE<5:0>), and various flags (restart, trap disable, etc).  These
+resources are allocated as follows:
+
+        Resource        Allocated To                            Mnemonic
+        --------        ------------                            --------
+
+        G[0]..G[15]     VAX architectural registers
+
+        T[0]            Kernel Stack Pointer                    KSP
+        T[1]            Executive Stack Pointer                 ESP
+        T[2]            Supervisor Stack Pointer                SSP
+        T[3]            User Stack Pointer                      USP
+        T[4]            Interrupt Stack Pointer                 IS
+        T[5]            Console Saved PSL                       SAVEPSL
+        T[6]            Console Saved PC                        SAVEPC
+                also    Trap Parameter                          TRAP
+        T[7]            ASTLVL (bits<26:24>)                    ASTLVL
+        T[8]            RESERVED FOR CROSS PAGE                 TXPAGE
+        T[9]            RESERVED FOR MEMORY MANAGEMENT          TMMGT
+        T[10]           System Control Block Base               SCBB
+                          (bits <1:0> must be zero)
+        T[11]           Process Control Block Base              PCBB
+        T[12]           P0 Base Register                        P0BR
+                          (bits<1:0> must be zero)
+        T[13]           P1 Base Register                        P1BR
+                          (stored in compensated form, that is,
+                           minus 00800000(hex), bits<1:0> must be zero)
+        T[14]           System Base Register                    SBR
+                          (stored in compensated form, that is,
+                           minus 01000000(hex), bits<1:0> must be zero)
+        T[15]           Software Interrupt Summary Register     SISR
+                          (bits <15:1>, bits<31:16,0> are zero in HARDWARE)
+
+        W[0]..W[5]      general purpose
+        W[6]            RESERVED FOR MEMORY MANAGEMENT
+                          (bits<1:0> are zero in HARDWARE)
+        W[7]            general purpose (SC register)
+
+        STATE<2:0>      general purpose, cleared at IID
+        STATE<3>        used to indicate INTERRUPTIBLE INSTRUCTION,
+                          cleared at IID
+        STATE<4>        used to indicate INSIDE EXCEPTION FLOWS
+        STATE<5>        used to indicate SEVERE EXCEPTION
+
+Note that resources marked as RESERVED can be used  by  the  microcode  as
+local variables.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 10
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+1.7  Interrupts
+
+1.7.1  Hardware Interrupts -
+
+Hardware interrupts come from the following sources:  the halt  pin  (HALT
+L),  which  is nonmaskable; the power fail pin (PWRFL L), which interrupts
+at IPL1E; the memory error pin (MEMERR L), which interrupts at IPL1D;  the
+corrected  read  data pin (CRD L), which interrupts at IPL1A; the interval
+timer pin (INTTIM L), which interrupts at IPL16,  or  the  four  interrupt
+request  pins  (IRQ<3:0>  L) , which interrupt at IPL's 17-14.  These pins
+are strobed once per microcycle by the hardware interrupt controller.  The
+hardware  interrupt  controller  compares  the  priority  of  any asserted
+interrupts to the prevailing interrupt priority level (IPL).   If  any  of
+the  asserted interrupts has a higher priority than the IPL, the interrupt
+logic asserts the signal Interrupt Pending to  the  I  Box.   A  different
+version  of  the signal, not including halt, is available as FPD Interrupt
+Pending.  The interrupt controller receives the IPL when the hardware  PSL
+is  updated.  It can return the number of the highest priority outstanding
+interrupt via an MXPS0 to the interrupt identification (INT.ID) register.
+
+
+
+1.7.2  Software Interrupts -
+
+Software interrupts are implemented partly by hardware and partly  by  the
+microcode.   The  hardware  maintains a Highest Software Interrupt Request
+register  (HSIR);  the  microcode  maintains  the  architectural  Software
+Interrupt  Summary  Register  (SISR)  in  a temporary register in the data
+path.  When macrocode requests a software interrupt  by  writing  a  value
+into the Software Interrupt Request Register (SIRR) or SISR, the microcode
+updates its copy of SISR, calculates the new  highest  software  interrupt
+request,  and  updates  HSIR  in  the interrupt controller.  The interrupt
+controller compares HSIR against IPL to decide  if  a  software  interrupt
+should be granted.
+
+The software interrupt system is also affected by an  REI  instruction  or
+other  event  which  changes  the interrupt priority level.  If the IPL is
+changed to a value lower than the highest priority software interrupt, and
+if no hardware interrupts are pending, the interrupt controller will start
+a software interrupt.
+
+
+
+1.7.3  Asynchronous System Traps (AST's) -
+
+AST's are  entirely  implemented  through  the  microcode.   When  an  REI
+instruction  occurs,  the  microcode  checks  to  see  if an AST should be
+delivered.  If so, the microcode posts a level 2  software  interrupt  and
+updates   the  software  interrupt  system  appropriately.   The  hardware
+interrupt controller will then handle further interrupt processing.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 11
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+1.8  Microcode Decisions
+
+The VAX  SRM  permits  some  scope  for  machine-dependent  implementation
+decisions,  particularly  in  interrupts,  exceptions,  and the privileged
+instructions.  Here are some of the implementation decisions in  the  CVAX
+chip which may affect diagnostic or improperly written system software.
+
+     1.  General -- The chip does not implement PME.
+
+     2.  Memory Management -- The chip will  machine  check  if  a  memory
+         management  microtrap occurs and the resolved process PTE address
+         is not in system space.
+
+     3.  Specifiers -- The chip treats modes 4F,  5F,  6F,  7F,  and  8F4X
+         (indexed immediate) as reserved address modes.  The chip will NOT
+         fault on a modify reference to an immediate operand  (there  will
+         undoubtedly be an access violation later).
+
+     4.  Exceptions -- An ACV or TNV during a kernel stack  not  valid  or
+         machine  check  abort  causes  a processor restart (like a halt).
+         Likewise, a machine check during a  kernel  stack  not  valid  or
+         machine check abort causes a processor restart.
+
+     5.  Exceptions -- Vector<1:0> # 0 during a CHMx is ignored, as in the
+         11/780.
+
+     6.  Exceptions -- Vector<1:0> = 2 or 3 causes a processor restart.
+
+     7.  Exceptions -- The machine check protocol is documented in a later
+         section.
+
+     8.  Interrupts -- The chip  uses  only  bits<15:2>  of  the  incoming
+         vector  as  the  offset into the SCB.  Bit<0> is interpreted as a
+         flag which, if set, signifies special Qbus processing (force  IPL
+         = 17 hex).
+
+     9.  Queues -- Certain types of misformed  interlocked  queues,  which
+         the   SRM   regards  as  UNPREDICTABLE,  are  processed  normally
+         (notably, a queue with a zero foreward  pointer  and  a  non-zero
+         backward pointer is treated as empty).
+
+    10.  Queues -- A machine check abort in the middle of  an  interlocked
+         queue instruction will not unlock the queue header.
+
+    11.  Privileged -- LDPCTX does no reserved operand  checking.   LDPCTX
+         on the kernel stack is implemented identically to MicroVAX.
+
+    12.  Privileged -- The chip  does  not  implement  numerous  processor
+         registers.   These unimplemented registers are passed to external
+         logic; if unimplemented, theyread as  zero  and  are  ignored  on
+         write.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 12
+NOTES ON THE CVAX MICROCODE                                  12 September 1988
+
+
+    13.  Privileged -- MTPR does no reserved operand checking, except  for
+         the  register  number and the value of ASTLVL, if accessed.  MTPR
+         automatically forces values written to PCBB,  SCBB,  P0BR,  P1BR,
+         and SBR to be longword aligned.
+
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 13
+CVAX MACHINE CHECK SPECIFICATION                             12 September 1988
+
+
+2  CVAX MACHINE CHECK SPECIFICATION
+
+The section describes how CVAX  handles  serious  microcode  and  hardware
+error conditions including memory subsystem errors.  These conditions are:
+
+      -  FPA protocol error
+      -  Impossible situations in memory management
+      -  Unused IPL requests
+      -  Impossible situations in the microcode
+      -  Bus (memory) errors
+      -  Multiple errors
+
+
+
+
+2.1  Types Of Errors
+
+2.1.1  FPA Protocol Error -
+
+The FPA checks for proper ordering of requests from the CPU.  If  the  FPA
+detects a protocol violation, a machine check occurs.
+
+        param           meaning
+        -----           -------
+        1               FPA protocol error (FPA error status code 1)
+
+        2               FPA reserved instruction (FPA error status code 2)
+
+        3               FPA unknown error (FPA error status code 6)
+
+        4               FPA unknown error (FPA error status code 7)
+
+All FPA protocol error machine  checks  are  NON-RECOVERABLE.   The  error
+should  be  logged,  and  the  currently running process (or the operating
+system) terminated.
+
+
+
+2.1.2  Impossible Situations In Memory Management -
+
+CVAX does some checking for impossible conditions in the memory management
+microflows.   If  an  impossible  situation  is  detected, a machine check
+occurs.
+
+        param           meaning
+        -----           -------
+        5               The calculated virtual address for a Process PTE
+                        is in P0 space (TB miss flows)
+
+        6               The calculated virtual address for a Process PTE
+                        is in P1 space (TB miss flows)
+
+        7               The calculated virtual address for a Process PTE
+                        is in P0 space (M = 0 flows)
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 14
+CVAX MACHINE CHECK SPECIFICATION                             12 September 1988
+
+
+
+        8               The calculated virtual address for a Process PTE
+                        is in P1 space (M = 0 flows)
+
+All impossible memory management machine checks are NON-RECOVERABLE.   The
+error  should  be  logged,  and  the  currently  running  process  (or the
+operating system) terminated.  The  current  memory  management  registers
+(P0BR, P1BR, SBR, P0LR, P1LR, SLR) should also be logged.
+
+
+
+2.1.3  Unused IPL Request -
+
+CVAX uses 13 of the 16 hardware interrupt priority levels  (IPLs)  defined
+in  the  VAX  architecture.   If  the  interrupt  controller  requests  an
+interrupt at an unused hardware IPL, a machine check occurs.
+
+        param           meaning
+        -----           -------
+        9               The interrupt controller returned an interrupting
+                        IPL of 18, 19, or 1B
+
+The unused IPL machine check is  NON-RECOVERABLE.   The  error  should  be
+logged.   A non-vectored interrupt representing a serious error (corrected
+read data, memory error, power fail, or processor halt) has probably  been
+lost.  The operating system should be terminated.
+
+
+
+2.1.4  Impossible Situations In The Microcode -
+
+Due to size constraints, erroneous branches in the microcode will  usually
+result in the execution of random microinstructions.  However, a few cases
+are trapped out.  If the microcode  detects  an  impossible  situation,  a
+machine check occurs.
+
+        param           meaning
+        -----           -------
+        A               MOVC3 or MOVC5 in impossible state (not
+                        move forward, move backward, or fill)
+
+The impossible microcode machine  check  is  NON-RECOVERABLE.   The  error
+should  be  logged,  and  the  currently running process (or the operating
+system) terminated.
+
+
+
+2.1.5  Bus (Memory) Errors -
+
+If external logic asserts ERR L in response to any memory cycle other than
+an instruction prefetch or interrupt acknowledge, a machine check occurs.
+
+        param           meaning
+        -----           -------
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 15
+CVAX MACHINE CHECK SPECIFICATION                             12 September 1988
+
+
+        80              read bus error, normal read
+
+        81              read bus error, SPTE, PCB, or SCB read
+
+        82              write bus error, normal write
+
+        83              write bus error, SPTE or PCB write
+
+The bus (memory) error machine checks MAY be recoverable, depending on the
+error code, the VAX CANT RESTART, and FPD flags in the machine check stack
+frame, as shown in the following table:
+
+        error     VAX CANT RESTART      FPD       action
+        --------+-------------------------------+--------------
+        80,81   |         0              X      | restartable
+                |         1              0      | non-recoverable
+                |         1              1      | restartable
+                |                               |
+        82,83   |         X              X      | non-recoverable
+
+In addition, bus (memory) error machine checks that are  restartable  from
+the  chip's point of view may be non-recoverable for system reasons (eg, a
+read lock may be outstanding).  CONSULT THE VARIOUS SYSTEM  SPECIFICATIONS
+FOR FURTHER DETAILS.
+
+On a non-recoverable error, the error should be logged, and the  currently
+running process (or the operating system) should be terminated.
+
+
+
+2.1.6  Multiple Errors -
+
+If CVAX encounters nested serious errors (e.g.,  kernel  stack  not  valid
+inside  a machine check), or other conditions which cannot be processed by
+macrocode (e.g., HALT instruction in kernel mode),  the  microcode  places
+the  current PC in IPR[SAVEPC], the current PSL, MAPEN, and a restart code
+in IPR[SAVEPSL], and executes a processor restart.
+
+
+
+2.2  Machine Check Processing
+
+2.2.1  Microcode Actions -
+
+The microcode process for machine check is the same for all cases.  If any
+exception  is  in  progress,  a  processor restart occurs.  Otherwise, the
+current instruction is packed up (MOVC3, MOVC5, POLYf)  or  unwound.   The
+microcode sets the serious error flag and performs machine check exception
+processing through SCB vector  4.   Note  that  the  exception  is  always
+processed  on the interrupt stack.  The following parameters are pushed on
+the stack:
+
+        +-------------------------------------------------------+
+        |               byte count (00000010 hex)               |  :SP
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 16
+CVAX MACHINE CHECK SPECIFICATION                             12 September 1988
+
+
+        +-------------------------------------------------------+
+        |               machine check code                      |
+        +-------------------------------------------------------+
+        |               most recent memory address              |
+        +-------------------------------------------------------+
+        |               internal state information 1            |
+        +-------------------------------------------------------+
+        |               internal state information 2            |
+        +-------------------------------------------------------+
+        |                       PC                              |
+        +-------------------------------------------------------+
+        |                       PSL                             |
+        +-------------------------------------------------------+
+
+The parameters are:
+
+  machine check code (hex):
+
+                1       =       FPA protocol error
+                2       =       FPA reserved instruction
+                3       =       FPA unknown error
+                4       =       FPA unknown error
+                5       =       process PTE in P0 space (TB miss)
+                6       =       process PTE in P1 space (TB miss)
+                7       =       process PTE in P0 space (M = 0)
+                8       =       process PTE in P1 space (M = 0)
+                9       =       undefined interrupt ID code
+                A       =       impossible microcode state (MOVCx)
+                80      =       read bus error, normal read
+                81      =       read bus error, SPTE, PCB, or SCB read
+                82      =       write bus error, normal write
+                83      =       write bus error, SPTE or PCB write
+
+  most recent memory address:
+
+                <31:0>  =       current contents of VAP register
+
+  internal state information 1:
+
+                <31:24> =       current contents of SC<7:0>
+                <23:22> =       11
+                <21:16> =       current contents of STATE<5:0>
+                <15>    =       current contents of VAX CANT RESTART bit
+                <14:12> =       111
+                <11:8>  =       current ALU condition codes
+                <7:0>   =       delta PC at time of exception
+
+  internal state information 2:
+
+                <31:24> =       current contents of OPCODE<7:0>
+                <23:20> =       1111
+                <19:16> =       current contents of HSIR<3:0>
+                <15:8>  =       current contents of CADR<7:0>
+                <7:0>   =       current contents of MSER<7:0>
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 17
+CVAX MACHINE CHECK SPECIFICATION                             12 September 1988
+
+
+
+  PC:           <31:0>  =       PC of start of current instruction
+
+  PSL:          <31:0>  =       current contents of PSL
+
+When exception processing is complete, the serious error flag is  cleared,
+and the next instruction is decoded.
+
+
+
+2.3  Processor Restart
+
+If the hardware or kernel software environment becomes severely corrupted,
+the chip may be unable to continue normal processing.  In these instances,
+the chip executes a processor restart and passes control to recovery  code
+beginning  at  physical  address 20040000 (hex).  IPR[SAVEPC] contains the
+previous PC, IPR[SAVEPSL] contains the previous PSL with MAPEN in bit<15>,
+a  valid  stack  flag  in bit<14>, and a restart code in bits <14:8>.  The
+restart codes are as follows:
+
+          code          condition
+          ----          ---------
+            2           HALT L asserted
+            3           initial power on
+            4           interrupt stack not valid during exception
+            5           machine check normal exception
+            6           HALT instruction executed in kernel mode
+            7           SCB vector bits<1:0> = 11
+            8           SCB vector bits<1:0> = 10
+            A           CHMx executed while on interrupt stack
+           10           ACV or TNV during machine check exception
+           11           ACV or TNV during kernel stack not valid exception
+           12           machine check during machine check exception
+           13           machine check during kernel stack not valid exception
+           19           PSL<26:24> = 101 during interrupt or exception
+           1A           PSL<26:24> = 110 during interrupt or exception
+           1B           PSL<26:24> = 111 during interrupt or exception
+           1D           PSL<26:24> = 101 during REI
+           1E           PSL<26:24> = 110 during REI
+           1F           PSL<26:24> = 111 during REI
+
+A processor restart sets the state of the chip as follows:
+
+        IPR[SAVPC]      =       saved PC
+        IPR[SAVEPSL]    =       saved PSL<31:16,7:0> in <31:16,7:0>
+                                saved MAPEN<0>       in <15>
+                                valid stack flag     in <14>
+                                saved restart code   in <13:8>
+        SP              =       interrupt stack pointer
+        PSL             =       041F0000 (hex)
+        PC              =       20040000 (hex)
+        MAPEN           =       0
+        SISR            =       0       (powerup only)
+        ASTLVL          =       4       (powerup only)
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 18
+CVAX MACHINE CHECK SPECIFICATION                             12 September 1988
+
+
+        ICCS            =       0       (powerup only)
+        MSER            =       0       (powerup only)
+        CADR            =       0       (powerup only)
+        all else        =       undefined
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 19
+CVAX CONSOLE SUPPORT                                         12 September 1988
+
+
+3  CVAX CONSOLE SUPPORT
+
+The restart process  described  in  the  previous  section  allows  system
+designers  to  implement a transparent console in macrocode.  This section
+details some of the fine points of implementing a macrocode console.
+
+
+
+3.1  Entry Protocol
+
+The restart process does the following:
+
+        SAVEPC <-- PC;
+        SAVEPSL<31:16,7:0> <-- PSL<31:16,7:0>;
+        SAVEPSL<15> <-- MAPEN<0>;
+        if PSL<26:24> LEQU 5 then
+                SAVEPSL<14> <-- 0;
+                SP_PSL<26:24> <-- SP;
+        else
+                SAVEPSL<14> <-- 1;
+        SAVEPSL<13:8> <-- restart code;
+        SP <-- ISP;
+        MAPEN <-- 0;
+        PSL <-- 041F0000;
+        PC <-- 20040000;
+
+Thus, the PC and PSL are saved in hardware registers, a stack swap to  the
+interrupt  stack is done, mapping is turned off, and the chip transfers to
+PHYSICAL location 20040000.  A typical console startup  routine  might  do
+the following:
+
+;       ipr console.pc  =       saved pc
+;       ipr console.psl =       saved psl + saved mapen + error code
+;       sp              =       interrupt stack pointer at time of error
+;       pc              =       20040000
+;       psl             =       041F0000
+;       mapen           =       0
+;       astlvl          =       ??? (4 at powerup)
+;       sisr            =       ??? (0 at powerup)
+;       iccs            =       ??? (0 at powerup)
+;       mser            =       ??? (0 at powerup)
+;       cadr            =       ??? (0 at powerup)
+
+CONSOLE::
+        mfpr    #console.pc,ram_saved.pc        ; save saved pc
+        mfpr    #console.psl,ram_saved.psl      ; save saved psl
+        movl    sp,ram_saved.sp                 ; save current stk ptr
+        movl    #ram_stack,sp                   ; set up console stack ptr
+         :
+         :
+
+After saving the  hardware  state,  the  console  must  save  the  general
+registers,  the SCBB, and the PCBB, and establish an SCBB and PCBB for its
+own operation.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 20
+CVAX CONSOLE SUPPORT                                         12 September 1988
+
+
+3.2  Console Processing
+
+The console executes in kernel mode, on the interrupt stack,  with  memory
+management  disabled.   Thus  it  has  access  to  all  machine resources.
+However, because the console has in effect replaced the  normally  running
+program, it must access certain machine resources from saved status rather
+than current status:
+
+      -  General registers
+      -  PSL
+      -  Certain IPRs (notably PCBB and SCBB; IPL, which  is  in  the  old
+         PSL)
+
+
+
+
+3.3  Console Exit
+
+The exit from the console depends on two things.  First,  the  environment
+to which the console is exiting must have a validly mapped interrupt stack
+with at least two spare longwords at the bottom.  Second,  the  REI  which
+restores  the  PC  and  PSL  must  be  part  of the same physical longword
+containing the instruction (or part of the instruction) that  sets  MAPEN.
+The  exit  protocol is then to push the saved PC and PSL onto the (mapped)
+bottom of the SAVED interrupt stack, decrement the SAVED  interrupt  stack
+pointer, enable mapping, if appropriate, and exit via an REI:
+
+;       ram_saved.pc    =       saved pc
+;       ram_saved.psl   =       saved psl + saved mapen + error code
+;       ram_saved.sp    =       saved stack pointer
+;       ram_isp.ptr     =       translated pointer to saved int stack
+;       R0 - R13, SCBB  =       restored to initial values
+
+CONSOLE.EXIT::
+        subl2   #4,ram_isp.ptr                  ; decr saved stack ptr
+        movl    ram_saved.psl,@ram_isp.ptr      ; push psl onto stack
+        incl    ram_isp.ptr                     ; ptr to byte 1 of pushed psl 
+        clrb    @ram_isp.ptr                    ; clear psl<15:8>
+        subl2   #5,ram_isp.ptr                  ; decr saved stk ptr
+        movl    ram_saved.pc,@ram_isp.ptr       ; push pc onto stack
+        movl    ram_saved.sp,sp                 ; restore saved sp
+        subl2   #8.,sp                          ; eight bytes pushed
+        bbc     #7,ram_saved.psl+1,console.rei  ; test mapping enabling
+        mtpr    #1,#mapen                       ; turn on map (if it was on)
+CONSOLE.REI::
+        rei                                     ; restore psl and pc,
+                                                ; return to user
+
+For this exit sequence to work, the interrupt stack at the time of console
+entry  must  be  validly  mapped  and  must have two spare longwords.  The
+console will have to verify this fact by simulating the memory  management
+process,  thereby  proving that the interrupt stack is resident and points
+to valid physical memory.  If the interrupt stack  is  NOT  valid,  or  if
+PSL<26:24> were invalid at entry, the exit sequence must be aborted.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 21
+CVAX CONSOLE SUPPORT                                         12 September 1988
+
+
+Also for the exit sequence to work, the REI following  the  MTPR  MUST  be
+executed  DESPITE  the  fact that memory mapping has been totally changed.
+This can be arranged IF the REI is prefetched as  part  of  the  preceding
+instruction.  The MTPR to MAPEN flushes the translation buffer BUT NOT THE
+INSTRUCTION PIPELINE.  Thus, if the REI was in the instruction buffer,  it
+will  be  executed, irrespective of where the new mapped PC points.  Since
+mapping is now on, REI will  pop  the  new  PC  and  PSL  off  the  mapped
+interrupt  stack.  That is why the console must push the PC and PSL at the
+translated addresses corresponding to  the  top  of  the  saved  interrupt
+stack.
+
+Prior to the REI, the interrupt stack pointer and MAPEN register have been
+restored  to  their  initial  values.  The REI restores the PSL and PC and
+switches stacks according to the saved PSL.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 22
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4  CVAX INSTRUCTION TIMING
+
+The execution time of an instruction depends on  the  instruction  itself,
+the  addressing modes of the instruction specifiers, and the special cases
+invoked by the instruction (cache miss, TB miss, unaligned operand,  etc).
+In the most general case, the instruction execution time is the sum of the
+specifier times and the execute, fetch time.
+
+        inst time = spec 1 time +...+ spec n time + execute, fetch time
+
+All times  are  given  in  microcycles  and  I/O  cycles.   A  number  'n'
+represents  n  microcycles;  'n'R  represents  n  read  cycles;  and  'n'W
+represents n write cycles.  Read cycles that  hit  in  the  cache  take  1
+microcycle;  read  cycles  that  miss  in  the cache take at least 1 extra
+cycle, depending on the speed of external  memory.   Write  cycles  always
+take one cycle, unless the external interface is busy.
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 23
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.1  Specifier Timing
+
+The first table covers all specifiers except  the  last;  the  second  and
+third  tables  cover  the  last specifier.  Specifier addressing modes are
+cross-indexed with specifier access type:
+
+        r = read
+        a = address
+        v = field
+        m = modify
+        w = write
+
+and data length:
+
+        b = byte
+        w = word
+        l = long or f_floating
+        q = quadword or d_floating or g_floating.
+
+Branch displacements are NOT considered  to  be  specifiers;  handling  of
+branch displacements is included in the execute, fetch timing tables.
+
+
+
+4.1.1  Specifier Timing (Not The Last Specifier) -
+
+Only access types a, v, and r occur in these specifiers.
+
+addressing mode            |  r.bwl    av.bwl  r.q    av.q
+---------------------------+--------------------------------
+not indexed:               |
+ short literal  #n         |    1       -       2       -
+ register       Rn         |    1       1       2       2
+ register def   (Rn)       |    1+1r    1       1+2r    1
+ autodecrement  -(Rn)      |    2+1r    2       2+2r    2
+ autoincrement  (Rn)+      |    2+1r    2       2+2r    2
+ immediate      i^#n       |    2       2       4       4
+ autoinc def    @(Rn)+     |    2+2r    2+1r    2+3r    2+1r
+ absolute       @#a        |    1+1r    1       1+2r    1
+ displ/relative d(Rn)      |    1+1r    1       1+2r    1
+ displ/rel def  @d(Rn)     |    1+2r    1+1r    1+3r    1+1r
+indexed:                   |
+ short literal             |    -       -       -       -
+ register                  |    -       -       -       -
+ register def   (Rn)[Rx]   |    2+1r    2       2+2r    2
+ autodecrement  -(Rn)[Rx]  |    3+1r    3       3+2r    3
+ autoincrement  (Rn)+[Rx]  |    3+1r    3       3+2r    3
+ immediate                 |    -       -       -       -
+ autoinc def    @(Rn)+[Rx] |    4+2r    4+1r    4+2r    4+1r
+ absolute       @#a[Rx]    |    2+1r    2       2+2r    2
+ displ/relative d(Rn)[Rx]  |    3+1r    3       3+2r    3
+ displ/rel def  @d(Rn)[Rx] |    3+2r    3+1r    3+3r    3+1r
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 24
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.1.2  Specifier Timing (Last Specifier) -
+
+Access types a, v, r, m, and w are permitted in the last specifier.   This
+table covers data lengths byte, word, and long.
+
+addressing mode            |  r.bwl    av.bwl  m.bwl  w.bwl
+---------------------------+--------------------------------
+not indexed:               |
+ short literal  #n         |    1       -       -       -
+ register       Rn         |    0       0       0       1
+ register def   (Rn)       |    1+1r    1       1+1r+1w 1+1w
+ autodecrement  -(Rn)      |    2+1r    2       2+1r+1w 2+1w
+ autoincrement  (Rn)+      |    2+1r    2       2+1r+1w 2+1w
+ immediate      i^#n       |    2       2       -       -
+ autoinc def    @(Rn)+     |    2+2r    2+1r    2+2r+1w 2+1r+1w
+ absolute       @#a        |    1+1r    1       1+1r+1w 1+1w
+ displ/relative d(Rn)      |    1+1r    1       1+1r+1w 1+1w
+ displ/rel def  @d(Rn)     |    1+2r    1+1r    1+2r+1w 1+1r+1w
+indexed:                   |
+ short literal             |    -       -       -       -
+ register                  |    -       -       -       -
+ register def   (Rn)[Rx]   |    2+1r    2       2+1r+1w 2+1w
+ autodecrement  -(Rn)[Rx]  |    3+1r    3       3+1r+1w 3+1w
+ autoincrement  (Rn)+[Rx]  |    3+1r    3       3+1r+1w 3+1w
+ immediate                 |    -       -       -       -
+ autoinc def    @(Rn)+[Rx] |    4+2r    4+1r    4+2r+1w 4+1r+1w
+ absolute       @#a[Rx]    |    2+1r    2       2+1r+1w 2+1w
+ displ/relative d(Rn)[Rx]  |    3+1r    3       3+1r+1w 3+1w
+ displ/rel def  @d(Rn)[Rx] |    3+2r    3+1r    3+2r+1w 3+1r+1w
+
+This table covers data length quad.  Note that back to back  writes  stall
+for one cycle; this is already included in the modify and write columns.
+
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 25
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+addressing mode            |   r.q    av.q     m.q     w.q
+---------------------------+--------------------------------
+not indexed:               |
+ short literal  #n         |    2       -       -       -
+ register       Rn         |    0       0       2       2
+ register def   (Rn)       |    1+2r    1       2+2r+2w 2+2w
+ autodecrement  -(Rn)      |    2+2r    2       3+2r+2w 3+2w
+ autoincrement  (Rn)+      |    2+2r    2       3+2r+2w 3+2w
+ immediate      i^#n       |    4       4       -       -
+ autoinc def    @(Rn)+     |    2+3r    2+1r    3+3r+2w 3+1r+2w
+ absolute       @#a        |    1+2r    1       2+2r+2w 2+2w
+ displ/relative d(Rn)      |    1+2r    1       2+2r+2w 2+2w
+ displ/rel def  @d(Rn)     |    1+3r    1+1r    2+3r+2w 2+1r+2w
+indexed:                   |
+ short literal             |    -       -       -       -
+ register                  |    -       -       -       -
+ register def   (Rn)[Rx]   |    2+2r    2       3+2r+2w 3+2w
+ autodecrement  -(Rn)[Rx]  |    3+2r    3       4+2r+2w 4+2w
+ autoincrement  (Rn)+[Rx]  |    3+2r    3       4+2r+2w 4+2w
+ immediate                 |    -       -       -       -
+ autoinc def    @(Rn)+[Rx] |    4+3r    4+1r    5+3r+2w 5+1r+2w
+ absolute       @#a[Rx]    |    2+2r    2       3+2r+2w 3+2w
+ displ/relative d(Rn)[Rx]  |    3+2r    3       4+2r+2w 4+2w
+ displ/rel def  @d(Rn)[Rx] |    3+3r    3+1r    4+3r+2w 4+1r+2w
+
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 26
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.2  Execute, Fetch Timing
+
+The execute, fetch  timing  covers  the  execution  time  of  the  current
+instruction   and   the   normally  buried  prefetch  time  for  the  next
+instruction.  If the current instruction is a branch, the  fetch  time  of
+the next instruction cannot be buried and is accounted for in this table.
+
+The standard notation for operand specifiers is:
+
+         <name>.<access type><data type>
+
+where:
+
+     1.  Name is a suggestive name for the operand in the context  of  the
+         instruction.   It  is the capitalized name of a register or block
+         for implied operands.
+
+     2.  Access type is a letter denoting  the  operand  specifier  access
+         type.
+
+                a  =    address operand
+                b  =    branch displacement
+                m  =    modified operand (both read and written)
+                r  =    read only operand
+                v  =    field operand
+                w  =    write only operand
+
+     3.  Data type is a letter denoting the data type of the operand.
+
+                b  =    byte
+                d  =    d_floating
+                f  =    f_floating
+                g  =    g_floating
+                l  =    longword
+                q  =    quadword
+                v  =    field (used only in implied operands)
+                w  =    word
+                *  =    multiple longwords (used only in implied operands)
+
+     4.  Implied operands, that is, locations that  are  accessed  by  the
+         instruction,  but  not  specified  in  an operand, are denoted by
+         curly braces {}.
+
+
+
+
+4.2.1  Integer Arithmetic And Logical Instructions -
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+58       ADAWI add.rw, sum.mw                           1       sum = reg
+                                                        4       sum = mem
+
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 27
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+80       ADDB2 add.rb, sum.mb                           1
+C0       ADDL2 add.rl, sum.ml                           1
+A0       ADDW2 add.rw, sum.mw                           1
+
+81       ADDB3 add1.rb, add2.rb, sum.wb                 1
+C1       ADDL3 add1.rl, add2.rl, sum.wl                 1
+A1       ADDW3 add1.rw, add2.rw, sum.ww                 1
+
+D8       ADWC add.rl, sum.ml                            1
+
+78       ASHL cnt.rb, src.rl, dst.wl                    5-8, 7 typ
+79       ASHQ cnt.rb, src.rq, dst.wq                    4-8, 7 typ
+
+8A       BICB2 mask.rb, dst.mb                          1
+CA       BICL2 mask.rl, dst.ml                          1
+AA       BICW2 mask.rw, dst.mw                          1
+
+8B       BICB3 mask.rb, src.rb, dst.wb                  1
+CB       BICL3 mask.rl, src.rl, dst.wl                  1
+AB       BICW3 mask.rw, src.rw, dst.ww                  1
+
+88       BISB2 mask.rb, dst.mb                          1
+C8       BISL2 mask.rl, dst.ml                          1
+A8       BISW2 mask.rw, dst.mw                          1
+
+89       BISB3 mask.rb, src.rb, dst.wb                  1
+C9       BISL3 mask.rl, src.rl, dst.wl                  1
+A9       BISW3 mask.rw, src.rw, dst.ww                  1
+
+93       BITB mask.rb, src.rb                           1
+D3       BITL mask.rl, src.rl                           1
+B3       BITW mask.rw, src.rw                           1
+
+94       CLRB dst.wb                                    2       dst = reg
+                                                        1       dst = mem
+D4       CLRL{=F} dst.wl                                2       dst = reg
+                                                        1       dst = mem
+7C       CLRQ{=D=G} dst.wq                              3       dst = reg
+                                                        1       dst = mem
+B4       CLRW dst.ww                                    2       dst = reg
+                                                        1       dst = mem
+
+91       CMPB src1.rb, src2.rb                          1
+D1       CMPL src1.rl, src2.rl                          1
+B1       CMPW src1.rw, src2.rw                          1
+
+98       CVTBL src.rb, dst.wl                           2
+99       CVTBW src.rb, dst.wl                           2
+F6       CVTLB src.rl, dst.wb                           4-5, 4 typ
+F7       CVTLW src.rl, dst.ww                           4-5, 4 typ
+33       CVTWB src.rw, dst.wb                           4-5, 4 typ
+32       CVTWL src.rw, dst.wl                           2
+
+97       DECB dif.mb                                    3       dst = reg
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 28
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+                                                        1       dst = mem
+D7       DECL dif.ml                                    3       dst = reg
+                                                        1       dst = mem
+B7       DECW dif.mw                                    3       dst = reg
+                                                        1       dst = mem
+
+86       DIVB2 divr.rb, quo.mb                          16-19, 17 typ
+C6       DIVL2 divr.rl, quo.ml                          39-43, 40 typ w/o FPA
+                                                        tbd with FPA
+A6       DIVW2 divr.rw, quo.mw                          24-27, 25 typ
+
+87       DIVB3 divr.rb, divd.rb, quo.wb                 16-19, 17 typ
+C7       DIVL3 divr.rl, divd.rl, quo.wl                 39-43, 40 typ w/o FPA
+                                                        tbd with FPA
+A7       DIVW3 divr.rw, divd.rw, quo.ww                 24-27, 25 typ
+
+7B       EDIV divr.rl, divd.rq, quo.vl, rem.wl          47-52, 48 typ
+
+7A       EMUL mulr.rl, muld.rl, add.rl, prod.wq         36 w/o FPA
+                                                        tbd with FPA
+
+96       INCB sum.mb                                    3       dst = reg
+                                                        1       dst = mem
+D6       INCL sum.ml                                    3       dst = reg
+                                                        1       dst = mem
+B6       INCW sum.mw                                    3       dst = reg
+                                                        1       dst = mem
+
+92       MCOMB src.rb, dst.wb                           0       dst = reg
+                                                        1       dst = mem
+D2       MCOML src.rl, dst.wl                           0       dst = reg
+                                                        1       dst = mem
+B2       MCOMW src.rw, dst.ww                           0       dst = reg
+                                                        1       dst = mem
+
+8E       MNEGB src.rb, dst.wb                           0       dst = reg
+                                                        1       dst = mem
+CE       MNEGL src.rl, dst.wl                           0       dst = reg
+                                                        1       dst = mem
+AE       MNEGW src.rw, dst.ww                           0       dst = reg
+                                                        1       dst = mem
+
+90       MOVB src.rb, dst.wb                            0
+D0       MOVL src.rl, dst.wl                            0
+7D       MOVQ src.rq, dst.wq                            0
+B0       MOVW src.rw, dst.ww                            0
+
+9A       MOVZBW src.rb, dst.wb                          0
+9B       MOVZBL src.rb, dst.wl                          0
+3C       MOVZWL src.rw, dst.ww                          0
+
+84       MULB2 mulr.rb, prod.mb                         14
+C4       MULL2 mulr.rl, prod.ml                         37 w/o FPA
+                                                        tbd with FPA
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 29
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+A4       MULW2 mulr.rw, prod.mw                         21
+
+85       MULB3 mulr.rb, muld.rb, prod.wb                14
+C5       MULL3 mulr.rl, muld.rl, prod.wl                37 w/o FPA
+                                                        tbd with FPA
+A5       MULW3 mulr.rw, muld.rw, prod.ww                21
+
+DD       PUSHL src.rl, {-(SP).wl}                       2+1w
+
+9C       ROTL cnt.rb, src.rl, dst.wl                    3
+
+D9       SBWC sub.rl, dif.ml                            1
+
+82       SUBB2 sub.rb, dif.mb                           1
+C2       SUBL2 sub.rl, dif.ml                           1
+A2       SUBW2 sub.rw, dif.mw                           1
+
+83       SUBB3 sub.rb, min.rb, dif.wb                   1
+C3       SUBL3 sub.rl, min.rl, dif.wl                   1
+A3       SUBW3 sub.rw, min.rw, dif.ww                   1
+
+95       TSTB src.rb                                    2       src = reg
+                                                        1       src = mem
+D5       TSTL src.rl                                    2       src = reg
+                                                        1       src = mem
+B5       TSTW src.rw                                    2       src = reg
+                                                        1       src = mem
+
+8C       XORB2 mask.rb, dst.mb                          1
+CC       XORL2 mask.rl, dst.ml                          1
+AC       XORW2 mask.rw, dst.mw                          1
+
+8D       XORB3 mask.rb, src.rb, dst.wb                  1
+CD       XORL3 mask.rl, src.rl, dst.wl                  1
+AD       XORW3 mask.rw, src.rw, dst.ww                  1
+
+
+
+4.2.2  Address Instructions -
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+9E       MOVAB src.ab, dst.wl                           0
+DE       MOVAL{=F} src.al, dst.wl                       0
+7E       MOVAQ{=D=G} src.aq, dst.wl                     0
+3E       MOVAW src.aw, dst.wl                           0
+
+9F       PUSHAB src.ab, {-(SP).wl}                      2+1w
+DF       PUSHAL{=F} src.al, {-(SP).wl}                  2+1w
+7F       PUSHAQ{=D=G} src.aq, {-(SP).wl}                2+1w
+3F       PUSHAW src.aw, {-(SP).wl}                      2+1w
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 30
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.2.3  Variable Length Bit Field Instructions -
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+EC       CMPV pos.rl, size.rb, base.vb,                 12-18, 13 typ   v = reg
+                {field.rv}, src.rl                      11+1r - 14+2r,
+                                                        12+1r typ       v = mem
+ED       CMPZV pos.rl, size.rb, base.vb,                12-18, 13 typ   v = reg
+                {field.rv}, src.rl                      11+1r - 14+2r,
+                                                        12+1r typ       v = mem
+EE       EXTV pos.rl, size.rb, base.vb,                 12-18, 13 typ   v = reg
+                {field.rv}, dst.wl                      11+1r - 14+2r,
+                                                        12+1r typ       v = mem
+EF       EXTZV pos.rl, size.rb, base.vb,                12-18, 13 typ   v = reg
+                {field.rv}, dst.wl                      11+1r - 14+2r,
+                                                        12+1r typ       v = mem
+F0       INSV src.rl, pos.rl, size.rb, base.vb,         10-12, 10 typ   v = reg
+                {field.wv}                              13+1r+1w - 15+2r+2w,
+                                                        13+1r+1w typ    v = mem
+EB       FFC startpos.rl, size.rb, base.vb,             14-36, 21 typ   v = reg
+                {field.rv}, findpos.wl                  13+1r - 37+2r,
+                                                        23+1r typ       v = mem
+EA       FFS startpos.rl, size.rb, base.vb,             13-35, 20 typ   v = reg
+                {field.rv}, findpos.wl                  12+1r - 36+2r,
+                                                        22+1r typ       v = mem
+
+
+
+4.2.4  Control Instructions -
+
+The number before the slash is cycles for  branch  not  taken,  after  the
+slash  for  branch  taken.   If  the  opcode  and  first  specifier of the
+instruction at the branch target of a  taken  branch  overlap  a  longword
+boundary, add 1r cycle to the branch taken execution time.
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+9D       ACBB limit.rb, add.rb, index.mb, displ.bw      8/8+1r  index = reg
+                                                        6/6+1r  index = mem
+F1       ACBL limit.rl, add.rl, index.ml, displ.bw      8/8+1r  index = reg
+                                                        6/6+1r  index = mem
+3D       ACBW limit.rw, add.rw, index.mw, displ.bw      8/8+1r  index = reg
+                                                        6/6+1r  index = mem
+
+F3       AOBLEQ limit.rl, index.ml, displ.bb            5/5+1r  index = reg
+                                                        4/4+1r  index = mem
+F2       AOBLSS limit.rl, index.ml, displ.bb            5/5+1r  index = reg
+                                                        4/4+1r  index = mem
+
+1E       BCC{=BGEQU} displ.bb                           1/3+1r
+1F       BCS{=BLSSU} displ.bb                           1/3+1r
+13       BEQL{=BEQLU} displ.bb                          1/3+1r
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 31
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+18       BGEQ displ.bb                                  1/3+1r
+14       BGTR displ.bb                                  1/3+1r
+1A       BGTRU displ.bb                                 1/3+1r
+15       BLEQ displ.bb                                  1/3+1r
+1B       BLEQU displ.bb                                 1/3+1r
+19       BLSS displ.bb                                  1/3+1r
+12       BNEQ{=BNEQU} displ.bb                          1/3+1r
+1C       BVC displ.bb                                   1/3+1r
+1D       BVS displ.bb                                   1/3+1r
+
+E1       BBC pos.rl, base.vb, displ.bb, {field.rv}      5/7+1r          v = reg
+                                                        6+1r/8+2r       v = mem
+E0       BBS pos.rl, base.vb, displ.bb, {field.rv}      5/7+1r          v = reg
+                                                        6+1r/8+2r       v = mem
+
+E5       BBCC pos.rl, base.vb, displ.bb, {field.mv}     6/8+1r          v = reg
+                                                        7+1r+1w/7+2r+1w v = mem
+E3       BBCS pos.rl, base.vb, displ.bb, {field.mv}     6/8+1r          v = reg
+                                                        7+1r+1w/7+2r+1w v = mem
+E4       BBSC pos.rl, base.vb, displ.bb, {field.mv}     6/8+1r          v = reg
+                                                        7+1r+1w/7+2r+1w v = mem
+E2       BBSS pos.rl, base.vb, displ.bb, {field.mv}     6/8+1r          v = reg
+                                                        7+1r+1w/7+2r+1w v = mem
+
+E7       BBCCI pos.rl, base.vb, displ.bb, {field.mv}    6/8+1r          v = reg
+                                                        7+1r+1w/9+2r+1w v = mem
+E6       BBSSI pos.rl, base.vb, displ.bb, {field.mv}    6/8+1r          v = reg
+                                                        7+1r+1w/9+2r+1w v = mem
+
+E9       BLBC src.rl, displ.bb                          2/4+1r
+E8       BLBS src.rl, displ.bb                          2/4+1r
+
+11       BRB displ.bb                                   3+1r
+31       BRW displ.bw                                   3+1r
+
+10       BSBB displ.bb, {-(SP).wl}                      4+1r+1w
+30       BSBW displ.bw, {-(SP).wl}                      4+1r+1w
+
+8F       CASEB selector.rb, base.rb, limit.rb,          8+2r/7+1r
+                displ.bw-list
+CF       CASEL selector.rl, base.rl, limit.rl,          8+2r/7+1r
+                displ.bw-list
+AF       CASEW selector.rw, base.rw, limit.rw,          8+2r/7+1r
+                displ.bw-list
+
+17       JMP dst.ab                                     3+1r
+
+16       JSB dst.ab, {-(SP).wl}                         4+1r+1w
+
+05       RSB {(SP)+.rl}                                 4+2r
+
+F4       SOBGEQ index.ml, displ.bb                      4/4+1r  index = reg
+                                                        3/3+1r  index = mem
+F5       SOBGTR index.ml, displ.bb                      4/4+1r  index = reg
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 32
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+                                                        3/3+1r  index = mem
+
+
+
+4.2.5  Procedure Call Instructions -
+
+In this section, n = number of set register bits  in  the  procedure  call
+mask.   The  register  writes in CALLx are timed for every other cycle; if
+the external memory subsystem cannot keep pace, there will  be  additional
+stalls  for  the  memory delays.  The last five writes are timed for every
+third cycle; if the external memory subsystem cannot keep pace, there will
+be additional stalls for memory delays.
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+FA       CALLG arglist.ab, dst.ab, {-(SP).w*}           21+2r+5w+n+nw
+FB       CALLS numarg.rl, dst.ab, {-(SP).w*}            24+2r+6w+n+nw
+
+04       RET {(SP)+.r*}                                 13+5r+nr        from G
+                                                        15+6r+nr        from S
+
+
+
+4.2.6  Miscellaneous Instructions -
+
+In this section, n = leftmost set bit in the register mask.  The writes in
+PUSHR  are  timed  for every third cycle; if the external memory subsystem
+cannot keep pace, there will be additional stalls for memory delays.
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+B9       BICPSW mask.rw                                 5
+B8       BISPSW mask.rw                                 5
+
+03       BPT {-(KSP).w*}                                exception
+
+00       HALT {-(KSP).w*}                               2
+
+0A       INDEX subscript.rl, low.rl, high.rl,           39
+         size.rl, indexin.rl, indexout.wl
+
+DC       MOVPSL dst.wl                                  2       dst = reg
+                                                        1       dst = mem
+
+01       NOP                                            1
+
+BA       POPR mask.rw, {(SP)+.r*}                       8+n+nr
+BB       PUSHR mask.rw, {-(SP).w*}                      5+2n+nw
+
+FC       XFC {unspecified operands}                     exception
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 33
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.2.7  Queue Instructions -
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+5C       INSQHI entry.ab, header.aq                     19+3r+5w
+5D       INSQTI entry.ab, header.aq                     20+4r+6w
+
+0E       INSQUE entry.ab, pred.ab                       5+2r+4w
+
+5E       REMQHI header.aq, addr.wl                      17+4r+3w
+5F       REMQTI header.aq, addr.wl                      21+5r+4w
+
+0F       REMQUE entry.ab, addr.wl                       7+3r+2w
+
+
+
+4.2.8  Character String Instructions -
+
+For CMPC3, CMPC5, LOCC, SKPC, SCANC, SPANC, n =  characters  processed  in
+main  loop;  k = characters processed in fill loop.  For MOVC3, MOVC5, n =
+LONGWORDS processed in main loop; k = LONGWORDS procsessed in fill loop.
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+29       CMPC3 len.rw, src1addr.ab, src2addr.ab         6+6n+2nr
+2D       CMPC5 src1len.rw, src1addr.ab, fill.rb,        6+6n+2nr+3k+kr
+               src2len.rw, src2addr.ab
+
+3A       LOCC char.rb, len.rw, addr.ab                  5+3n+nr
+
+28       MOVC3 len.rw, srcaddr.ab, dstaddr.ab           16+3n+nr+nw
+2C       MOVC5 srclen.rw, srcaddr.ab, fill.rb,          26+3n+nr+nw+2k+kw
+         dstlen.rw, dstaddr.ab
+
+2A       SCANC len.rw, addr.ab, tbladdr.ab, mask.rb     6+4n+2nr
+
+3B       SKPC char.rb, len.rw, addr.ab                  5+3n+nr
+
+2B       SPANC len.rw, addr.ab, tbladdr.ab, mask.rb     6+4n+2nr
+
+
+
+
+4.2.9  Operating System Support Instructions -
+
+The writes in SVPCTX are timed for every  third  cycle;  if  the  external
+memory  subsystem  cannot  keep  pace, there will be additional stalls for
+memory delays.
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 34
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+BD       CHME param.rw, {-(ySP).w*}                     26+2r+3w
+BC       CHMK param.rw, {-(ySP).w*}                     26+2r+3w
+BE       CHMS param.rw, {-(ySP).w*}                     26+2r+3w
+BF       CHMU param.rw, {-(ySP).w*}                     26+2r+3w
+         Where y=MINU(x, PSL<current_mode>)
+
+06       LDPCTX {PCB.r*, -(KSP).w*}                     17+22r+2w
+
+DB       MFPR procreg.rl, dst.wl                        5-12, 11 typ
+DA       MTPR src.rl, procreg.rl                        8-12, 11 typ
+
+0C       PROBER mode.rb, len.rw, base.ab                13-14, 13 typ
+0D       PROBEW mode.rb, len.rw, base.ab                13-14, 13 typ
+
+02       REI {(SP)+.r*}                                 22+2r - 33+2r,
+                                                        24+2r typ
+
+07       SVPCTX {(SP)+.r*, PCB.w*}                      6+2r+20w - 12+2r+20w,
+                                                        12+2r+20w typ
+
+
+
+4.2.10  Floating Point Instructions -
+
+Opcode   Instruction                            Execution Cycles
+------   -----------                            ----------------
+
+6F       ACBD limit.rd, add.rd, index.md,displ.bw       tbd
+4F       ACBF limit.rf, add.rf, index.mf,displ.bw       tbd
+4FFD     ACBG limit.rg, add.rg, index.mg,displ.bw       tbd
+
+60       ADDD2 add.rd, sum.md                           tbd
+40       ADDF2 add.rf, sum.mf                           tbd
+40FD     ADDG2 add.rg, sum.mg                           tbd
+
+61       ADDD3 add1.rd, add2.rd, sum.wd                 tbd
+41       ADDF3 add1.rf, add2.rf, sum.wf                 tbd
+41FD     ADDG3 add1.rg, add2.rg, sum.wg                 tbd
+
+71       CMPD src1.rd, src2.rd                          tbd
+51       CMPF src1.rf, src2.rf                          tbd
+51FD     CMPG src1.rg, src2.rg                          tbd
+
+6C       CVTBD src.rb, dst.wd                           tbd
+4C       CVTBF src.rb, dst.wf                           tbd
+4CFD     CVTBG src.rb, dst.wg                           tbd
+68       CVTDB src.rd, dst.wb                           tbd
+76       CVTDF src.rd, dst.wf                           tbd
+6A       CVTDL src.rd, dst.wl                           tbd
+69       CVTDW src.rd, dst.ww                           tbd
+48       CVTFB src.rf, dst.wb                           tbd
+56       CVTFD src.rf, dst.wd                           tbd
+99FD     CVTFG src.rf, dst.wg                           tbd
+4A       CVTFL src.rf, dst.wl                           tbd
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 35
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+49       CVTFW src.rf, dst.ww                           tbd
+48FD     CVTGB src.rg, dst.wb                           tbd
+33FD     CVTGF src.rg, dst.wf                           tbd
+4AFD     CVTGL src.rg, dst.wl                           tbd
+49FD     CVTGW src.rg, dst.ww                           tbd
+6E       CVTLD src.rl, dst.wd                           tbd
+4E       CVTLF src.rl, dst.wf                           tbd
+4EFD     CVTLG src.rl, dst.wg                           tbd
+6D       CVTWD src.rw, dst.wd                           tbd
+4D       CVTWF src.rw, dst.wf                           tbd
+4DFD     CVTWG src.rw, dst.wg                           tbd
+
+6B       CVTRDL src.rd, dst.wl                          tbd
+4B       CVTRFL src.rf, dst.wl                          tbd
+4BFD     CVTRGL src.rg, dst.wl                          tbd
+
+66       DIVD2 divr.rd, quo.md                          tbd
+46       DIVF2 divr.rf, quo.mf                          tbd
+46FD     DIVG2 divr.rg, quo.mg                          tbd
+
+67       DIVD3 divr.rd, divd.rd, quo.wd                 tbd
+47       DIVF3 divr.rf, divd.rf, quo.wf                 tbd
+47FD     DIVG3 divr.rg, divd.rg, quo.wg                 tbd
+
+74       EMODD mulr.rd, mulrx.rb, muld.rd, int.wl,      tbd
+                fract.wd
+54       EMODF mulr.rf, mulrx.rb, muld.rf, int.wl,      tbd
+                fract.wf
+54FD     EMODG mulr.rg, mulrx.rw, muld.rg, int.wl,      tbd
+                fract/wg
+
+72       MNEGD src.rd, dst.wd                           tbd
+72       MNEGD src.rd, dst.wd                           tbd
+52FD     MNEGG src.rg, dst.wg                           tbd
+
+70       MOVD src.rd, dst.wd                            tbd
+50       MOVF src.rf, dst.wf                            tbd
+50FD     MOVG src.rg, dst.wg                            tbd
+
+64       MULD2 mulr.rd, prod.md                         tbd
+44       MULF2 mulr.rf, prod.mf                         tbd
+44FD     MULG2 mulr.rg, prod.mg                         tbd
+
+65       MULD3 mulr.rd, muld.rd, prod.wd                tbd
+45       MULF3 mulr.rf, muld.rf, prod.wf                tbd
+45FD     MULG3 mulr.rg, muld.rg, prod.wg                tbd
+
+75       POLYD arg.rd, degree.rw, table.ab              tbd
+55       POLYF arg.rf, degree.rw, table.ab              tbd
+55FD     POLYG arg.rf, degree.rw, table.ab              tbd
+
+62       SUBD2 sub.rd, dif.md                           tbd
+42       SUBF2 sub.rf, dif.mf                           tbd
+42FD     SUBG2 sub.rg, dif.mg                           tbd
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 36
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+
+63       SUBD3 sub.rd, min.rd, dif.wd                   tbd
+43       SUBF3 sub.rf, min.rf, dif.wf                   tbd
+43FD     SUBG3 sub.rg, min.rg, dif.wg                   tbd
+
+73       TSTD src.rd                                    tbd
+53       TSTF src.rf                                    tbd
+53FD     TSTG src.rg                                    tbd
+
+
+
+4.2.11  Microcode-Assisted Emulated Instructions -
+
+The times gives here are for execution of the emulation exception.
+
+Opcode   Instruction                               Execution Cycles
+------   -----------                               ----------------
+
+20       ADDP4 addlen.rw, addaddr.ab, sumlen.rw,        17+2r+10w
+                sumaddr.ab
+21       ADDP6 add1len.rw, add1addr.ab, add2len.rw,     17+2r+10w
+                add2addr.ab, sumlen.rw, sumaddr.ab
+
+F8       ASHP cnt.rb, srclen.rw, srcaddr.ab, round.rb,  17+2r+10w
+              dstlen.rw, dstaddr.ab
+
+35       CMPP3 len.rw, src1addr.ab, src2addr.ab         17+2r+10w
+37       CMPP4 src1len.rw, src1addr.ab, src2len.rw,     17+2r+10w
+                src2addr.ab
+
+0B       CRC tbl.ab, inicrc.rl, strlen.rw, stream.ab    17+2r+10w
+
+F9       CVTLP src.rl, dstlen.rw, dstaddr.ab            17+2r+10w
+36       CVTPL srclen.rw, srcaddr.ab, dst.wl            17+2r+10w
+08       CVTPS srclen.rw, srcaddr.ab, dstlen.rw,        17+2r+10w
+                dstaddr.ab
+09       CVTSP srclen.rw, srcaddr.ab, dstlen.rw,        17+2r+10w
+                dstaddr.ab
+24       CVTPT srclen.rw, srcaddr.ab, tbladdr.ab,       17+2r+10w
+               dstlen.rw, dstaddr.ab
+26       CVTTP srclen.rw, srcaddr.ab, tbladdr.ab,       17+2r+10w
+               dstlen.rw, dstaddr.ab
+
+27       DIVP divrlen.rw, divraddr.ab, divdlen.rw,      17+2r+10w
+                divdaddr.ab, quolen.rw, quoaddr.ab
+
+38       EDITPC srclen.rw, srcaddr.ab, pattern.ab,      17+2r+10w
+                dstaddr.ab
+
+39       MATCHC objlen.rw, objaddr.ab, srclen.rw,       17+2r+10w
+                srcaddr.ab
+
+34       MOVP len.rw, srcaddr.ab, dstaddr.ab            17+2r+10w
+
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 37
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+2E       MOVTC srclen.rw, srcaddr.ab, fill.rb,          17+2r+10w
+                tbladdr.ab, dstlen.rw, dstaddr.ab
+2F       MOVTUC srclen.rw, srcaddr.ab, esc.rb,          17+2r+10w
+                tbladdr.ab, dstlen.rw, dstaddr.ab
+
+25       MULP mulrlen.rw, mulraddr.ab, muldlen.rw,      17+2r+10w
+                muldaddr.ab, prodlen.rw, prodaddr.ab
+
+22       SUBP4 sublen.rw, subaddr.ab, diflen.rw,        17+2r+10w
+                difaddr.ab
+23       SUBP6 sublen.rw, subaddr.ab, minlen.rw,        17+2r+10w
+                 minaddr.ab, diflen.rw, difaddr.ab
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 38
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.3  Other Timings
+
+Event                                              Execution Cycles
+------                                             ----------------
+
+initiate hardware interrupt                             20+3r+2w
+
+initiate software interrupt                             24+2r+2w - 40+2r+2w,
+                                                        30+2r+2w typ
+
+initiate exception                                      30+2r+2w - 50+2r+8w,
+                                                        35+2r+3w typ
+
+unaligned read operand (word or longword)               1r
+unaligned read operand (quadword)                       2r
+unaligned write operand (word or longword)              1+1w
+unaligned write operand (quadword)                      2+2w
+
+TB miss, system space                                   4+1r
+TB miss, process space, single miss                     6+1r
+TB miss, process space, double miss                     11+2r
+I stream fetch delay after TB miss                      5+1r
+Branch displacement fetch delay after TB miss           7+1r
+M bit clear, system space                               9+2r+1w
+M bit clear, process space, single miss                 9+2r+1w
+M bit clear, process space, double miss                 17+3r+1w
+Read crossing page boundary                             8
+Write crossing page boundary                            7+2r
+
+DMA latency                                             3
+interrupt latency                                       tbd
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 39
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+4.4  Examples
+
+
+ADDL2 d(r),r - aligned memory operand, cache hit, no TB miss
+
+        specifier 1 time                1+1r
+        specifier 2 time                0
+        execute, fetch time             1
+                                        ----
+        total                           2+1r
+
+MOVL r,d(r) - aligned memory operand, cache hit, no TB miss
+
+        specifier 1 time                1
+        specifier 2 time                1+1w
+        execute, fetch time             0
+                                        ----
+        total                           2+1w
+
+SOBLEQ r,disp - cache hit, no TB miss, instruction at branch
+        target spans a longword boundary
+
+        specifier 1 time                1       (note - 1 specifier)
+        execute, fetch time             4+1r    (note - branch taken)
+        unaligned new instruction       1r
+                                        ----
+        total                           5+2r
+
+INDEX d(r),@d(r),(r)[rx],@(r)+,-(r),@d(r)[rx] - all memory operands
+        unaligned across page boundaries, all memory operands take
+        TB misses on both reads, M bit clear, cache hits
+
+        specifier 1 time                1+1r
+        specifier 1 cross page          8
+        specifier 1 TB miss x 2         12+2r
+        specifier 1 unaligned           1r
+        specifier 2 time                1+2r
+        specifier 2 cross page x 2      16
+        specifier 2 TB miss x 4         24+4r
+        specifier 2 unaligned x 2       2r
+        specifier 3 time                2+1r
+        specifier 3 cross page          8
+        specifier 3 TB miss x 2         12+2r
+        specifier 3 unaligned           1r
+        specifier 4 time                2+2r
+        specifier 4 cross page x 2      16
+        specifier 4 TB miss x 4         24+4r
+        specifier 4 unaligned x 2       2r
+        specifier 5 time                2+1r
+        specifier 5 cross page          8
+        specifier 5 TB miss x 2         12+2r
+        specifier 5 unaligned           1r
+        specifier 6 time                3+1r+1w
+        specifier 6 read cross page     8
+
+CVAX CPU Chip Microcode Documentation (Company Confidential)           Page 40
+CVAX INSTRUCTION TIMING                                      12 September 1988
+
+
+        specifier 6 write cross page    7+2r
+        specifier 6 TB miss x 4         24+4r
+        specifier 6 M bit clear x 2     18+4r+2w
+        specifier 6 read unaligned      1r
+        specifier 6 write unaligned     1+1w
+        execute, fetch time             39
+                                        ----
+        total                           248+38r+4w

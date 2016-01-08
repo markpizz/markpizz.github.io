@@ -1,0 +1,1417 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                MicroVAX CPU Chip Microcode Documentation
+                           DC 333 (21-20887-01)
+
+
+                        Rev 1.00 (February, 1985)
+
+
+
+                  C O M P A N Y  C O N F I D E N T I A L
+
+
+
+Copyright (C) 1985 by Digital Equipment Corporation
+
+The information in this document is subject to change without  notice  and
+should  not be construed as a commitment by Digital Equipment Corporation.
+Digital Equipment Corporation assumes no  responsibility  for  any  errors
+that may occur in this document.
+
+This specification does not describe  any  program  or  product  which  is
+currently  available from Digital Equipment Corporation.  Nor does Digital
+Equipment Corporation  commit  to  implement  this  specification  in  any
+product  or  program.   Digital  Equipment Corporation makes no commitment
+that this document accurately describes any product it might ever make.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 2
+TABLE OF CONTENTS                                                1 February 1985
+
+
+                                   CONTENTS
+
+        1       NOTES ON THE MICROVAX MICROCODE  . . . . . . . . . . 4
+        1.1       Code Module Organization . . . . . . . . . . . . . 4
+        1.2       Assembly And Allocation  . . . . . . . . . . . . . 5
+        1.3       Size Budget  . . . . . . . . . . . . . . . . . . . 6
+        1.4       Microtraps . . . . . . . . . . . . . . . . . . . . 7
+        1.5       Interrupt And Exception Entry Points . . . . . . . 7
+        1.6       Micromachine Resource Allocation . . . . . . . . . 9
+        1.7       Hardware/Microcode Tradeoffs . . . . . . . . . .  10
+        1.7.1     Processor Status Longword  . . . . . . . . . . .  10
+        1.7.2     Hardware Interrupts  . . . . . . . . . . . . . .  10
+        1.7.3     Software Interrupts  . . . . . . . . . . . . . .  11
+        1.7.4     Asynchronous System Traps (AST's)  . . . . . . .  11
+        1.8       Microcode Decisions  . . . . . . . . . . . . . .  12
+        2       MICROVAX INSTRUCTION AND SPECIFIER DECODING  . . .  14
+        2.1       Overview . . . . . . . . . . . . . . . . . . . .  14
+        2.2       Initial Instruction Decode (IID) . . . . . . . .  16
+        2.2.1     IID Exception Dispatch . . . . . . . . . . . . .  16
+        2.2.2     IID Opcode Dispatch  . . . . . . . . . . . . . .  17
+        2.2.3     IID Specifier Dispatch . . . . . . . . . . . . .  17
+        2.3       Next Specifier Decode (NSD)  . . . . . . . . . .  18
+        2.3.1     EXECUTION_STARTED Flip-Flop  . . . . . . . . . .  18
+        2.3.2     Fork Code And Specifier Counter  . . . . . . . .  19
+        2.3.3     Opcode Dependent Dispatch  . . . . . . . . . . .  19
+        2.3.4     NSD Specifier Dispatch . . . . . . . . . . . . .  20
+        3       MICROVAX IPLA  . . . . . . . . . . . . . . . . . .  21
+        4       MICROVAX MACHINE CHECK SPECIFICATION . . . . . . .  24
+        4.1       Types Of Errors  . . . . . . . . . . . . . . . .  24
+        4.1.1     Impossible Situations In The Microcode . . . . .  24
+        4.1.2     Impossible Situations In Memory Management . . .  24
+        4.1.3     Unused IPL Request . . . . . . . . . . . . . . .  25
+        4.1.4     Unused FPU Error . . . . . . . . . . . . . . . .  25
+        4.1.5     Bus (Memory) Errors  . . . . . . . . . . . . . .  25
+        4.1.6     Multiple Errors  . . . . . . . . . . . . . . . .  26
+        4.2       Machine Check Processing . . . . . . . . . . . .  26
+        4.2.1     Microcode Actions  . . . . . . . . . . . . . . .  26
+        4.2.2     Operating System Actions . . . . . . . . . . . .  27
+        4.3       Restart Processing . . . . . . . . . . . . . . .  27
+        5       MICROVAX CONSOLE SUPPORT . . . . . . . . . . . . .  29
+        5.1       Entry Protocol . . . . . . . . . . . . . . . . .  29
+        5.2       Console Processing . . . . . . . . . . . . . . .  30
+        5.3       Console Exit . . . . . . . . . . . . . . . . . .  30
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 3
+REVISION HISTORY                                                 1 February 1985
+
+
+                             REVISION HISTORY
+                             ----------------
+
+Rev     Date            Purpose
+---     ----            -------
+1.00    Feb, 1985       Initial release.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 4
+INTRODUCTION                                                     1 February 1985
+
+
+The purpose of this document is to provide information about the  MicroVAX
+microcode  implementation.   It  includes  information about the microcode
+itself, as well as details  on  implementation  specific  topics  such  as
+machine checks and the console interface.
+
+
+
+1  NOTES ON THE MICROVAX MICROCODE
+
+This section provides some general documentation and notes on the MicroVAX
+microcode.
+
+
+
+1.1  Code Module Organization
+
+The MicroVAX microcode consists of the following code modules:
+
+Definition Modules
+------------------
+
+        DEFIN.MIC       -       micromachine definitions
+        MACRO.MIC       -       microcode macroes
+        ALIGN.MIC       -       alignment lists for hardware dispatches
+        IPLA.MIC        -       IPLA definitions
+
+Central Routine Modules
+-----------------------
+
+        POWERUP.MIC     -       power up
+        MEMMGT.MIC      -       memory management
+        INTEXC.MIC      -       interrupts and exceptions
+        SPEC.MIC        -       specifier flows
+
+Instruction Routine Modules
+---------------------------
+
+        INTLOGADR.MIC   -       integer, logical, and address instructions
+        MULDIV.MIC      -       multiply and divide instructions
+        VFIELD.MIC      -       variable length bit field instructions
+        CTRL.MIC        -       control instructions
+        CALRET.MIC      -       procedure call instructions
+        MISC.MIC        -       miscellaneous instructions
+        QUEUE.MIC       -       queue instructions
+        CSTRING.MIC     -       character string instructions
+        OPSYS.MIC       -       operating system support instructions
+        FPOINT.MIC      -       floating point instructions
+        EMULAT.MIC      -       emulation support
+
+Microcode Support Modules
+-------------------------
+
+        LIST.MIC        -       micro2 list statement
+        NOLIST.MIC      -       micro2 nolist statement
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 5
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+        NOTIMPB0.MIC    -       dummy labels for assembly BASE0
+        HACK4IPLA.MIC   -       dummy origins for assembly IPLA
+        TEST.MIC        -       test and debugging microcode
+
+
+
+1.2  Assembly And Allocation
+
+The MicroVAX microcode is assembled with  version  1M(01)  of  the  MICRO2
+assembler, as follows:
+
+$ MICRO2 :==[microcode.tools]MICRO2                                     ; define command for assembler
+
+$ MICRO2 DEFIN+MACRO+ALIGN+NOTIMPB0+IPLA+TEST/LIST=BASE0/ULD=BASE0      ; global alignments, IPLA
+
+$ MICRO2 nolist+DEFIN+MACRO+list+POWERUP+FMEMMGT+SPEC+INTEXC+-
+        INTLOGADR+VFIELD+CTRL+MULDIV+CALRET+MISC+QUEUE+OPSYS+-
+        CSTRING+FPOINT+EMULAT/LIST=BASE1/ULD=BASE1                      ; main assembly
+
+The assembled modules are then linked with the special V-11/uVAX allocator
+and converted into .MEM files for DECSIM and other CAD programs (note that
+[microcode.tools] should  be  changed  to  point  to  the  MicroVAX  tools
+directory being used):
+
+$ ASSIGN [microcode.tools]ALLOC1.PAT ALLOC1$PAT                         ; define logicals
+$ ASSIGN [microcode.tools]ALLOC3.PAT ALLOC3$PAT                         ; and commands
+$ AL1 :==[microcode.tools]ALLOC1                                        ; for allocator
+$ AL2 :==[microcode.tools]ALLOC2
+$ AL3 :==[microcode.tools]ALLOC3
+$ AL4 :==[microcode.tools]ALLOC4
+$ ULDTOTEXT :==[microcode.tools]ULDTOTEXT
+
+$ AL1 BASE0 /DEBUG=N                                                    ; allocate BASE0
+$ AL2 BASE0
+$ AL3 BASE0
+$ AL4 BASE0
+$ ULDTOTEXT BASE0.U40
+$ DELETE BASE0.CON;*
+$ DELETE BASE0.BDR;*
+$ DELETE BASE0.ADR;*
+$ DELETE BASE0.EXT;*
+
+$ AL1 BASE1 /DEBUG=N                                                    ; allocate BASE1
+$ AL2 BASE1 /LINK=BASE0
+$ AL3 BASE1 /LINK=BASE0
+$ AL4 BASE1
+$ ULDTOTEXT BASE1.U40
+$ DELETE BASE1.CON;*
+$ DELETE BASE1.BDR;*
+$ DELETE BASE1.ADR;*
+$ DELETE BASE1.EXT;*
+
+Finally, the IPLA is again assembled and converted to a special format:
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 6
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+
+$ MICRO2 NOLIST+DEFIN+MACRO+LIST+HACK4IPLA+IPLA/LIS=IPLA/ULD=IPLA       ; assemble IPLA
+$ RUN [microcode.tools]IPLATEXT                                         ; convert IPLA
+IPLA
+
+
+
+1.3  Size Budget
+
+The MicroVAX microcode size budget is as follows:
+
+        module                  original budget         uVAX pass 3
+        ------                  ---------------         -----------
+
+        POWERUP.MIC             50                       24
+        MEMMGT.MIC              100                      67
+        SPEC.MIC                200                     160
+        INTEXC.MIC              200                     133
+        INTLOGADR.MIC           128                     104
+        VFIELD.MIC              100                      79
+        CTRL.MIC                98                      106
+        MULDIV.MIC              110                     140
+        CALRET.MIC              120                      83
+        MISC.MIC                73                       51
+        QUEUE.MIC               201                      98
+        OPSYS.MIC               350                     246
+        CSTRING.MIC             100                      93
+        FPOINT.MIC              200                     135
+        EMULAT.MIC              0                        58
+                                ----                    ----
+                                2030                    1577
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 7
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+1.4  Microtraps
+
+The following table lists all microtraps in the microcode.
+
+        Entry Point             Module          Location        Comments
+        -----------             ------          --------        -------
+        MM.CPB..                FMEMMGT.MIC      40             cross page
+        MM.TBM..                FMEMMGT.MIC      42             TB miss
+        MM.ACV.TNV..            FMEMMGT.MIC      44             ACV/TNV
+        MM.M0..                 FMEMMGT.MIC      46             m = 0
+        IE.BUSERR.READ.VIRT..   INTEXC.MIC       48             read virtual bus error
+        IE.BUSERR.READ.PHYS..   INTEXC.MIC       4A             read physical bus error
+        IE.BUSERR.WRITE.VIRT..  INTEXC.MIC       4C             write virtual bus error
+        IE.BUSERR.WRITE.PHYS..  INTEXC.MIC       4E             write physical bus error
+        IE.INTOV..              INTEXC.MIC       50             integer overflow
+        IE.ILLOP..              INTEXC.MIC       58             illegal opcode
+        IE.BUSERR.INT.VEC..     INTEXC.MIC       5A             interrupt vector bus error
+        FP.ERR..                FPOINT.MIC       5C             floating point error
+
+
+
+1.5  Interrupt And Exception Entry Points
+
+The following table lists all entry points into module  INTEXC  from  both
+hardware dispatches and from other microcode modules.
+
+Hardware dispatches:
+
+        Entry Point             From            Comments
+        -----------             ----            --------
+        IE.ILLOP..              microtrap       illegal opcode
+        IE.INTOV..              microtrap       integer overflow
+        IE.BUSERR.READ.VIRT..   microtrap       read virtual bus error
+        IE.BUSERR.WRITE.VIRT..  microtrap       write virtual bus error
+        IE.BUSERR.READ.PHYS..   microtrap       read physical bus error
+        IE.BUSERR.WRITE.PHYS..  microtrap       write physical bus error
+        IE.BUSERR.INT.VEC..     microtrap       interrupt vector bus error
+
+        IID.VAX.TRACE.TRAP..    IID             trace trap
+        IID.VAX.INTERRUPT..     IID             interrupt
+        IID.VAX.ARITH.TRAP..    IID             arith trap, T[AST.TRAP] = trap type
+
+        BPT..                   IID             BPT instruction
+        XFC..                   IID             XFC instruction
+        XFD..                   IID             0FD prefix, execute IID again
+        FPD..                   IID             FPD set in PSL
+
+Microcode dispatches:
+
+        Entry Point             From            Comments
+        -----------             ----            --------
+        RSRV.ADDR.FLT..         SPEC.MIC        reserved addressing fault
+        FP.ARITH.FLT..          FPOINT.MIC      fp arith fault, T[AST.TRAP] = fault type
+        RSRV.INST.FLT..         FPOINT.MIC      reserved instruction fault
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 8
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+        PRIV.INST.FLT..         various         privileged instruction fault (same as reserved)
+        RSRV.OPER.FLT..         various         reserved operand fault
+        HARDWARE.FLT..          various         machine check fault, T[MCHK] = fault code
+        IE.ACV..                MEMMGT.MIC      ACV fault, T[MMGT] = fault type
+        IE.TNV..                MEMMGT.MIC      TNV fault, T[MMGT] = fault type
+        IE.INTERRUPT..          CSTRING.MIC     hardware interrupt in mid instruction
+                                                  (treat as fault)
+        IE.SWRE.INT..           OPSYS.MIC       software interrupt,
+                                                  T[SISR]<19:16> = highest pri swre int
+        IE.CHM.EXCEPT..         OPSYS.MIC       CHM exception,
+                                                  W1 = opcode mode * 4
+                                                  W2 = minu(W1, psl<cur_mode> * 4)
+                                                  W3 = sext(operand)
+                                                  W4 = sp_W2
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)          Page 9
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+1.6  Micromachine Resource Allocation
+
+The resources available to  the  microcode  include  the  general  purpose
+registers  (G's),  temporary  registers  (T's),  working  registers (W's),
+processor registers (P's), state flags  (STATE<7:0>),  and  various  flags
+(restart, trap disable, etc).  These resources are allocated as follows:
+
+        Resource                Allocated To                            Mnemonic
+        --------                ------------                            --------
+
+        G[0]..G[15]             VAX architectural registers
+
+        T[0]                    P0 Base Register                        P0BR
+                                (bits<1:0> must be zero)
+        T[1]                    P1 Base Register                        P1BR
+                                (stored in compensated form, that is, minus 00800000(hex),
+                                 bits<1:0> must be zero)
+        T[2]                    System Base Register                    SBR
+                                (stored in compensated form, that is, minus 01000000(hex),
+                                 bits<1:0> must be zero)
+        T[3]                    Software Interrupt Summary Register     SISR
+                                (bits<19:16> = max request-1, bits <15:1> = requests,
+                                 bits<31:20,0> must be zero)
+        T[4]                    RESERVED FOR SPECIFIER FLOWS            SPEC
+                                AND INTERRUPTS AND EXCEPTIONS
+        T[5]                    Process Control Block Base              PCBB
+                                (bits <1:0> must be zero)
+        T[6]                    System Control Block Base               SCBB
+                                (bits <1:0> must be zero)
+        T[7]                    Processor Status Longword               PSL
+                                (bits<31:28,21,15:8,4:0> must be zero)
+        T[8]                    ASTLVL (bits<26:24>)                    AST.TRAP
+                                current trap number (bits<7:0>)
+        T[9]                    Interrupt Stack Pointer                 IS
+        T[A]                    RESERVED FOR MEMORY MANAGEMENT          MMGT
+        T[B]                    general purpose                         TEMP
+
+        W[0]..W[4]              general purpose
+        W[5]                    RESERVED FOR MEMORY MANAGEMENT
+        W[6]                    general purpose
+        W[7]                    general purpose (SC register)
+
+        STATE<2:0>              general purpose, cleared at IID
+        STATE<3>                used to indicate INTERRUPTIBLE INSTRUCTION, cleared at IID
+        STATE<4>                RESERVED FOR INTERRUPTS AND EXCEPTIONS
+        STATE<5>                RESERVED FOR MEMORY MANAGEMENT
+        STATE<7:6>              RESERVED FOR INTERRUPTS AND EXCEPTIONS
+
+Note that resources marked as RESERVED can be used  by  the  microcode  as
+local  variables.  Specifically, T[SPEC] can be used freely once specifier
+decoding is  complete;  W[5]  and  T[MMGT]  can  be  used  between  memory
+references.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 10
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+1.7  Hardware/Microcode Tradeoffs
+
+Hardware and microcode share responsibility for certain key  functions  in
+MicroVAX, notably the PSL and interrupts.
+
+
+
+1.7.1  Processor Status Longword -
+
+The processor status longword (PSL) is kept in two  parts.   The  hardware
+invariant  part  of  the PSL is maintained by the microcode in a temporary
+register.  The microcode initializes this part of the PSL during  restart,
+and modifies it during the course of an REI, BICPSW, BICPSW, CALLx, or RET
+instruction, or during an interrupt, exception, or  fault  sequence.   The
+microcode  must  assure  that  bits  <31:26,21,15:8,4:0>  of the temporary
+register are zero at all times, and must also assure that the hardware  is
+kept informed of any changes to the invariant part of the PSL.
+
+The variable part of the PSL is maintained by hardware.  This includes the
+trace  pending  flag (TP, bit<30>), the trace enable flag (T, bit<4>), and
+the condition codes (NZVC, bits<3:0>).  The variable part of the  PSL  may
+be  read  as  processor register C (PR[C]) and written as MXPR destination
+PSL.HWRE (MXPR[PSL.HWRE]).  Writing processor register C only updates  the
+condition codes (NZVC).
+
+Some example microcode sequences:
+
+        ;-------------------------------; read PSL into temporary register:
+        W[0]<--T[PSL]                   ; get invariant part of PSL
+
+        ;-------------------------------;
+        W[0]<--W[0].OR.P[PSL.CC..TP]    ; or in hardware part of PSL
+                :
+                :
+        ;-------------------------------; write modified PSL to hardware:
+        MXPR[PSL.HWRE]<--W[0]           ; update TP, T, NZVC in hardware
+                :
+                :
+        ;-------------------------------; modify just PSL condition codes:
+        P[PSL.CC..TP]<--P[PSL.CC..TP].ANDNOT.K[1]       ; clear PSL<C>
+
+
+
+1.7.2  Hardware Interrupts -
+
+Hardware interrupts come from the following sources:  the halt pin,  which
+is  nonmaskable;  the  power  fail  pin,  which  interrupts  at IPL31; the
+interval timer pin, which interrupts  at  IPL16,  or  the  four  interrupt
+request pins, which interrupt at IPL's 17-14.  These pins are strobed once
+per  microcycle  by  the  hardware  interrupt  controller.   The  hardware
+interrupt  controller  compares the priority of any asserted interrupts to
+the prevailing interrupt priority level (IPL).  If  any  of  the  asserted
+interrupts has a higher priority than the IPL, the interrupt logic asserts
+the signal Interrupt Pending to the I Box.  A  different  version  of  the
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 11
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+signal,  not  including  halt, is available as FPD Interrupt Pending.  The
+interrupt controller receives the IPL  over  the  internal  DAL  when  the
+hardware PSL is updated via an MXPR instruction.  It can return the number
+of the highest priority outstanding interrupt via an MXPR to the interrupt
+identification (INTID) register.
+
+
+
+1.7.3  Software Interrupts -
+
+Software interrupts  are  entirely  implemented  by  the  microcode.   The
+microcode  maintains  the  Software Interrupt Summary Register (SISR) in a
+temporary register in the data path.  When macrocode requests  a  software
+interrupt  by writing a value into the Software Interrupt Request Register
+(SIRR), the microcode updates it copy of SISR and calculates whether  this
+will  result in an interrupt.  If so, the microcode directly dispatches to
+the interrupt routine.   If  not,  the  microcode  continues  with  normal
+execution.
+
+The software interrupt system is also examined during an  REI  instruction
+or  other event which changes the interrupt priority level.  If the IPL is
+changed to a value lower than the highest priority software interrupt, and
+if  no  hardware  interrupts  are  pending,  the  microcode will enter the
+software interrupt sequence.  Because the microcode can only test for  FPD
+interrupts,  and  not  all  interrupts, this implies that a halt interrupt
+request will NOT be honored  if  a  software  interrupt  sequence  can  be
+started.
+
+
+
+1.7.4  Asynchronous System Traps (AST's) -
+
+AST's are  entirely  implemented  through  the  microcode.   When  an  REI
+instruction,  or  other event which changes the IPL, occurs, the microcode
+checks to see whether the new IPL is below  AST  level.   If  it  is,  the
+microcode  checks  the  AST  register for a pending AST, and generates any
+required software interrupts.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 12
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+1.8  Microcode Decisions
+
+The VAX  SRM  permits  some  scope  for  machine-dependent  implementation
+decisions,  particularly  in  interrupts,  exceptions,  and the privileged
+instructions.  Here are  some  of  the  implementation  decisions  in  the
+MicroVAX  chip  which  may  affect diagnostic or improperly written system
+software.
+
+     1.  General -- The chip has no temporaries for the per process  stack
+         pointers.   These  are always kept in the PCB.  The chip does not
+         implement PME.
+
+     2.  Memory Management -- The chip will  machine  check  if  a  memory
+         management  microtrap occurs and the resolved process PTE address
+         is not in system space.
+
+     3.  Specifiers -- The chip treats modes 4F, 5F, 6F,  7F  as  reserved
+         address  modes.  The chip will NOT fault on a modify reference to
+         an  immediate  operand  (there  will  undoubtedly  be  an  access
+         violation later).
+
+     4.  Exceptions -- If psl<fpd> is set at initial  instruction  decode,
+         and  the  opcode  is  not  one for which psl<fpd> is specifically
+         allowed, the chip takes a reserved opcode fault.
+
+     5.  Exceptions -- An ACV or TNV during a kernel stack  not  valid  or
+         machine  check  abort  causes  a processor restart (like a halt).
+         Likewise, a machine check during a  kernel  stack  not  valid  or
+         machine check abort causes a processor restart.
+
+     6.  Exceptions -- Kernel stack not  valid  abort  and  machine  check
+         abort  follow  the same flows as regular exceptions, that is, the
+         chip does not automatically process these aborts on the interrupt
+         stack.
+
+     7.  Exceptions -- Vector<1:0> # 0 during a CHMx is ignored, as in the
+         11/780.
+
+     8.  Exceptions -- Vector<1:0> = 2 or 3 causes a processor restart.
+
+     9.  Exceptions -- The machine check protocol is documented in a later
+         section.
+
+    10.  Interrupts -- The chip uses only bits<9:2> of the incoming vector
+         as  the  offset  into  the  SCB.  Bit<0> is interpreted as a flag
+         which, if set, signifies special Qbus processing (force IPL =  17
+         hex).
+
+    11.  Queues -- Certain types of misformed  interlocked  queues,  which
+         the   SRM   regards  as  UNPREDICTABLE,  are  processed  normally
+         (notably, a queue with a zero foreward  pointer  and  a  non-zero
+         backward pointer is treated as empty).
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 13
+NOTES ON THE MICROVAX MICROCODE                                  1 February 1985
+
+
+    12.  Queues -- A machine check abort in the middle of  an  interlocked
+         queue instruction will not unlock the queue header.
+
+    13.  Privileged -- LDPCTX does no reserved operand checking.
+
+    14.  Privileged -- The chip  does  not  implement  numerous  processor
+         registers.   These  unimplemented  registers read as zero and are
+         ignored on write.
+
+    15.  Privileged -- MTPR does no reserved operand checking, except  for
+         the  register  number and the value of ASTLVL, if accessed.  MTPR
+         automatically forces values written to PCBB,  SCBB,  P0BR,  P1BR,
+         and SBR to be longword aligned.
+
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 14
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+2  MICROVAX INSTRUCTION AND SPECIFIER DECODING
+
+This section desribes MicroVAX initial instruction decode (IID)  and  next
+specifier decode (NSD).
+
+
+
+2.1  Overview
+
+The  MicroVAX  microengine  is  "hardwired"   for   instruction   specific
+sequencing  at  two  points:   initial  instruction  decode (IID) and next
+specifier decode (NSD).  Initial instruction decode occurs during the last
+microcycle  of  the  previous  macroinstruction  and  performs  an initial
+instruction fork based on the opcode and the first specifier (if there  is
+one).   Next  specifier decode occurs at the end of the first (and second)
+specifiers and performs the  secondary  and  tertiary  instruction  forks.
+This is shown graphically below:
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 15
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+                                                               IID
+                                                                |
+                                +---------------+---------------+
+                                |               |               |
+                               IID             IID             IID
+                            exceptions:     opcodes:        specifiers:
+                            interrupts,     branches,       all other
+                            traps, etc      no spec,        instructions
+                                            XFC, XFD            |
+                                                                |
+        +-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+        |       |       |       |       |       |       |       |       |       |       |       |       |       |       |
+      short   index  IB dry  IB halt   reg    reg    autodec autoinc  immed  autoinc  absol   by/wd   long    by/wd   long
+      lit       |       |       |       |     defer     |       |       |    defer      |     displ   displ   displ   displ
+        |       |       |       |       |       |       |       |       |       |       |       |       |     defer   defer
+        |       |       |       |       |       |       |       |       |       |       |       |       |       |       |
+        +-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+                                                                |
+                                                               NSD (second specifier)
+                                                                |
+                                +---------------+---------------+
+                                |               |               |
+                               NSD             NSD             NSD
+                            execute:        optimize:       specifiers:
+                            fork = re       fork = fre &    fork = fre &
+                                |           spec = 5X       spec ~ 5X or
+                                |               |           fork = fse
+                            dispatch        dispatch            |
+                                                                |
+        +-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+        |       |       |       |       |       |       |       |       |       |       |       |       |       |       |
+      short   index  IB dry  IB halt   reg    reg    autodec autoinc  immed  autoinc  absol   by/wd   long    by/wd   long
+      lit       |       |       |       |     defer     |       |       |    defer      |     displ   displ   displ   displ
+        |       |       |       |       |       |       |       |       |       |       |       |       |     defer   defer
+        |       |       |       |       |       |       |       |       |       |       |       |       |       |       |
+        +-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+                                                                |
+                                                               NSD (third specifier)
+                                                                |
+                                                            dispatch
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 16
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+2.2  Initial Instruction Decode (IID)
+
+Initial instruction decode (IID) is a special branch field condition which
+marks  the  last  microinstruction  of  the current macroinstruction.  IID
+invokes special microaddress generation logic in the I Box which generates
+the  next  address  based  on  conditions  in  the  micromachine  and  the
+instruction buffer:
+
+     1.  If an exception or interrupt is pending, the next microaddress is
+         generated according to the IID EXCEPTION dispatch table.
+
+     2.  If there is no exception  or  interrupt  pending,  and  the  next
+         macroinstruction  does  not  require specifier decoding, the next
+         microaddress is generated according to the  IID  OPCODE  dispatch
+         table.
+
+     3.  If there is no exception  or  interrupt  pending,  and  the  next
+         macroinstruction   does  require  specifier  decoding,  the  next
+         microaddress is generated according to the IID SPECIFIER dispatch
+         table.
+
+
+
+
+2.2.1  IID Exception Dispatch -
+
+If there is an exception or interrupt pending, the  next  microaddress  is
+generated in accordance with the following table:
+
+ VAX    | INTER |PSL<TP>| Pre-  | IB    ||  microaddress
+ TRAP   | PEND  |       | fetch | dry   ||     (hex)
+ REQ    |       |       | halted|       ||
+--------+-------+-------+-------+-------++------------------
+  1     |  x    |  x    |  x    |  x    ||  114         VAX trap
+  0     |  1    |  x    |  x    |  x    ||  10E         interrupt
+  0     |  0    |  1    |  x    |  x    ||  10C         trace trap
+  0     |  0    |  0    |  1    |  1    ||  106         prefetch halted
+  0     |  0    |  0    |  0    |  1    ||  104         prefetch stalled
+  0     |  0    |  0    |  0    |  0    ||  see IID Opcode Dispatch
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 17
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+2.2.2  IID Opcode Dispatch -
+
+If there is no exception or interrupt pending, the  next  microaddress  is
+generated in accordance with the following table:
+
+ PSL    | Opcode| IB[PC] <7:0>  ||  microaddress
+ <FPD>  | reg   |               ||     (hex)
+        | <8:0> |               ||
+        | =0FD  |               ||
+--------+-------+---------------++--------------------------
+  0     |  no   |  0000 0xxx    ||  130...13E           zero specifiers HALT...SVPCTX
+  0     |  no   |  00x1 0000    ||  124                 BSBB, BSBW
+  0     |  no   |  00x1 0001    ||  120                 BRB, BRW
+  0     |  no   |  0001 001x    ||  120                 BNEQ, BEQL
+  0     |  no   |  0001 010x    ||  120                 BGTR, BLEQ
+  0     |  no   |  0001 1xxx    ||  120                 BGEQ...BCS
+  0     |  no   |  1111 1100    ||  128                 XFC
+  x     |  no   |  1111 1101    ||  12A                 XFD
+  1     |  x    |  xxxx xxxx    ||  12C                 FPD set
+  0     |  no   |  xxxx xxxx    ||  see IID Specifier Dispatch          all OTHER one byte opcodes
+  0     |  yes  |  xxxx xxxx    ||  see IID Specifier Dispatch          all TWO byte opcodes
+
+Since the only two FPD opcodes are MOVC3 and MOVC5, the microcode does NOT
+redispatch  on FPD but instead inspects the opcode with a case branch, and
+transfers control directly to the appropriate unpack routine.
+
+
+
+2.2.3  IID Specifier Dispatch -
+
+If there is no exception or interrupt pending, and  the  opcode  does  not
+specify  direct dispatch, the next microaddress is generated in accordance
+with the following table:
+
+ Specifier      | uaddr | uaddr ||
+                | (hex) | (hex) ||
+                |R=0...E|  R=F  ||
+----------------+-------+-------++-----------------------------------
+0x,1x,2x,3x     |  140  |  140  ||  S^#
+4x              |  142  |  14E  ||  [R]         [PC] illegal
+dry, not halted |  144  |  144  ||
+dry, halted     |  146  |  146  ||
+5x              |  14A  |  14E  ||  R           PC illegal
+6x              |  14C  |  14E  ||  (R)         (PC) illegal
+7x              |  150  |  14E  ||  -(R)        -(PC) illegal
+8x              |  152  |  148  ||  (R)+        I^#
+9x              |  154  |  156  ||  @(R)+       @#
+Ax, Cx          |  158  |  158  ||  d(R)        d(PC)
+Ex              |  15A  |  15A  ||  d(R)        d(PC)
+Bx, Dx          |  15C  |  15C  ||  @d(R)       @d(PC)
+Fx              |  15E  |  15E  ||  @d(R)       @d(R)
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 18
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+2.3  Next Specifier Decode (NSD)
+
+Next specifier decode (NSD) is a  special  branch  field  condition  which
+marks  the  last microinstruction of first specifier decode or other first
+part processing.  NSD invokes special microaddress generation logic in the
+I  Box  which  generates  the  next address based on the EXECUTION_STARTED
+flip-flop, the fork code from the IPLA, the  specifier  counter,  and  the
+instruction buffer.
+
+ EXEC_  | Fork code/ type       | Spec  |IB dry | Reg   |          Microaddress          |  Address
+ START  |                       | Num   |or halt| Mode  |10  9  8  7  6  5  4  3  2  1  0|  Range
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  1     |  x                    |  x    |  x    |  x    |   execute usubroutine return   |  any
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  0  / FSE second spec |  1    |  x    |  x    |   see NSD Specifier Dispatch   |  180 - 19E
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  0  / FSE execute     |  2    |  x    |  x    | 0  1|   execution address   | 0|  200 - 3FE (note)
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  1  / FRE second spec |  1    |  y    |  x    |   see NSD Specifier Dispatch   |  180 - 19E
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  1  / FRE second spec |  1    |  n    |  n    |   see NSD Specifier Dispatch   |  180 - 19E
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  1  / FRE opt execute |  1    |  n    |  y    | 1  0|   execution address   | 0|  400 - 5FE (note)
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  1  / FRE execute     |  2    |  x    |  x    | 0  1|   execution address   | 0|  200 - 3FE (note)
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+  0     |  2  / FE execute      |  x    |  x    |  x    | 0  1|   execution address   | 0|  200 - 3FE (note)
+--------+-----------------------+-------+-------+-------+--+--+--+--+--+--+--+--+--+--+--+----------------
+
+Note:  The two byte opcodes (for  g_floating)  are  overmapped  into  this
+space  by  OR'ing the high order opcode bit into next address bit <5> (ie,
+g_floating  instructions  that  are  not  mapped  onto  their   f_floating
+counterparts  will  dispatch  to  the  equivalent  d_floating dispatches).
+microinstruction bus.
+
+
+
+2.3.1  EXECUTION_STARTED Flip-Flop -
+
+The EXECUTION_STARTED flip-flop is cleared at IID.  It is set by the I Box
+when   an   NSD   opcode   dependant  dispatch  is  executed.   Once  set,
+EXECUTION_STARTED causes all subsequent instances of NSD to be interpreted
+as  microsubroutine  return.   This permits consolidation of two copies of
+the specifier flows.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 19
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+2.3.2  Fork Code And Specifier Counter -
+
+If EXECUTION_STARTED is clear, the fork code from the IPLA, the  specifier
+counter  in the I Box, and the state of the instruction buffer interact to
+determine the interpretation of NSD.
+
+     1.  Fork code FE.  NSD causes  an  opcode  dependant  dispatch  to  a
+         microaddress in the range 200 - 3FE.  EXECUTION_STARTED is set.
+
+     2.  Fork code FRE.
+
+          -  Specifier 1, IB dry:  NSD specifier dispatch.
+          -  Specifier 1, IB ok, specifier  is  not  register  mode:   NSD
+             specifier dispatch.
+          -  Specifier 1, IB  ok,  specifier  is  register  mode:   opcode
+             dependent  dispatch to a microaddress in the range 400 - 5FE.
+             EXECUTION_STARTED is set.
+          -  Specifier 2:  opcode dependent dispatch to a microaddress  in
+             the range 200 - 3FE.  EXECUTION_STARTED is set.
+
+
+     3.  Fork code FSE.
+
+          -  Specifier 1:  NSD specifier dispatch.
+          -  Specifier 2:  opcode dependent dispatch to a microaddress  in
+             the range 200 - 3FE.  EXECUTION_STARTED is set.
+
+
+
+
+
+2.3.3  Opcode Dependent Dispatch -
+
+The opcode dependent dispatch mentioned above is derived from the nine-bit
+opcode  and  the  three-bit  execution dispatch control in the IPLA.  This
+three-bit field expands to an  eight-bit  mask,  in  accordance  with  the
+following table:
+
+execution       |    mask       ||
+dispatch code   |               ||
+----------------+---------------++--------------------------------------
+  0             |   1111 1001   ||  used to consolidate BBSx, BBCx
+  1             |   1001 1111   ||  used to force ADD{B,W,L}x to ADDBx, etc
+  2             |   1101 1001   ||  used to force ADDfn, SUBfn, MULfn, DIVfn to ADDFn
+  3             |   0001 0000   ||  used to force MOVx, MOVAx, MOVZxy to 10(hex)
+  4             |   0001 0101   ||  used to force PUSHAx, PUSHL to 15(hex), CLRx to 14(hex)
+  5             |   1111 1111   ||  used for unmodified dispatch
+  6             |   1111 1100   ||  used to force CVTfx to CVTFB, CVTxf to CVTBf
+  7             |   1111 1110   ||  used to consolidate even-odd pairs
+
+Opcode bit <8> is OR'd into bit <5>, the result is AND'd  with  the  mask,
+and  the  final  result  becomes  bits  <8:1> of the next microinstruction
+address.  Thus opcode dispatches are always to EVEN locations in 512  word
+ranges.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 20
+MICROVAX INSTRUCTION AND SPECIFIER DECODING                      1 February 1985
+
+
+2.3.4  NSD Specifier Dispatch -
+
+If the fork code calls for a second specifier, the  next  microaddress  is
+generated in accordance with the following table:
+
+ Specifier      | uaddr | uaddr ||
+                | (hex) | (hex) ||
+                |R=0...E|  R=F  ||
+----------------+-------+-------++-----------------------------------
+0x,1x,2x,3x     |  180  |  180  ||  S^#
+4x              |  182  |  18E  ||  [R]         [PC] illegal
+dry, not halted |  184  |  184  ||
+dry, halted     |  186  |  186  ||
+5x              |  18A  |  18E  ||  R           PC illegal
+6x              |  18C  |  18E  ||  (R)         (PC) illegal
+7x              |  190  |  18E  ||  -(R)        -(PC) illegal
+8x              |  192  |  188  ||  (R)+        I^#
+9x              |  194  |  196  ||  @(R)+       @#
+Ax, Cx          |  198  |  198  ||  d(R)        d(PC)
+Ex              |  19A  |  19A  ||  d(R)        d(PC)
+Bx, Dx          |  19C  |  19C  ||  @d(R)       @d(PC)
+Fx              |  19E  |  19E  ||  @d(R)       @d(R)
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 21
+MICROVAX IPLA                                                    1 February 1985
+
+
+3  MICROVAX IPLA
+
+The IPLA contains 19 bits for each MicroVAX opcode.  The IPLA  is  defined
+through the following Micro2 macro:
+
+ IPLA[prm.1][prm.2][prm.3][prm.4][prm.5][prm.6][prm.7][prm.8][prm.9][prm.10]
+
+Each parameter goes inside a set of square brackets.
+
+The EXACT order of the parameters is:
+
+        [prm.1]         OPCODE                          mnemonic
+        [prm.2]         DATA LENGTH SPECS 1 & 2         mnemonic
+        [prm.3]         ACCESS CODE SPECS 1 & 2         mnemonic
+        [prm.4]         FORK CODE                       mnemonic
+        [prm.5]         EXECUTE DISPATCH CTRL           mnemonic
+        [prm.6]         V BIT TRAP                      mnemonic
+        [prm.7]         PSL CC MAP CODE                 mnemonic
+        [prm.8]         FBOX INSTRUCTION                mnemonic
+        [prm.9]         FPD ILLEGAL OPCODE              numeric
+        [prm.10]        BRANCH CTRL TEST CONDITION      mnemonic
+
+In detail:
+
+     1.  Prm.  1 -- Opcode:  The instruction mnemonic goes here.
+
+     2.  Prm.2 -- Data length for specifiers 1 and 2:   The  data  lengths
+         for  specifiers  1  and 2 go here.  The parameter consists of two
+         data length mnemonics (for compatability with earlier versions of
+         the  hardware,  the  value  definitions automatically add a third
+         value equal to the second).  Micro2 generates a 6-bit field  from
+         this.  The data length mnemonics are:
+
+                b    =  00:     BYTE
+                w    =  01:     WORD
+                l,f  =  10:     LONG, F_Floating
+                q,d,g = 11:     QUAD, D_Floating, G_floating
+
+         An example of this encoding:  bl (specifiers  1  is  byte,  2  is
+         long) is encoded as 00 10 10.
+
+     3.  Prm.3 -- Access code for specifiers 1 and 2:   The  access  types
+         for  specifiers  1  and 2 go here.  The parameter consists of two
+         access code mnemonics (the value definitions automatically add  a
+         third value equal to the second).  Micro2 generates a 6-bit field
+         from this.  The access code mnemonics are:
+
+                r   =   00:     READ
+                m   =   01:     MODIFY
+                a   =   10:     ADDRESS 
+                v   =   11:     FIELD
+
+         An example of this encoding:  rv (specifiers 1 is read, specifier
+         2 is field) is encoded as 00 11 11.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 22
+MICROVAX IPLA                                                    1 February 1985
+
+
+     4.  Prm.4  --  Fork  code:   The  fork  code,  which   controls   the
+         interpretation  of  NSD,  goes here.  The parameter consists of a
+         single fork control mnemonic.  Micro2 assembles this into  a  two
+         bit field.  The fork code mnemonics are:
+
+                fse =   00:     first, second, execute
+                fre =   01:     first, optimize, execute
+                fe  =   10:     first, execute
+                ill =   11:     opcode is ILLEGAL
+
+     5.  Prm.5 -- Execution  dispatch  control:   The  execution  dispatch
+         control,  a  3-bit  index  into  a mask table, goes here.  Micro2
+         automatically generates the proper index code  by  comparing  the
+         desired dispatch address against the base instruction mnemonic.
+
+     6.  Prm.6 -- V bit trap:  A 1/0 value, which enables or disables  the
+         optimized  trap on integer overflow, goes here.  Micro2 generates
+         a 1-bit value  for  this  field.   Mnemonics  for  the  optimized
+         overflow trap are:
+
+                VINT =  0:      automatic integer overflow trap if V bit
+                                and IV bit set
+                X    =  1:      no automatic trap
+
+     7.  Prm.7 -- PSL  CC  map  code:   The  PSL  condition  code  mapping
+         function  goes  here.   Micro2  generates  a 3-bit value for this
+         field.  The mnemonics for the condition code map are:
+
+                IIII =  0:      PSL.NZVC = imm ALU.NZVC
+                IIIJ =  1:      PSL.NZV = imm ALU.NZV, PSL.C = ~imm ALU.C
+                IIIP =  2:      PSL.NZV = imm ALU.NZV, PSL.C unchanged
+                JIZJ =  3:      PSL.NZVC = compare encoding of imm ALU.NZVC
+                AAAA =  4:      PSL.NZVC = ALU.NZVC
+                AAAB =  5:      PSL.NZV = ALU.NZV, PSL.C = ~ALU.C
+                AAAP =  6:      PSL.NZV = ALU.NZV, PSL.C unchanged
+                ;    =  7:      unused
+
+     8.  Prm.8  --  Fbox  instruction:   A  1/0  value,  which   indicates
+         floating/non-floating   instruction   respectively,   goes  here.
+         Micro2 generates a 1-bit value for this field.  Mnemonics for the
+         floating instruction field are:
+
+                EBOX = 0:       instruction is not floating point
+                FBOX = 1:       instruction is floating point
+
+     9.  Prm.9 -- FPD illegal opcode:  A 0/1 value, which  indicates  that
+         this   instruction  is  legal/illegal  if  FPD  is  set.   Micro2
+         generates a 1-bit value for this field.  There are no mnemonics.
+
+    10.  Prm.10 -- Branch control test condition:  The test condition  for
+         the  branch  control  PLA goes here.  The various test conditions
+         mnemonics are:
+
+                X      =  0:    NEVER TRUE
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 23
+MICROVAX IPLA                                                    1 February 1985
+
+
+         ;      A*NxV  =  1:    ALU NOT.(NxorV) 
+         ;      A*Z    =  2:    ALU NOT.Z
+         ;      A*ZNxV =  3:    ALU NOT.(Zor(NxorV))
+         ;      A*ZN   =  4:    ALU NOT.(ZorN) 
+         ;      ANxV   =  5:    ALU N.XOR.V
+         ;      AZ     =  6:    ALU Z
+         ;      AZNxV  =  7:    ALU Zor(NxorV) 
+                P*C    =  8:    PSL NOT.C
+                P*CZ   =  9:    PSL NOT.(C.OR.Z)
+                P*N    =  A:    PSL NOT.N
+                P*NZ   =  B:    PSL NOT.(N.OR.Z)
+                P*V    =  C:    PSL NOT.V
+                P*Z    =  D:    PSL NOT.Z
+                PC     =  E:    PSL C
+                PCZ    =  F:    PSL C.OR.Z
+                PN     = 10:    PSL N
+                PNZ    = 11:    PSL N.OR.Z
+                PV     = 12:    PSL V
+                PZ     = 13:    PSL Z
+
+         Note that this information is not used by MicroVAX.
+
+As an example, here is the IPLA macro for the ADDW2 instruction:
+
+        IPLA[ADDW2][ww ][rm ][fre][ADDB2][VINT][IIII][EBOX][1][X   ]
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 24
+MICROVAX MACHINE CHECK SPECIFICATION                             1 February 1985
+
+
+4  MICROVAX MACHINE CHECK SPECIFICATION
+
+The section describes how MicroVAX handles serious microcode and  hardware
+error conditions including memory subsystem errors.  These conditions are:
+
+      -  Impossible situations in the microcode
+      -  Impossible situations in memory management
+      -  Unused IPL requests
+      -  Unused FPU errors
+      -  Bus (memory) errors
+      -  Multiple errors
+
+
+
+
+4.1  Types Of Errors
+
+4.1.1  Impossible Situations In The Microcode -
+
+Due to size constraints, erroneous branches in the microcode will  usually
+result in the execution of random microinstructions.  However, a few cases
+are trapped out.  If the microcode  detects  an  impossible  situation,  a
+machine check occurs.
+
+        param           meaning
+        -----           -------
+        1               First Specifier Decode reached memory read
+                        processing even though the access type is .ax OR
+
+                        First Specifier Decode reached floating short
+                        literal processing for an instruction with an
+                        opcode in the range 00 to 1F or 80 to 9F
+
+        2               Second Specifier Decode reached memory read
+                        processing even though the access type is .ax
+
+
+
+4.1.2  Impossible Situations In Memory Management -
+
+MicroVAX does some  checking  for  impossible  conditions  in  the  memory
+management  microflows.  If an impossible situation is detected, a machine
+check occurs.
+
+        param           meaning
+        -----           -------
+        5               The Memory Management Status Register returned
+                        an undefined value (TB miss flows)
+
+        6               The Memory Management Status Register returned
+                        an undefined value (M = 0 flows)
+
+        7               The calculated virtual address for a Process PTE
+                        is in P0 space
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 25
+MICROVAX MACHINE CHECK SPECIFICATION                             1 February 1985
+
+
+
+        8               The calculated virtual address for a Process PTE
+                        is in P1 space
+
+
+
+4.1.3  Unused IPL Request -
+
+MicroVAX uses only a few  of  the  32  interrupt  priority  levels  (IPLs)
+defined  in the VAX architecture.  If the interrupt controller requests an
+interrupt at an unused IPL, a machine check occurs.
+
+        param           meaning
+        -----           -------
+        9               The interrupt controller returned an interrupting
+                        IPL of 19 or 1D
+
+
+
+
+4.1.4  Unused FPU Error -
+
+The FPU returns three bits of status if an error occurs.  Only six of  the
+possible eight error conditions are defined.  If the FPU returns an unused
+error code, a machine check occurs.
+
+        param           meaning
+        -----           -------
+        3               The FPU returned unused status code 0
+
+        4               The FPU returned status code 7 and the chip
+                        failed to take an FPU error microtrap
+
+
+
+4.1.5  Bus (Memory) Errors -
+
+If external logic asserts ERR L in response to any memory cycle other than
+an instruction prefetch or interrupt acknowledge, a machine check occurs.
+
+        param           meaning
+        -----           -------
+        80              read bus error, address parameter is virtual
+
+        81              read bus error, address parameter is physical
+
+        82              write bus error, address parameter is virtual
+
+        83              write bus error, address parameter is physical
+
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 26
+MICROVAX MACHINE CHECK SPECIFICATION                             1 February 1985
+
+
+4.1.6  Multiple Errors -
+
+If MicroVAX encounters nested serious errors (e.g., kernel stack not valid
+inside  a machine check), or other conditions which cannot be processed by
+macrocode (e.g., HALT instruction in kernel mode),  the  microcode  places
+the  current PC in IPR[SAVEPC], the current PSL, MAPEN, and a restart code
+in IPR[SAVEPSL], the current interrupt stack in IPR[SAVEISP], and executes
+a restart process.
+
+
+
+4.2  Machine Check Processing
+
+4.2.1  Microcode Actions -
+
+The microcode process for machine check is the same for all cases.   If  a
+serious   error  (machine  check  exception  or  kernel  stack  not  valid
+exception) is in progress, the restart process is invoked.  Otherwise, the
+current  instruction  is  packed up (MOVC3, MOVC5, POLYf) or unwound.  The
+microcode sets the  serious  error  flag  and  performs  normal  exception
+processing  through  SCB vector 4.  The following parameters are pushed on
+the stack:
+
+        +-------------------------------------------------------+
+        |               byte count (0000000C hex)               |  :SP
+        +-------------------------------------------------------+
+        |               machine check code                      |
+        +-------------------------------------------------------+
+        |               most recent virtual address             |
+        +-------------------------------------------------------+
+        |               internal state information              |
+        +-------------------------------------------------------+
+        |                       PC                              |
+        +-------------------------------------------------------+
+        |                       PSL                             |
+        +-------------------------------------------------------+
+
+The parameters are:
+
+        machine check code (hex):       1       =       impossible microcode state (FSD)
+                                        2       =       impossible microcode state (SSD)
+                                        3       =       undefined FPU error code 0
+                                        4       =       undefined FPU error code 7
+                                        5       =       undefined memory management status (TB miss)
+                                        6       =       undefined memory management status (M = 0)
+                                        7       =       process PTE in P0 space
+                                        8       =       process PTE in P1 space
+                                        9       =       undefined interrupt ID code
+                                        80      =       read bus error, address parameter is virtual
+                                        81      =       read bus error, address parameter is physical
+                                        82      =       write bus error, address parameter is virtual
+                                        83      =       write bus error, address parameter is physical
+
+        most recent virtual address:    <31:0>  =       current contents of VAP register
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 27
+MICROVAX MACHINE CHECK SPECIFICATION                             1 February 1985
+
+
+
+        internal state information:     <28:24> =       current contents of ATDL register
+                                        <23:20> =       current contents of STATE<3:0>
+                                        <19:16> =       current contents of ALU cond codes
+                                        <14>    =       current contents of VAX CANT RESTART bit
+                                        <7:0>   =       delta PC at time of exception
+
+        PC:                             <31:0>  =       PC of start of current instruction
+
+        PSL:                            <31:0>  =       current contents of PSL
+
+When exception processing is complete, the serious error flag is  cleared,
+and the next instruction is decoded.
+
+
+
+4.2.2  Operating System Actions -
+
+Most machine checks are non-recoverable.   The  only  case  for  which  an
+instruction  restart is even theoretically possible is a read bus error of
+a virtual address which results from a transient error (eg,  parity).   In
+this  case,  the  VAX  CANT  RESTART  and  FIRST PART DONE (FPD) bits tell
+whether the instruction is restartable.  VAX CANT RESTART is  set  if  the
+instruction has modified any of the visible registers (GPR's, PSL, etc) or
+written data to memory.  FPD is set  if  the  CPU  is  in  the  middle  of
+executing  an  interruptible instruction.  If VAX CANT RESTART is set, and
+FPD is clear, then instruction recovery should not be attempted.   If  VAX
+CANT  RESTART  is  clear,  or FPD is set, then instruction recovery can be
+attempted.
+
+
+
+4.3  Restart Processing
+
+If the hardware or kernel software environment becomes severely corrupted,
+the chip may be unable to continue normal processing.  In these instances,
+the chip executes a restart process and passes control  to  recovery  code
+beginning  at  physical  address 20040000 (hex).  IPR[SAVEPC] contains the
+previous PC, IPR[SAVEPSL] contains the previous PSL with MAPEN in  bit<15>
+and  a  restart  code  in  bits  <14:8>, IPR[SAVISP] contains the previous
+Interrupt Stack.  The restart codes are as follows:
+
+          code          condition
+          ----          ---------
+            2           HALT L asserted
+            3           initial power on
+            4           interrupt stack not valid during exception
+            5           machine check during machine check or kernel stack
+                        not valid exception
+            6           HALT instruction executed in kernel mode
+            7           SCB vector bits<1:0> = 11
+            8           SCB vector bits<1:0> = 10
+            A           CHMx executed while on interrupt stack
+           10           ACV or TNV during machine check exception
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 28
+MICROVAX MACHINE CHECK SPECIFICATION                             1 February 1985
+
+
+           11           ACV or TNV during kernel stack not valid exception
+
+The restart process sets the state of the chip as follows:
+
+        IPR[SAVISP]     =       saved interrupt stack pointer
+        IPR[SAVPC]      =       saved PC
+        IPR[SAVEPSL]    =       saved PSL<31:16,7:0> in <31:16,7:0>
+                                saved MAPEN<0>       in <15>
+                                saved restart code   in <14:8>
+        SP              =       stack pointer at time of restart
+                                (not stack pointer specified by PSL<26:24>)
+        PSL             =       041F0000 (hex)
+        PC              =       20040000 (hex)
+        MAPEN           =       0
+        SISR            =       0       (powerup only)
+        ASTLVL          =       4       (powerup only)
+        ICCS            =       0       (powerup only)
+        all else        =       undefined
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 29
+MICROVAX CONSOLE SUPPORT                                         1 February 1985
+
+
+5  MICROVAX CONSOLE SUPPORT
+
+The restart process  described  in  the  previous  section  allows  system
+designers  to  implement a transparent console in macrocode.  This section
+details some of the fine points of implementing a macrocode console.
+
+
+
+5.1  Entry Protocol
+
+Following the restart process, the console is entered with state saved  in
+internal  registers.   THIS  STATE  IS  VALID FOR A LIMITED TIME ONLY.  IN
+PARTICULAR,  MEMORY  MANAGEMENT  MUST  BE  LEFT  DISABLED,  AND   EMULATED
+INSTRUCTIONS CANNOT BE USED before the saved values are moved to permanent
+memory.  Thus a typical console entrance code might look like this:
+
+;       ipr console.pc  =       saved pc
+;       ipr console.psl =       saved psl + saved mapen + error code
+;       ipr console.isp =       "real" isp
+;       sp              =       stack pointer at time of error
+;       pc              =       20040000
+;       psl             =       041F0000
+;       mapen           =       0
+;       astlvl          =       ??? (4 at powerup)
+;       sisr            =       ??? (0 at powerup)
+;       iccs            =       ??? (0 at powerup)
+
+CONSOLE::
+        mfpr    #console.pc,ram_saved.pc        ; save saved pc
+        mfpr    #console.psl,ram_saved.psl      ; save saved psl
+        mfpr    #console.isp,ram_saved.isp      ; save saved isp
+        movl    sp,ram_saved.sp                 ; save current stk ptr
+                                                ; (to complete stack swap if necc)
+        movl    #ram_stack,sp                   ; set up console stack ptr
+         :
+         :
+
+The saving of the "real" console interrupt stack pointer, as well  as  the
+SP  register,  conceals one of the many trickeries of this procedure.  The
+console runs on the interrupt stack.  If the halted code was running on  a
+non-interrupt  stack,  the microcode should execute a stack swap, that is,
+store SP in KSP, ESP, SSP,  or  USP,  and  load  SP  from  ISP.   However,
+MICROVAX  KEEPS  THE  NON-INTERRUPT  STACK POINTERS IN THE PCB.  The stack
+swap requires both a valid PCB and a successful memory  access.   This  is
+unacceptable,  given  that  the  console is often entered with a corrupted
+software environment.  Thus, in the console  entrance  protocol,  MICROVAX
+DOES  NOT EXECUTE A STACK SWAP.  The SP register contains the stack at the
+time the halt  or  error  occurred,  and  IPR   console.isp  contains  the
+interrupt  stack  pointer, which may or may not equal the SP register.  If
+the saved PSL has the interrupt stack bit CLEAR,  then  the  console  must
+complete  the  stack  swap  by  storing  the  saved  value  of SP into the
+appropriate location in the current PCB, if one exists.  If the saved  PSL
+has the interrupt stack bit SET, then no special action is required.
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 30
+MICROVAX CONSOLE SUPPORT                                         1 February 1985
+
+
+In addition to completing the  stack  swap,  the  console  must  save  the
+general  registers, the SCBB, and the PCBB, and establish an SCBB and PCBB
+for its own operation.
+
+
+
+5.2  Console Processing
+
+The console executes in kernel mode, on the interrupt stack,  with  memory
+management  disabled.   Thus  it  has  access  to  all  machine resources.
+However, because the console has in effect replaced the  normally  running
+program, it must access certain machine resources from saved status rather
+than current status:
+
+      -  General registers
+      -  PSL
+      -  Certain IPRs (notably KSP, ESP, SSP, USP, which are  in  the  OLD
+         PCBB; ISP; PCBB and SCBB; IPL, which is in the OLD PSL)
+
+
+
+
+5.3  Console Exit
+
+The exit from the console depends on two things.  First,  the  environment
+to which the console is exiting must have a validly mapped interrupt stack
+with at least two spare longwords at the bottom.  Second,  the  REI  which
+restores  the  PC  and  PSL  must  be  part  of the same physical longword
+containing the instruction (or part of the instruction) that  sets  MAPEN.
+The  exit  protocol is then to push the saved PC and PSL onto the (mapped)
+bottom of the SAVED interrupt stack, decrement the SAVED  interrupt  stack
+pointer, enable mapping, if appropriate, and exit via an REI:
+
+;       ram_saved.pc    =       saved pc
+;       ram_saved.psl   =       saved psl + saved mapen + error code
+;       ram_saved.isp   =       saved interrupt sp
+;       ram_isp.ptr     =       translated pointer to saved int stack
+;       R0 - R13, SCBB  =       restored to initial values
+
+CONSOLE.EXIT::
+        subl2   #4,ram_isp.ptr                  ; prepare to push onto saved stack
+        movl    ram_saved.psl,@ram_isp.ptr      ; push psl onto stack
+        incl    ram_isp.ptr                     ; pointer at byte 1 of psl on stack
+        clrb    @ram_isp.ptr                    ; clear psl<15:8>
+        subl2   #5,ram_isp.ptr                  ; prepare to push onto saved stack
+        movl    ram_saved.pc,@ram_isp.ptr       ; push pc onto stack
+        movl    ram_saved.isp,sp                ; restore saved sp
+        subl2   #8.,sp                          ; two longwords have been pushed
+        bbc     #7,ram_saved.psl+1,console.rei  ; if mapping not enabled, skip enabling
+        mtpr    #1,#mapen                       ; turn on mapping (if it was on)
+CONSOLE.REI::
+        rei                                     ; restore psl and pc, return to user
+
+For this exit sequence to work, the interrupt stack at the time of console
+
+MicroVAX CPU Chip Microcode Documentation (Company Confidential)         Page 31
+MICROVAX CONSOLE SUPPORT                                         1 February 1985
+
+
+entry  must  be  validly  mapped  and  must have two spare longwords.  The
+console will have to verify this fact by simulating the memory  management
+process,  thereby  proving that the interrupt stack is resident and points
+to valid physical memory.  If the interrupt stack is NOT valid,  the  exit
+sequence must be aborted.
+
+Also for the exit sequence to work, the REI following  the  MTPR  MUST  be
+executed  DESPITE  the  fact that memory mapping has been totally changed.
+This can be arranged IF the REI is prefetched as  part  of  the  preceding
+instruction.  The MTPR to MAPEN flushes the translation buffer BUT NOT THE
+INSTRUCTION PIPELINE.  Thus, if the REI was in the instruction buffer,  it
+will  be  executed, irrespective of where the new mapped PC points.  Since
+mapping is now on, REI will  pop  the  new  PC  and  PSL  off  the  mapped
+interrupt  stack.  That is why the console must push the PC and PSL at the
+translated addresses corresponding to  the  top  of  the  saved  interrupt
+stack.
+
+Prior to the REI, the interrupt stack pointer and MAPEN register have been
+restored  to  their  initial  values.  The REI restores the PSL and PC and
+switches stacks according to the saved PSL (which is why the console  MUST
+finish  the  console  swap which the microcode was unable to do at console
+entry).

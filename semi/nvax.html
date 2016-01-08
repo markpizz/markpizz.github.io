@@ -1,0 +1,107 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>NVAX</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  NVAX (1991)
+</H1>
+<P>
+NVAX (no code name) was the fourth and penultimate VAX microprocessor. Bill
+Herrick was the project manager; Mike Uhler was the supervising architect
+and lead microcoder. NVAX incorporated numerous advances over its predecessors:
+single chip design (no external floating point or cache controller);
+macro-instruction pipelining; patchable control store. NVAX reused the
+fully-pipelined floating point processor from Rigel. Despite its complexities,
+NVAX actually finished ahead of schedule and shipped in systems before the
+end of 1991.
+<P>
+NVAX was implemented in DEC's 0.75u triple-metal CMOS4 process. A variant,
+called NVAX+, was pin-compatible with the first Alpha processor, EV-4. This
+allowed the first generation of Alpha mid-range SMP systems (VAX 7000) to
+use a single board design for both VAX and Alpha variants of the
+system. NVAX operated over a frequency range of 71Mhz to 90Mhz: the
+fastest CISC processor in the world.
+<P>
+NVAX+ was shrunk into DEC's 0.5u CMOS5 process. This version operated at
+frequencies up to 143Mhz and was also the fastest CISC processor of its day.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/nvax.jpg">NVAX</A></TD>
+    <TD></TD>
+    <TD>638x574</TD>
+    <TD>~1,300,000</TD>
+    <TD>NVAX is a fourth-generation VLSI VAX microprocessor. It combines, in
+      one chip, all the functions of a VAX: integer execution, floating point
+      execution, and cache. Key features include:
+      <UL>
+	<LI>
+	  Very high performance (30X MicroVAX)
+	<LI>
+	  Macro-pipelined design
+	<LI>
+	  Fully pipelined floating-point unit
+	<LI>
+	  2KB on-chip instruction cache
+	<LI>
+	  8KB on-chip data cache
+	<LI>
+	  128 entry TLB
+	<LI>
+	  Patchable control store
+      </UL>
+      <P>
+      Power dissipation: 18W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+NVAX shipped in late 1991 and supported the VAX product line until the
+termination of new system sales at the end of the century. NVAX was used
+in low end VAX systems (VAX 4500 and 4600) and mid-range systems (VAX 7000
+and VAX 10000). NVAX+5 shipped in 1994.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+Just as Rigel is the realization of Nautilus (VAX 8800) in silicon, so to
+a large extent was NVAX the realization of Aquarius (VAX 9000) in a single
+chip. Work on NVAX began in the fall of 1987, with a part-time team; I wrote
+the initial sketch of the Ebox (execution unit) microcode. Serious work began
+in early 1988, when Bill Herrick, Mike Uhler, and Bill Wheeler freed up from
+Rigel. The performance model had been completed, and microarchitectural work
+started, by the time I left the Microprocessor Group in the fall of 1988.
+<P>
+NVAX went very smoothly as an implementation project, taping out ahead of
+schedule. Debug also went well, with fewer bugs found after tape-out than
+in any previous VLSI VAX design. The patchable control store made an important
+contribution in shortening debug, by allowing microcode workarounds to be
+used throughout debug.
+<P>
+Throughout its life, NVAX was the focus of controversy within the corporation.
+Its features, functions, and performance overlapped the ECL-based VAX 9000,
+a mainframe-class system priced at over $1M. As soon as NVAX became an official
+project, its backers (including me) pointed out that it would make the VAX
+9000 obsolete and thus make it impossible for the 9000 to ever recoup its
+development costs. Proponents of the VAX 9000 could not make the mental leap
+to see how a single chip could replace hundreds of ECL gate arrays and supporting
+circuits. Nonetheless, NVAX systems shipped less than 15 months after the
+VAX 9000 and effectively ended the life of that product. DEC never shipped
+an ECL-based system after that.
+<P>
+NVAX was presented at the 1992 International Solid State Circuits Conference.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

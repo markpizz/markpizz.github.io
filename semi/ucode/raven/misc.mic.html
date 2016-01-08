@@ -1,0 +1,1059 @@
+.TOC	"MISC.MIC -- Miscellaneous Instructions"
+.TOC	"Revision 2.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 28-Feb-90 RMS	Fixed bug in INDEX.
+;    1 15-Feb-90 RMS	Documented PSL write restriction.
+; (2)0 15-Nov-89 RMS	Revised for simplified decoder.
+;   10 13-Nov-89 RMS	Revised detail probe routines.
+;    9 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    8 25-Sep-89 RMS	Editorial changes.
+;    7 23-Sep-89 RMS	Revised for restriction against reads in last cycle.
+;    6 15-Sep-89 RMS	Revised for TB invalidate restrictions.
+;    5 08-Jul-89 RMS	Moved SC loads out of harms way.
+;    4 05-Jul-89 RMS	Moved state clears out of harms way.
+;    3 02-Jul-89 RMS	Revised PUSHR detailed probe routine.
+;    2 30-Jun-89 RMS	Revised for probe, TB invalidate restrictions.
+;    1 27-Jun-89 RMS	Moved WAIT.PC.READY.xx to other modules.
+; (1)0 14-Jun-89 RMS	Revised to remove subroutine and for release to CMS.
+;    2 03-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 10-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN MISC
+.nobin
+
+;	This module implements the miscellaneous instruction class.
+;	Instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	B9	 BICPSW mask.rw							* * * *		rsv
+;
+;	B8	 BISPSW mask.rw							* * * *		rsv
+;
+;	03	 BPT {-(KSP).w*}						0 0 0 0
+;
+;	00	 HALT {-(KSP).w*}						- - - -		prv
+;
+;	0A	 INDEX subscript.rl, low.rl, high.rl, size.rl, indexin.rl,	* * 0 0		sub
+;		 indexout.wl
+;
+;	DC	 MOVPSL dst.wl							- - - -
+;
+;	01	 NOP								- - - -
+;
+;	BA	 POPR mask.rw, {(SP)+.r*}					- - - -
+;
+;	BB	 PUSHR mask.rw, {-(SP).w*}					- - - -
+;
+;	FC	 XFC {unspecified operands}					0 0 0 0
+;
+.TOC	"	BPT, XFC"
+
+;	These instructions cause an immediate fault through a dedicated SCB vector.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	BPT		03	breakpoint fault			0	--	--	BPT	   --
+;
+;	XFC		FC	customer reserved instruction fault	0	--	--	XFC	   --
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The next microstate is IE.FAULT.COMMON.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+.bin
+
+;	BPT operation:
+;
+;		initiate breakpoint fault
+
+BPT:
+	;********** Hardware dispatch **********;
+	[W1] <-- [SCBB] + 000000[SCB.BPT],	; address in SCB for BPT instruction
+	LONG,					;
+	GOTO [IE.FAULT.COMMON]			; go join common fault code
+
+
+;	XFC operation:
+;
+;		initiate customer reserved instruction fault
+
+XFC:
+	;********** Hardware dispatch **********;
+	[W1] <-- [SCBB] + 000000[SCB.XFC],	; address in SCB for XFC instruction
+	LONG,					;
+	GOTO [IE.FAULT.COMMON]			; go join common fault code
+
+.nobin
+.TOC	"	HALT"
+
+;	This instruction halts the processor if the current mode is kernel.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   ----
+;	HALT		00	if (curr mode neq kernel) then		0	--	--	HALT	   --
+;				   (reserved instruction fault)
+;				   else (halt restart)
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The next microstate is CONSOLE.HALT (kernel mode)
+;		or RSRV.INST.FLT (non-kernel mode).
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+.bin
+
+;	HALT operation:
+;
+;		if PSL<cur_mode> is kernel, then halt processor,
+;		else initiate reserved instruction fault
+
+HALT:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [PSL] AND [PSL.CUR.MASK]000000, ; test PSL<cur_mode> = 0
+	LONG,					;
+	CALL [WAIT.ONE.CYCLE.WBUS.CC]		; kill a cycle, select Wbus cc's
+
+	;---------------------------------------;
+	NOP,					; nothing to do...
+	CASE AT [HALT.NOT.KERNEL]		; case on PSL<cur_mode>
+
+;= ALIGNLIST *0***	(HALT.NOT.KERNEL,	HALT.KERNEL)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+HALT.NOT.KERNEL:
+	;---------------------------------------; wbus.z = 0 (not kernel):
+	RESERVED INSTRUCTION FAULT		; not in kernel mode, fault
+
+HALT.KERNEL:
+	;---------------------------------------; wbus.z = 1 (kernel):
+	CONSOLE HALT [ERR.HLTINS]		; go to console halt routine
+
+.nobin
+.TOC	"	NOP"
+
+;	This instruction performs no operation.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   ----
+;	NOP		01	no operation				0	--	--	NOP	   --
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		Machine state is unchanged.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+.bin
+
+;	NOP operation:
+;
+;		decode next instruction
+
+LAST.CYCLE:
+NOP:
+	;********** Hardware dispatch **********;
+	NOP,					; nothing to do...
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	INDEX"
+
+;	This instruction computes the index into a subscripted array.
+;
+;	The indexin operand is added to the subscript operand, and the sum is
+;	multiplied by the size of the operand.  The indexout operand is replaced
+;	by the result.  If the subscript operand is less than the low operand or
+;	greater than the high operand, a subscript range trap is taken.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----		--	--------   -----
+;	INDEX		0A	indexout.wl <--				6	rrrrrw/llllll	iiii	INDEX	   --
+;					(indexin.rl+subscript.rl)*size.rl
+;					if (subscript.rl LSS lowlimit.rl) OR
+;					   (subscript.rl GTR highlimit.rl) THEN subscript range trap
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (subscript) operand
+;		W2	=	second (low limit) operand
+;		W4	=	third (high limit) operand
+;		W6	=	fourth (size) operand
+;		W3	=	fifth (indexin) operand
+;		W1 = VA	=	address of sixth (indexout) operand, if memory
+;		RN	=	register number of sixth specifier
+;		DL	=	data length of sixth operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;		If a subscript range trap occured, the code branches to the exception flows.
+;
+;	Condition codes:
+;		N <-- indexout LSS 0
+;		Z <-- indexout EQL 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		INDEX can be made two microwords shorter, at the cost of two cycles,
+;		by checking the limits before transmitting the operands.
+;
+.bin
+
+;	INDEX operation:
+;
+;		indexout.wl <-- (indexin.rl+subscript.rl)*size.rl
+;		if (subscript.rl LSS lowlimit.rl) OR
+;		   (subscript.rl GTR highlimit.rl) THEN subscript range trap
+
+INDEX:
+	;********** Hardware dispatch **********;
+	VA <-- 000000[01],			; [1] flag memory mode in VA
+	[WBUS] <-- [W6], LONG,			; get size
+	XMIT FPU LW (ENABLE),			; send to FPU
+	GOTO [INDEX.CONT]			; join common flows
+
+INDEX.R:
+	;********** Hardware dispatch **********;
+	VA <-- 000000[00],			; [1] flag register mode in VA
+	[WBUS] <-- [W6], LONG,			; get size
+	XMIT FPU LW (ENABLE),			; send to FPU
+	GOTO [INDEX.CONT]			; join common flows
+
+INDEX.CONT:
+	;---------------------------------------;
+	[W3] <-- [W3] + [W0], LONG,		; [2] compute indexin + subscript
+	XMIT FPU LW (ENABLE)			; send to FPU
+
+	;---------------------------------------;
+	[WBUS] <-- [W0] - [W2], LONG		; [3] compare subscript:low limit
+
+	;---------------------------------------;
+	[WBUS] <-- [W4] - [W0], LONG,		; [4] compare high limit:subscript
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[WBUS] <-- [VA] AND 000000[01], LONG,	; [5] test for register vs memory
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [INDEX.LOW.LIMIT.00]		; case on result of low limit
+
+;	Index, continued.
+;	Finish low check, transmit size to FPU.
+
+;	At this point,
+;		W1	=	address of destination, if memory
+;		RN	=	register number of destination, if register
+;		Wbus<0>	=	1 if memory destination
+
+;= ALIGNLIST 0101*	(INDEX.LOW.LIMIT.00,	INDEX.LOW.LIMIT.01,
+;=			 INDEX.LOW.LIMIT.10,	INDEX.LOW.LIMIT.11)
+
+INDEX.LOW.LIMIT.00:
+	;---------------------------------------; wbus.nv = 00:
+	VA <-- [W1], LONG,			; [6] restore VA
+						; >> W1 not written in prev cycle
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [INDEX.HIGH.LIMIT.00]		; low limit ok, case on high limit check
+
+INDEX.LOW.LIMIT.01:
+	;---------------------------------------; wbus.nv = 01:
+	VA <-- [W1], LONG,			; [6] restore VA
+						; >> W1 not written in prev cycle
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [INDEX.HIGH.LIMIT.01]		; go finish instruction and trap
+
+INDEX.LOW.LIMIT.10:
+	;---------------------------------------; wbus.nv = 10:
+	VA <-- [W1], LONG,			; [6] restore VA
+						; >> W1 not written in prev cycle
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [INDEX.HIGH.LIMIT.10]		; go finish instruction and trap
+
+INDEX.LOW.LIMIT.11:
+	;---------------------------------------; wbus.nv = 11:
+	VA <-- [W1], LONG,			; [6] restore VA
+						; >> W1 not written in prev cycle
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [INDEX.HIGH.LIMIT.00]		; low limit ok, case on high limit check
+
+;	Index, continued.
+;	Finish high limit check.
+
+;	At this point,
+;		VA	=	address of destination, if memory
+;		RN	=	register number of destination, if register
+;		STATE<0> =	1 if memory destination
+
+;= ALIGNLIST 0101*	(INDEX.HIGH.LIMIT.00,	INDEX.HIGH.LIMIT.01,
+;=			 INDEX.HIGH.LIMIT.10,	INDEX.HIGH.LIMIT.11)
+
+INDEX.HIGH.LIMIT.00:
+	;---------------------------------------; wbus.nv = 00:
+	NOP,					; [7] nothing to do...
+	CASE AT [INDEX.NORMAL.REG]		; case on register vs memory
+
+INDEX.HIGH.LIMIT.01:
+	;---------------------------------------; wbus.nv = 01:
+	[W3] <-- 000000[ARITH.TRAP.SUBRNG],	; [7] set parameter for subscript trap
+	LONG,					;
+	CASE AT [INDEX.TRAP.REG]		; case on register vs memory
+
+INDEX.HIGH.LIMIT.10:
+	;---------------------------------------; wbus.nv = 10:
+	[W3] <-- 000000[ARITH.TRAP.SUBRNG],	; [7] set parameter for subscript trap
+	LONG,					;
+	CASE AT [INDEX.TRAP.REG]		; case on register vs memory
+
+INDEX.HIGH.LIMIT.11:
+	;---------------------------------------; wbus.nv = 11:
+	NOP,					; [7] nothing to do...
+	CASE AT [INDEX.NORMAL.REG]		; case on register vs memory
+
+;	INDEX, continued.
+;	Limit checks complete, write result.
+
+;	At this point,
+;		W3	=	trap parameter, if subscript range trap
+;		VA	=	address of destination, if memory
+;		RN	=	register number of destination, if register
+
+;= ALIGNLIST ***0*	(INDEX.NORMAL.REG,	INDEX.NORMAL.MEM)
+;  Wbus<3:1> = 000 --> Wbus<3:0> = 000?
+
+INDEX.NORMAL.REG:
+	;---------------------------------------; wbus<0> = 0:
+	[Rrn] <-- FPU RESULT 1, LONG,		; [8] write result to register
+	SET PSL CC (IIII),			; get condition codes from FPU
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+INDEX.NORMAL.MEM:
+	;---------------------------------------; wbus<0> = 1:
+	MEM (VA)&, [WDR] <-- FPU RESULT 1, LONG,; [8] write result to memory
+	SET PSL CC (IIII),			; get condition codes from FPU
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+;= ALIGNLIST ***0*	(INDEX.TRAP.REG,	INDEX.TRAP.MEM)
+;  Wbus<3:1> = 000 --> Wbus<3:0> = 000?
+
+INDEX.TRAP.REG:
+	;---------------------------------------; wbus<0> = 0:
+	[Rrn] <-- FPU RESULT 1, LONG,		; [8] write result to register
+	SET PSL CC (IIII),			; get condition codes from FPU
+	SET NORETRY,				; set disable retry flag
+	GOTO [IE.ARITH.TRAP.WAIT]		; wait for psl cc's, do subscript trap
+
+INDEX.TRAP.MEM:
+	;---------------------------------------; wbus<0> = 1:
+	MEM (VA)&, [WDR] <-- FPU RESULT 1, LONG,; [8] write result to memory
+	SET PSL CC (IIII),			; get condition codes from FPU
+	SET NORETRY,				; set disable retry flag
+	GOTO [IE.ARITH.TRAP.WAIT]		; wait for psl cc's, do subscript trap
+
+.nobin
+.TOC	"	BICPSW, BISPSW"
+
+;	These instructions operate on the trap enable and condition code bits of the PSW.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	BISPSW		B8	psw <-- psw or src.rw			1	r/w	--	BISPSW	   --
+;				  if (src.rw<15:8> neq 0) then (reserved operand fault)
+;
+;	BICPSW		B9	psw <-- psw and not src.rw		1	r/w	--	BICPSW	   --
+;				  if (src.rw<15:8> neq 0) then (reserved operand fault)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (src) operand
+;		DL	=	data length of first operand (word)
+;
+;	Exit conditions:
+;		If src<15:8> = 0, PSW<7:0> have been updated.
+;
+;	Condition codes:
+;		(BISPSW)		(BICPSW)
+;		N <-- N or src<3>	N <-- N andnot src<3>
+;		Z <-- Z or src<2>	Z <-- Z andnot src<2>
+;		V <-- V or src<1>	V <-- V andnot src<1>	[Integer overflow trap disabled.]
+;		C <-- C or src<0>	C <-- C andnot src<0>
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Single operand instructions are not optimized for trailing register specifiers.
+;		2) BISPSW, BICPSW must wait one cycle for the condition codes to become stable.
+;		   This cycle is provided by the specifier decode.
+;
+.bin
+
+;	BISPSW operation:
+;
+;		if src<15:8> = 0, then PSL<7:0> <-- PSL<7:0> or src<7:0>
+;			else initiate reserved operand fault
+
+BISPSW:
+	;********** Hardware dispatch **********;
+	[W5] <-- [PSL], LONG,			; [1] get microcode PSL
+	SELECT [PSL.3-0],			; prepare to case on condition codes
+	GOTO [BISPSW.CONT]			; join common code
+
+BISPSW.R:
+	;********** Hardware dispatch **********;
+	[W5] <-- [PSL], LONG,			; [1] get microcode PSL
+	SELECT [PSL.3-0],			; prepare to case on condition codes
+	GOTO [BISPSW.CONT]			; join common code
+
+BISPSW.CONT:
+	;---------------------------------------;
+	[WBUS] <-- [W0] AND 0000[0FF]00, LONG,	; [2] test for src<15:8> eql 0
+	CALL CASE AT [OR.PSW.CC]		; [3] or in PSW cc's, select Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- [W5] OR [W0], LONG,		; [4] set bits in PSW, save in W1
+	NEW PSW,				; update hardware copy
+						; >> no DECODE NEXT in next two cycles
+	SET NORETRY,				; set disable retry flag
+	CASE AT [BIXPSW.RESERVED.BITS]		; case on operand test from [2]
+
+BICPSW:
+	;********** Hardware dispatch **********;
+	[W5] <-- [PSL], LONG,			; [1] get microcode PSL
+	SELECT [PSL.3-0],			; prepare to case on condition codes
+	GOTO [BICPSW.CONT]			; join common code
+
+BICPSW.R:
+	;********** Hardware dispatch **********;
+	[W5] <-- [PSL], LONG,			; [1] get microcode PSL
+	SELECT [PSL.3-0],			; prepare to case on condition codes
+	GOTO [BICPSW.CONT]			; join common code
+
+BICPSW.CONT:
+	;---------------------------------------;
+	[WBUS] <-- [W0] AND 0000[0FF]00, LONG,	; [2] test for src<15:8> eql 0
+	CALL CASE AT [OR.PSW.CC]		; [3] or in PSW cc's, select Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- [W5] ANDNOT [W0], LONG,	; [4] clear bits in PSW, save in W1
+	NEW PSW,				; update hardware copy
+						; >> no DECODE NEXT in next two cycles
+	SET NORETRY,				; set disable retry flag
+	CASE AT [BIXPSW.RESERVED.BITS]		; case on operand test from [2]
+
+;	BIxPSW, continued.
+;	Resolve reserved operand fault.
+
+;	At this point,
+;		W1	=	new PSW
+;		W5	=	old PSW
+
+;= ALIGNLIST *0***	(BIXPSW.RESERVED.BITS,	BIXPSW.UPDATE.PSW)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+BIXPSW.RESERVED.BITS:
+	;---------------------------------------; wbus.z = 0:
+	[WBUS] <-- [W5], BYTE,			; [5] src<15:8> neq 0, restore PSW
+	NEW PSW,				; inform hardware
+						; >> no DECODE NEXT in next two cycles
+	RESERVED OPERAND FAULT			; fault
+
+BIXPSW.UPDATE.PSW:
+	;---------------------------------------; wbus.z = 1:
+	[PSL] <-- [W1] AND 000000[0F0], BYTE,	; [5] update microcode PSW bits<7:4> only
+	GOTO [WAIT.PC.READY]			; wait for PSW to settle
+
+;	Common subroutine to wait one cycle, exit with Wbus cc's selected.
+
+WAIT.ONE.CYCLE.WBUS.CC:
+	;---------------------------------------;
+	NOP,					; wait one cycle for something to happen
+	SELECT [WBUS.NZVC],			; select Wbus cc's
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	MOVPSL"
+
+;	This instruction copies the PSL to a destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	MOVPSL		DC	dst.wl <-- PSL				1	w/l	--	MOVPSL	   --
+;
+;	Entry conditions from specifier flows:
+;		VA	=	address of first (dst) operand, if memory
+;		RN	=	register number of first specifier
+;		DL	=	data length of first operand (longword)
+;
+;	Exit conditions:
+;		The PSL is stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) MOVPSL must wait one cycle for the condition codes to become stable.
+;		   This cycle is provided by the specifier decode.  However, for allocation
+;		   reasons, MOVPSL cannot call ASSEMBLE.PSL directly and thus loses a cycle.
+;
+.bin
+
+; 	MOVPSL operation:
+;
+;		dst.wl <-- PSL
+
+MOVPSL:
+	;********** Hardware dispatch **********;
+	NOP,					; wait for condition codes
+	CALL [SELECT.ASSEMBLE.PSL]		; wait and assemble PSL
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- [W5], LONG,	; write PSL to memory
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+MOVPSL.R:
+	;********** Hardware dispatch **********;
+	NOP,					; wait for condition codes
+	CALL [SELECT.ASSEMBLE.PSL]		; wait and assemble PSL
+
+	;---------------------------------------;
+	[Rrn] <-- [W5], LONG,			; write PSL to register
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	PUSHR"
+;
+;	This instruction pushes multiple registers onto the stack.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	PUSHR		BB	push registers based on mask.rw		1	r/w	--	PUSHR	   --
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (mask) operand
+;		DL	=	data length of first operand (word)
+;
+;	Exit conditions:
+;		The specified registers have been pushed.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Single operand instructions are not optimized for trailing register specifiers.
+;
+.bin
+
+;	PUSHR operation:
+;
+;		Push general registers based on mask.rw.
+;		Use code shared with CALL instruction for registers 0 - 11.
+;		Update SP.
+
+PUSHR:
+	;********** Hardware dispatch **********;
+	[W0] <-- [W0] ANDNOT 0000[80]00, WORD,	; [1] clear mask<15>, test mask<14:0> = 0
+	GOTO [PUSHR.CONT]			; join common flows
+
+PUSHR.R:
+	;********** Hardware dispatch **********;
+	[W0] <-- [Rrn] ANDNOT 0000[80]00, WORD,	; [1] clear mask<15>, test mask<14:0> = 0
+	GOTO [PUSHR.CONT]			; join common flows
+
+;	Note:	Any exit from PUSHR prior to testing of the probe status MUST
+;		invalidate the probed TB entry, in case an invalid PTE was loaded.
+
+PUSHR.CONT:
+	;---------------------------------------;
+	VA <-- [SP] - 000000[60.],		; [2] worst case stack = 15 lw = 60 bytes
+						; >> SP not written in prev cycle
+	PROBE WRITE (VA), BYTE,			; probe worst case stack
+						; >> no DECODE NEXT in next three cycles
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	SC&, [WBUS] <-- [W0], LONG,		; [3] load mask<7:0> into SC
+	CASE AT [PUSHR.NOT.ZERO]		; case on mask = 0 test from [1]
+
+;= ALIGNLIST *0***	(PUSHR.NOT.ZERO,	PUSHR.ZERO)
+;  WBUS.NZVC set by ANDNOT with msb clear --> N = V = C = 0
+
+PUSHR.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [SP] - 000000[60.],		; [4] recover original probe address
+						; >> SP not written in prev cycle
+	TB INVALIDATE, LONG,			; zap TB entry in case invalid PTE loaded
+						; >> no ADR or CRQ in next cycle
+	GOTO [WAIT.PC.READY]			; wait out probe shadow, decode next
+
+;	PUSHR, continued.
+;	Check stack probe results.
+
+;	At this point,
+;		W0	=	original mask with bit<15> clear
+;		SC	=	mask<7:0>
+;		VA	=	SP - 60
+;		Wbus	=	mask<15:12>, then mask<11:8>
+
+PUSHR.NOT.ZERO:
+	;---------------------------------------; wbus.z = 0:
+	[WBUS] <-- ZEXT [W0] RSH [12.], LONG,	; [4] test mask<15:12>
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [MMGT.STATUS]			; prepare to case on mmgt status
+
+PUSHR.PROBE.CASE:
+	;---------------------------------------;
+	[WBUS] <-- ZEXT [W0] RSH [8.], LONG,	; [5] test mask<11:8>
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [PUSHR.PROBE.OK]		; case on probe status from [2]
+
+;= ALIGNLIST 0011*	(PUSHR.PROBE.OK,	PUSHR.TNV,
+;=			 PUSHR.ACV,		PUSHR.ACV.TNV)
+
+PUSHR.PROBE.OK:
+	;---------------------------------------; mmgt.status = 00xx:
+	VA <-- [SP],				; [6] load VA with SP
+						; >> SP not written in prev cycle
+	[WBUS] <-- [SP]!![W0] RSH [8.], LONG,	; test mask<11:8>
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [PUSHR.14.12.000]		; case on Wbus<3:0> = mask<15:12> from [4]
+
+;	PUSHR, continued.
+;	Process mask bits<14:12> = SC<2:0> (R12 to R14).
+
+;	At this point,
+;		W0	=	original mask with bit<15> clear
+;		VA	=	next stack location for push
+;		SC	=	mask<7:0>
+;		Wbus	=	mask<11:8> in two pipeline stages
+
+;= ALIGNLIST *000*	(PUSHR.14.12.000,	PUSHR.14.12.001,
+;=			 PUSHR.14.12.010,	PUSHR.14.12.011,
+;=		         PUSHR.14.12.100,	PUSHR.14.12.101,
+;=			 PUSHR.14.12.110,	PUSHR.14.12.111)
+;  Mask<15> = 0 --> Wbus<3> = 0 --> Wbus<3:0> = 0???
+
+PUSHR.14.12.000:
+	;---------------------------------------; wbus<2:0> = 000:
+	NOP,					; [7] nothing to do...
+	SET NORETRY,				; set disable retry flag
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [CALL.11.8.0000]		; case on Wbus<3:0> from [5]
+
+PUSHR.14.12.001:
+	;---------------------------------------; wbus<2:0> = 001:
+	VA <-- [VA] - 4,			; [7,8,10] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [AP], LONG,	; push AP
+	SET NORETRY,				; set disable retry flag
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [CALL.11.8.0000]		; case on Wbus<3:0> from [5,6,8]
+
+PUSHR.14.12.010:
+	;---------------------------------------; wbus<2:0> = 010:
+	VA <-- [VA] - 4,			; [7,8] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [FP], LONG,	; push FP
+	SET NORETRY,				; set disable retry flag
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [CALL.11.8.0000]		; case on Wbus<3:0> from [5,6]
+
+PUSHR.14.12.011:
+	;---------------------------------------; wbus<2:0> = 011:
+	VA <-- [VA] - 4,			; [7,9] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [FP], LONG,	; push FP
+	SET NORETRY,				; set disable retry flag
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [PUSHR.14.12.001]			; go push AP
+
+PUSHR.14.12.100:
+	;---------------------------------------; wbus<2:0> = 100:
+	VA <-- [VA] - 4,			; [7] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [SP], LONG,	; push SP
+	SET NORETRY,				; set disable retry flag
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [CALL.11.8.0000]		; case on Wbus<3:0> from [5]
+
+PUSHR.14.12.101:
+	;---------------------------------------; wbus<2:0> = 101:
+	VA <-- [VA] - 4,			; [7] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [SP], LONG,	; push SP
+	SET NORETRY,				; set disable retry flag
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [PUSHR.14.12.001]			; go push AP
+
+PUSHR.14.12.110:
+	;---------------------------------------; wbus<2:0> = 110:
+	VA <-- [VA] - 4,			; [7] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [SP], LONG,	; push SP
+	SET NORETRY,				; set disable retry flag
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [PUSHR.14.12.010]			; go push FP
+
+PUSHR.14.12.111:
+	;---------------------------------------; wbus<2:0> = 111:
+	VA <-- [VA] - 4,			; [7] decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [SP], LONG,	; push SP
+	SET NORETRY				; set disable retry flag
+
+	;---------------------------------------;
+	[WBUS] <-- ZEXT [W0] RSH [8.], LONG,	; [8] test mask<11:8> for use in [10]
+	GOTO [PUSHR.14.12.011]			; go push FP, AP
+
+;	PUSHR, continued.
+;	Return from common CALLx/PUSHR code, all registers pushed.
+;	CALLx/PUSHR distinguished by length of last specifier (byte/word).
+
+;	At this point,
+;		VA	=	last item pushed on stack
+
+PUSHR.DONE:
+	;---------------------------------------; dl = word:
+	[SP] <-- [VA], LONG,			; update stack pointer
+	LAST CYCLE				; decode next instruction
+
+;	PUSHR, continued.
+;	Approximate probe failed.
+;	Count bits in mask, reprobe at precise spot.
+
+;	At this point,
+;		W0	=	original mask with bit<15> clear
+;		STATE<3:0> =	0000
+;		SC	=	mask<7:0>
+;		VA	=	SP - 60
+
+PUSHR.TNV:
+	;---------------------------------------; mmgt.status = 01xx:
+	TB INVALIDATE, LONG,			; invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	GOTO [PUSHR.ACV]			; join common code
+
+PUSHR.ACV.TNV:
+	;---------------------------------------; mmgt.status = 11xx:
+	TB INVALIDATE, LONG,			; invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	GOTO [PUSHR.ACV]			; join common code
+
+PUSHR.ACV:
+	;---------------------------------------; mmgt.status = 10xx:
+	[W1] <-- [W0], WORD			; [n] copy mask, cannot be zero
+
+;= ALIGNLIST 10***	(PUSHR.MMGT.WAIT,	PUSHR.MMGT.DONE)
+;  WBUS.NZVC set by MOVE or ANDNOT --> V = C = 0
+
+PUSHR.MMGT.WAIT:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [VA] - 4,			; [n+1] decrement running stack pointer
+	[WDR] <-- -B [W1], LONG,		; negate remaining mask
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- [W1] ANDNOT [WDR], WORD,	; [n+2] reset rightmost bit of mask
+	CASE AT [PUSHR.MMGT.WAIT]		; case on PREVIOUS mask from [n]
+
+PUSHR.MMGT.DONE:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [VA] + 000000[64.],		; compensate for extra decrement + 15 lw
+	[WDR] <-- MEM.WCHK (VA), BYTE		; check exact top of stack, fault on error
+
+	;---------------------------------------;
+	[WBUS] <-- ZEXT [W0] RSH [12.], LONG,	; [4] test mask<15:12>
+	SELECT [STATE.3-0],			; force case to 0000 (ok) path
+	GOTO [PUSHR.PROBE.CASE]			; rejoin main flows
+
+.nobin
+.TOC	"	POPR"
+
+;	This instruction pops multiple registers off the stack.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	POPR		BA	pop registers based on mask.rw		1	r/w	--	POPR	   --
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (mask) operand
+;		DL	=	data length of first operand (word)
+;
+;	Exit conditions:
+;		The specified registers have been popped.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Single operand instructions are not optimized for trailing register specifiers.
+;
+.bin
+
+;	POPR operation:
+;
+;		Make sure that all stack entries will be accessible.
+;		Pop general registers based on mask.rw.
+;		Use code shared with RET instruction for registers 0 - 11.
+;		Update SP.
+
+POPR:
+	;********** Hardware dispatch **********;
+	[W0] <-- [W0] ANDNOT 0000[80]00, WORD,	; [1] clear mask<15>, test mask<14:0> = 0
+	GOTO [POPR.CONT]			; join common code
+
+POPR.R:
+	;********** Hardware dispatch **********;
+	[W0] <-- [Rrn] ANDNOT 0000[80]00, WORD,	; [1] clear mask<15>, test mask<14:0> = 0
+	GOTO [POPR.CONT]			; join common code
+
+;	Note:	Any exit from POPR prior to testing of the probe status MUST
+;		invalidate the probed TB entry, in case an invalid PTE was loaded.
+
+POPR.CONT:
+	;---------------------------------------;
+	VA <-- [SP] + 000000[59.],		; [2] maximum pop count = 15 lw = 60 bytes
+						; >> SP not written in prev cycle
+	PROBE READ (VA), BYTE,			; probe top of stack
+						; >> no DECODE NEXT in next three cycles
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	SC&, [WBUS] <-- ZEXT [W0] RSH [4],	; [3] load mask<11:4> into SC
+	LONG,					;
+	CASE AT [POPR.NOT.ZERO]			; case on mask = 0 from [1]
+
+;= ALIGNLIST *0***	(POPR.NOT.ZERO,	POPR.ZERO)
+;  WBUS.NZVC set by ANDNOT with msb clear --> N = V = C = 0
+
+POPR.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [SP] + 000000[59.],		; [4] recover original probe address
+						; >> SP not written in prev cycle
+	TB INVALIDATE, LONG,			; zap TB entry in case invalid PTE loaded
+						; >> no ADR or CRQ in next cycle
+	GOTO [WAIT.PC.READY]			; wait out probe shadow, decode next
+
+;	POPR, continued.
+
+;	At this point,
+;		W0	=	mask with bit<15> clear
+;		SC	=	mask<11:4>
+
+POPR.NOT.ZERO:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [SP],				; [4] point at first entry on stack
+						; >> SP not written in prev cycle
+	IntWbus <-- B [W0],			; test mask<3:0>
+	[WDR] <-- MEM (VA), BYTE,		; make sure first entry is accessible
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [MMGT.STATUS]			; prepare to case on probe status
+
+	;---------------------------------------;
+	VA <-- [SP] + 000000[59.], LONG,	; [5] recover address of probe
+						; >> SP not written in prev cycle
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [POPR.PROBE.OK]			; case on probe status from [2]
+
+;= ALIGNLIST 0011*	(POPR.PROBE.OK,		POPR.TNV,
+;=			 POPR.ACV,		POPR.ACV.TNV)
+
+POPR.PROBE.OK:
+	;---------------------------------------; mmgt.status = 00xx:
+	VA <-- [SP] - 4, LONG,			; [6] set VA for common POPR/RET stack pops
+						; >> SP not written in prev cycle
+	STATE.1 <-- 1,				; flag POPR vs RET
+	SET NORETRY,				; set disable retry flag
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [RET.0.3.0000]			; go case on Wbus<3:0> from [4]
+
+;	POPR, continued.
+;	Return from code shared with RET.
+;	R0 - R11 popped according to mask, mask<15:12> tested.
+;	Pop R12 - R14 according to mask.
+
+;	At this point,
+;		VA	=	last stack location popped
+
+POPR.DONE:
+	;---------------------------------------; state<1:0> = 10:
+	NOP,					; nothing to do...
+	CASE AT [POPR.12.14.000]		; case on mask bits<14:12>
+
+;= ALIGNLIST *000*	(POPR.12.14.000,	POPR.12.14.001,
+;=			 POPR.12.14.010,	POPR.12.14.011,
+;=		         POPR.12.14.100,	POPR.12.14.101,
+;=			 POPR.12.14.110,	POPR.12.14.111)
+;  Mask<15> = 0 --> Wbus<3> = 0 --> Wbus<3:0> = 0???
+
+POPR.12.14.000:
+	;---------------------------------------; wbus<2:0> = 000:
+	[SP] <-- [VA] + 000000[04], LONG,	; update SP
+	LAST CYCLE				; decode next instruction
+
+POPR.12.14.001:
+	;---------------------------------------; wbus<2:0> = 001:
+	VA <-- [VA] + 4,			; point at next stack location
+	[AP] <-- MEM (VA), LONG,		; restore AP
+	GOTO [POPR.12.14.000]			; go update SP
+
+POPR.12.14.010:
+	;---------------------------------------; wbus<2:0> = 010:
+	VA <-- [VA] + 4,			; point at next stack location
+	[FP] <-- MEM (VA), LONG,		; restore FP
+	GOTO [POPR.12.14.000]			; go update SP
+
+POPR.12.14.011:
+	;---------------------------------------; wbus<2:0> = 011:
+	VA <-- [VA] + 4,			; point at next stack location
+	[AP] <-- MEM (VA), LONG,		; restore AP
+	GOTO [POPR.12.14.010]			; go restore FP
+
+POPR.12.14.100:
+	;---------------------------------------; wbus<2:0> = 100:
+	VA <-- [VA] + 4,			; point at next stack location
+	[SP] <-- MEM (VA), LONG,		; restore SP
+	GOTO [LAST.CYCLE]			; go decode next instruction
+						; (no decode allowed this cycle)
+
+POPR.12.14.101:
+	;---------------------------------------; wbus<2:0> = 101:
+	VA <-- [VA] + 4,			; point at next stack location
+	[AP] <-- MEM (VA), LONG,		; restore AP
+	GOTO [POPR.12.14.100]			; go restore SP
+
+POPR.12.14.110:
+	;---------------------------------------; wbus<2:0> = 110:
+	VA <-- [VA] + 4,			; point at next stack location
+	[FP] <-- MEM (VA), LONG,		; restore FP
+	GOTO [POPR.12.14.100]			; go restore SP
+
+POPR.12.14.111:
+	;---------------------------------------; wbus<2:0> = 111:
+	VA <-- [VA] + 4,			; point at next stack location
+	[AP] <-- MEM (VA), LONG,		; restore AP
+	GOTO [POPR.12.14.110]			; go restore FP, SP
+
+;	POPR, continued.
+;	Approximate probe failed.
+;	Count bits in mask, reprobe at precise spot.
+
+;	At this point,
+;		W0	=	original mask with bit<15> clear
+;		SC	=	mask<11:4>
+;		VA	=	SP + 59
+
+POPR.TNV:
+	;---------------------------------------; mmgt.status = 01xx:
+	TB INVALIDATE, LONG,			; invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	GOTO [POPR.ACV]				; join common code
+
+POPR.ACV.TNV:
+	;---------------------------------------; mmgt.status = 11xx:
+	TB INVALIDATE, LONG,			; invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	GOTO [POPR.ACV]				; join common code
+
+POPR.ACV:
+	;---------------------------------------; mmgt.status = 10xx:
+	[W1] <-- [W0], WORD			; [n] copy mask, cannot be zero
+
+;= ALIGNLIST 10***	(POPR.MMGT.WAIT,	POPR.MMGT.DONE)
+;  WBUS.NZVC set by ANDNOT --> V = C = 0
+
+POPR.MMGT.WAIT:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [VA] + 4,			; [n+1] increment running stack pointer
+	[WDR] <-- -B [W1], LONG,		; negate remaining mask
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- [W1] ANDNOT [WDR], WORD,	; [n+2] reset rightmost bit of mask
+	CASE AT [POPR.MMGT.WAIT]		; case on value of mask from [n]
+
+POPR.MMGT.DONE:
+	;---------------------------------------; wbus.z = 1:
+	[WBUS] <-- [W0], LONG			; [4] test mask<3:0>
+
+	;---------------------------------------;
+	VA <-- [VA] - 000000[64.],		; [5] compensate for extra increment + 15 lw
+	[WDR] <-- MEM (VA), BYTE,		; check exact top of stack, fault on error
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [POPR.PROBE.OK]			; rejoin main flows
+
+;= END MISC

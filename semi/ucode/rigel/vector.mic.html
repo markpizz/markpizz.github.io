@@ -1,0 +1,895 @@
+.TOC	"VECTOR.MIC -- VAX Vector Instructions"
+.TOC	"Revision 3.3"
+
+;	Mike Uhler, Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1986, 1987, 1988, 1989 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    3 25-Apr-88 GMU	Checked for vector disabled condition on exit from
+;			MFVP.  This is necessary because SYNC and MSYNC must
+;			force a vector unit disabled fault on the current
+;			instruction rather than the next if a previous
+;			vector instruction encountered an exception.
+;    2 01-Apr-88 GMU	Corrected the order of the ALIGNLIST at VEC.SYNCHRONOUS.
+;			The error caused the current mode encoding to be
+;			reversed for exec and supervisor modes in memory
+;			reference instructions sent to the vector unit.
+; (3)1 24-Aug-87 GMU	Removed modify fault; pass 1 code freeze.
+;
+;    5 27-Jul-87 GMU	Updated to latest interface spec.
+;    4 27-Apr-87 GMU	Updated comments for MxVP per the latest revision
+;			of the vector spec.
+;    3 08-Apr-87 GMU	Added another cycle to the end of the synchronous
+;			instructions to guarantee that the state flag was
+;			set at the possible microtrap.
+;    2 30-Mar-87 GMU	Completed exception handler.
+; (2)1 31-Dec-86 GMU	Initial microcode.
+
+.bin
+;= BEGIN VECTOR
+.nobin
+
+
+;	This module implements the VAX vector instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	31FD	 MFVP regnum.rw, dst.wl						- - - -		vec
+;
+;	34FD	 VLDL cntrl.rw, base.ab, stride.rl				- - - -		vec
+;	36FD	 VLDQ cntrl.rw, base.ab, stride.rl				- - - -		vec
+;	9CFD	 VSTL cntrl.rw, base.ab, stride.rl				- - - -		vec
+;	9EFD	 VSTQ cntrl.rw, base.ab, stride.rl				- - - -		vec
+
+;	35FD	 VGATHL cntrl.rw, base.ab					- - - -		vec
+;	37FD	 VGATHQ cntrl.rw, base.ab					- - - -		vec
+;	9DFD	 VSCATL cntrl.rw, base.ab					- - - -		vec
+;	9FFD	 VSCATQ cntrl.rw, base.ab					- - - -		vec
+
+;	EDFD	 IOTA   cntrl.rw, scal.rl					- - - -		vec
+;	A9FD	 MTVP regnum.rw, src.rl						- - - -		vec
+;	85FD	 VSADDF cntrl.rw, scal.rl					- - - -		vec
+;	81FD	 VSADDL cntrl.rw, scal.rl					- - - -		vec
+;	CDFD	 VSBICL cntrl.rw, scal.rl					- - - -		vec
+;	C9FD	 VSBISL cntrl.rw, scal.rl					- - - -		vec
+;	C5FD	 VSCMPF cntrl.rw, scal.rl					- - - -		vec
+;	C1FD	 VSCMPL cntrl.rw, scal.rl					- - - -		vec
+;	ADFD	 VSDIVF cntrl.rw, scal.rl					- - - -		vec
+;	A5FD	 VSMULF cntrl.rw, scal.rl					- - - -		vec
+;	A1FD	 VSMULL cntrl.rw, scal.rl					- - - -		vec
+;	E5FD	 VSSLLL cntrl.rw, scal.rl					- - - -		vec
+;	E1FD	 VSSRLL cntrl.rw, scal.rl					- - - -		vec
+;	89FD	 VSSUBL cntrl.rw, scal.rl					- - - -		vec
+;	E9FD	 VSXORL cntrl.rw, scal.rl					- - - -		vec
+;	8DFD	 VSSUBF cntrl.rw, scal.rl					- - - -		vec
+
+;	87FD	 VSADDD cntrl.rw, scal.rq					- - - -		vec
+;	83FD	 VSADDG cntrl.rw, scal.rq					- - - -		vec
+;	C7FD	 VSCMPD cntrl.rw, scal.rq					- - - -		vec
+;	C3FD	 VSCMPG cntrl.rw, scal.rq					- - - -		vec
+;	AFFD	 VSDIVD cntrl.rw, scal.rq					- - - -		vec
+;	ABFD	 VSDIVG cntrl.rw, scal.rq					- - - -		vec
+;	EFFD	 VSMERGE cntrl.rw, scal.rq					- - - -		vec
+;	A7FD	 VSMULD cntrl.rw, scal.rq					- - - -		vec
+;	A3FD	 VSMULG cntrl.rw, scal.rq					- - - -		vec
+;	8FFD	 VSSUBD cntrl.rw, scal.rq					- - - -		vec
+;	8BFD	 VSSUBG cntrl.rw, scal.rq					- - - -		vec
+
+;	A8FD	 VSYNC regnum.rw						- - - -		vec
+;	86FD	 VVADDD	cntrl.rw						- - - -		vec
+;	84FD	 VVADDF	cntrl.rw						- - - -		vec
+;	82FD	 VVADDG	cntrl.rw						- - - -		vec
+;	80FD	 VVADDL	cntrl.rw						- - - -		vec
+;	CCFD	 VVBICL	cntrl.rw						- - - -		vec
+;	C8FD	 VVBISL	cntrl.rw						- - - -		vec
+;	C4FD	 VVCMPF	cntrl.rw						- - - -		vec
+;	C6FD	 VVCMPD	cntrl.rw						- - - -		vec
+;	C2FD	 VVCMPG	cntrl.rw						- - - -		vec
+;	C0FD	 VVCMPL	cntrl.rw						- - - -		vec
+;	ECFD	 VVCVT cntrl.rw							- - - -		vec
+;	ACFD	 VVDIVF	cntrl.rw						- - - -		vec
+;	AEFD	 VVDIVD	cntrl.rw						- - - -		vec
+;	AAFD	 VVDIVG	cntrl.rw						- - - -		vec
+;	EEFD	 VVMERGE cntrl.rw						- - - -		vec
+;	A4FD	 VVMULF	cntrl.rw						- - - -		vec
+;	A6FD	 VVMULD	cntrl.rw						- - - -		vec
+;	A2FD	 VVMULG	cntrl.rw						- - - -		vec
+;	A0FD	 VVMULL	cntrl.rw						- - - -		vec
+;	E4FD	 VVSLLL	cntrl.rw						- - - -		vec
+;	E0FD	 VVSRLL	cntrl.rw						- - - -		vec
+;	8CFD	 VVSUBF	cntrl.rw						- - - -		vec
+;	8EFD	 VVSUBD	cntrl.rw						- - - -		vec
+;	8AFD	 VVSUBG	cntrl.rw						- - - -		vec
+;	88FD	 VVSUBL	cntrl.rw						- - - -		vec
+;	E8FD	 VVXORL	cntrl.rw						- - - -		vec
+
+;	Overview Of Vector Instruction Execution
+;	-------- -- ------ ----------- ---------
+
+;	VAX vector instructions are executed with the cooperation of the scalar CPU and the
+;	optional vector unit.  The scalar CPU is responsible for parsing the vector instruction
+;	specifiers, and sending operand and control information to the vector unit.  The vector
+;	unit then executes the vector instruction, including any memory references necessary
+;	to load or store vector data.
+
+;	There are two bits of state on the microtest bus (VECTOR.STATE decode) which control
+;	the operation of vector instructions.  One bit indicates that the vector unit is
+;	present (i.e., physically there), and the other indicates that the vector unit is
+;	enabled (i.e., not disabled due to an exception or error).  The vector-unit-present bit
+;	is cleared by the microcode on powerup, and set by the console if the vector unit
+;	is present.  The vector-unit-enabled bit is driven to the appropriate state by the
+;	vector unit.
+
+;	Vector instruction specifier parsing is done in the same manner as for all instructions,
+;	with the operands left in the MD file.  There are 6 entry points to the vector instruction
+;	execution flows, which end up merging into one common flow.  All entry points first check
+;	the vector-unit-present state bit.  If the vector unit is not present, a reserved instruction
+;	fault is initiated.  If the vector unit is present but not enabled, a vector unit disabled
+;	fault is initiated.  The exception to this is MxPR reads and writes of vector unit registers,
+;	which ignore the check for vector unit enabled.
+
+;	If the vector unit is both present and enabled, the microcode transfers operand and control
+;	information to the vector unit using EPR writes.  Operands, if any, are transferred to the
+;	vector unit in the opposite order that they appear in the instruction stream.  That is,
+;	the last operand is transferred first, followed by the next-to-last, etc.  Doing so allows
+;	the entry points for longer instructions to fall into the entry points for shorter instructions.
+
+;	When all operands have been transferred, the microcode packs the control word operand, the
+;	instruction opcode, and potentially the current processor mode into one longword and
+;	transfers it to the vector unit.  The transfer of this longword validates all previous
+;	transfers and allows the vector unit to begin execution of the vector instruction.
+;	For memory reference instructions, the microcode includes an encoding of PSL<CUR_MOD>
+;	in this transfer so that the vector unit can do the appropriate protection checks.  The
+;	encoding used is the logical complement of PSL<25:24>, as follows:
+
+;		PSL<25:24>     Mode	 Encoding
+;		----------  ----------  ----------
+;		    00      Kernel	    11
+;		    01      Executive       10
+;		    10      Supervisor      01
+;		    11      User            00
+
+;	The vector unit executes most vector instruction in parallel with the scalar CPU execution
+;	of subsequent instructions.  However, certain vector instructions (notably memory reference,
+;	MFVP, and MFPR) require that the scalar CPU synchronize with the vector unit.  To do this,
+;	the microcode reads a vector unit register with an EPR read after transferring the control
+;	word/opcode to the vector unit.  This causes the scalar CPU to stall until the vector unit
+;	responds.
+
+;	For memory reference instructions, the vector unit does not respond to the EPR read until
+;	all memory accesses have passed the memory management checks through the vector TB.
+;	If the memory management checks all pass, the vector unit terminates the EPR read with
+;	RDY_L, which causes the microcode to go on to the next instruction.  In this instance, the
+;	returned data is ignored.
+
+;	If a memory reference instruction fails a memory management check, the vector unit terminates
+;	the EPR read with ERR_L, and supplies the following information on D_BUS<31:0>:
+
+;	<31:9>	=	Virtual page number of the faulting page.
+;
+;	<8:7>	=	Type of fault:
+;
+;			00	=	Modify fault.
+;			01	=	Translation not valid fault.
+;			10	=	Vector unit error (causes machine check).
+;			11	=	Access control violation fault.
+;
+;	<6:0>	=	Memory management exception parameters (bits <6:0> of the parameter word
+;			pushed on top of the stack for a memory management fault).
+;
+;	The microcode decodes bits <8:7>, and initiates the appropriate exception, using the
+;	rest of the data as parameters.
+
+;	Vector unit registers may be read with the MFPR instruction (privileged registers), or the
+;	MFVP instruction (non-privileged registers).  For these instructions, the vector unit returns
+;	the requested data on D_bus<31:0>, and terminates the EPR read with RDY_L.  The EPR
+;	read should not be terminated with ERR_L, unless D_BUS<8:7> are forced to 10 (binary) to
+;	report a vector unit error as a machine check.
+
+;	The operand and control information transmitted by each of the six microcode entry points is shown
+;	in the following diagrams.
+
+
+;	VEC.VS.Q.. (vector - quadword scalar operate instructions):
+
+;				D_bus <31:0>					   A_bus <10:3>		CMD <3:0>   Transfer
+;	-----------------------------------------------------------------	------------------	---------   --------
+
+;        3 3 3 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+;        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                        operand <63:32>                        |	B (VEPR.OPERAND.2)	EPR write	1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                        operand <31:00>                        |	A (VEPR.OPERAND.1)	EPR write	2
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|    opcode     |               |          control word         |	9 (VEPR.OPCODE)		EPR write	3
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+;	VEC.VS.L.. (vector - longword scalar operate instructions):
+;
+;				D_bus <31:0>					   A_bus <10:3>		CMD <3:0>   Transfer
+;	-----------------------------------------------------------------	------------------	---------   --------
+
+;        3 3 3 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+;        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                        operand <31:00>                        |	A (VEPR.OPERAND.1)	EPR write	1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|    opcode     |               |          control word         |	9 (VEPR.OPCODE)		EPR write	2
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	VEC.LDST.. (vector load/store instructions):
+;
+
+;				D_bus <31:0>					   A_bus <10:3>		CMD <3:0>   Transfer
+;	-----------------------------------------------------------------	------------------	---------   --------
+
+;        3 3 3 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+;        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                            stride                             |	B (VEPR.OPERAND.2)	EPR write	1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                         base address                          |	A (VEPR.OPERAND.1)	EPR write	2
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|    opcode     |   |mod|       |          control word         |	9 (VEPR.OPCODE)		EPR write	3
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|         faulting virtual page number        |flt|  parameters |       9 (VEPR.MM.STATUS)	EPR read	4
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+;	VEC.GASC.. (vector scatter/gather instructions):
+;
+
+;				D_bus <31:0>					   A_bus <10:3>		CMD <3:0>   Transfer
+;	-----------------------------------------------------------------	------------------	---------   --------
+
+;        3 3 3 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+;        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                         base address                          |	A (VEPR.OPERAND.1)	EPR write	1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|    opcode     |   |mod|       |          control word         |	9 (VEPR.OPCODE)		EPR write	2
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|         faulting virtual page number        |flt|  parameters |       9 (VEPR.MM.STATUS)	EPR read	3
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	VEC.VV.. (vector - vector operate instructions)
+;
+
+;				D_bus <31:0>					   A_bus <10:3>		CMD <3:0>   Transfer
+;	-----------------------------------------------------------------	------------------	---------   --------
+
+;        3 3 3 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+;        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|    opcode     |               |          control word         |	9 (VEPR.OPCODE)		EPR write	1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+;	VEC.MFVP.. (read vector processor register).  MFPR also uses this protocol.
+;
+
+;				D_bus <31:0>					   A_bus <10:3>		CMD <3:0>   Transfer
+;	-----------------------------------------------------------------	------------------	---------   --------
+
+;        3 3 3 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+;        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|    opcode     |               |        register number        |	9 (VEPR.OPCODE)		EPR write	1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+;	|                         register data                         |	8 (VEPR.REG.DATA)	EPR read	2
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+.TOC	"	Vector - Scalar Operate Instructions"
+
+
+;	These instructions perform an operation with a scalar and a vector.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VSADDG		83FD	vector - scalar G-floating add		 2	rr/wq	--	VEC.VS.Q..	--
+;	VSADDD		87FD	vector - scalar D-floating add		 2	rr/wq	--	VEC.VS.Q..	--
+;	VSSUBG		8BFD	vector - scalar G-floating subtract	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSSUBD		8FFD	vector - scalar D-floating subtract	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSMULG		A3FD	vector - scalar G-floating multiply	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSMULD		A7FD	vector - scalar D-floating multiply	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSDIVG		ABFD	vector - scalar G-floating divide	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSDIVD		AFFD	vector - scalar D-floating divide	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSCMPG		C3FD	vector - scalar G-floating compare	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSCMPD		C7FD	vector - scalar D-floating compare	 2	rr/wq	--	VEC.VS.Q..	--
+;	VSMERGE		EFFD	vector - scalar merge			 2	rr/wq	--	VEC.VS.Q..	--
+;
+;	VSADDL		81FD	vector - scalar longword add		 2	rr/wl	--	VEC.VS.L..	--
+;	VSADDF		85FD	vector - scalar F-floating add		 2	rr/wl	--	VEC.VS.L..	--
+;	VSSUBL		89FD	vector - scalar longword subtract	 2	rr/wl	--	VEC.VS.L..	--
+;	VSSUBF		8DFD	vector - scalar F-floating subtract	 2	rr/wl	--	VEC.VS.L..	--
+;	VSMULL		A1FD	vector - scalar longword multiply	 2	rr/wl	--	VEC.VS.L..	--
+;	VSMULF		A5FD	vector - scalar F-floating multiply	 2	rr/wl	--	VEC.VS.L..	--
+;	MTVP		A9FD	vector register <-- src.rl		 2	rr/wl	--	VEC.VS.L..	--
+;	VSDIVF		ADFD	vector - scalar F-floating divide	 2	rr/wl	--	VEC.VS.L..	--
+;	VSCMPL		C1FD	vector - scalar longword compare	 2	rr/wl	--	VEC.VS.L..	--
+;	VSCMPF		C5FD	vector - scalar F-floating compare	 2	rr/wl	--	VEC.VS.L..	--
+;	VSBISL		C9FD	vector - scalar longword bit set	 2	rr/wl	--	VEC.VS.L..	--
+;	VSBICL		CDFD	vector - scalar longword bit clear	 2	rr/wl	--	VEC.VS.L..	--
+;	VSSRLL		E1FD	vector - scalar longword shift right	 2	rr/wl	--	VEC.VS.L..	--
+;	VSSLLL		E5FD	vector - scalar longword shift left	 2	rr/wl	--	VEC.VS.L..	--
+;	VSXORL		E9FD	vector - scalar longword exclusive or	 2	rr/wl	--	VEC.VS.L..	--
+;	IOTA		EDFD	generate compressed iota vector		 2	rr/wl	--	VEC.VS.L..	--
+;
+;	Entry conditions from specifier flows:
+;		MD.T0	=	first (control word) operand
+;		MD.T2 (MD.T3'MD.T2) = second (scalar) operand
+;
+;	Exit conditions:
+;		Vector operation started.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- N
+;		V <-- V				[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+
+.bin
+
+VEC.VS.Q..:
+	;********** Hardware Dispatch **********;
+	[VA] <-- 000000[VEPR.OPERAND.2],	; load EPR address for operand 2
+	CASE [VECTOR.STATE] AT [VEC.VS.Q.FAULT], ; case on vector unit present
+		sim va <-- epr[vop2]
+
+;= ALIGNLIST 110*	(VEC.VS.Q.FAULT,	VEC.VS.Q.CONTINUE)
+
+VEC.VS.Q.FAULT:
+	;---------------------------------------; vector.state<0> = 0:
+	RESERVED INSTRUCTION FAULT		; no vector unit, fault
+
+VEC.VS.Q.CONTINUE:
+	;---------------------------------------; vector.state<0> = 1:
+	MTPR (VA)&, [WBUS] <-- [MD.T3], LONG,	; send lw of qw to vector unit
+	DISABLE IB PREFETCH,			; no prefetch around EPR write
+	GOTO [VEC.VS.L..]			; fall into lw flow
+
+VEC.VS.L..:
+	;********** Hardware Dispatch **********;
+	[VA] <-- 000000[VEPR.OPERAND.1], 	; load EPR address for operand 1
+	CASE [VECTOR.STATE] AT [VEC.OPRND1.FAULT], ; case on vector unit present
+		sim va <-- epr[vop1]
+
+.nobin
+.TOC	"	Vector Load/Store Instructions"
+
+
+;	These instruction load a vector register from memory or store a vector vegister to memory.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VLDL		34FD	load longword vector into register	 3	rar/wbl	--	VEC.LDST..	--
+;	VLDQ		36FD	load quadword vector into register	 3	rar/wbl	--	VEC.LDST..	--
+;	VSTL		9CFD	store longword vector from register	 3	rar/wbl	--	VEC.LDST..	--
+;	VSTQ		9EFD	store quadword vector from register	 3	rar/wbl	--	VEC.LDST..	--
+;
+;
+;	Entry conditions from specifier flows:
+;		MD.T0	=	first (control word) operand
+;		MD.T2	=	second (base) operand
+;		MD.T4	=	third (stride) operand
+;
+;	Exit conditions:
+;		Vector operation complete.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- N
+;		V <-- V				[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+
+.bin
+
+VEC.LDST..:
+	;********** Hardware Dispatch **********;
+	[VA] <-- 000000[VEPR.OPERAND.2],	; load EPR address for operand 2
+	CASE [VECTOR.STATE] AT [VEC.LDST.FAULT],  ; case on vector unit present
+		sim va <-- epr[vop2]
+
+;= ALIGNLIST 110*	(VEC.LDST.FAULT,	VEC.LDST.CONTINUE)
+
+VEC.LDST.FAULT:
+	;---------------------------------------; vector.state<0> = 0:
+	RESERVED INSTRUCTION FAULT		; no vector unit, fault
+
+VEC.LDST.CONTINUE:
+	;---------------------------------------; vector.state<0> = 1:
+	MTPR (VA)&, [WBUS] <-- [MD.T4], LONG,	; send stride to vector unit
+	DISABLE IB PREFETCH,			; no prefetch around EPR write
+	GOTO [VEC.GASC..]			; fall into scatter/gather flow
+
+.nobin
+.TOC	"	Vector Scatter/Gather Instructions"
+
+
+;	These instruction scatter a vector register to memory or gather a vector register from memory.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VGATHL		35FD	gather longword vector into register	 2	ra/wb	--	VEC.GASC..	--
+;	VGATHQ		37FD	gather quadword vector into register	 2	ra/wb	--	VEC.GASC..	--
+;	VSCATL		9DFD	scatter longword vector into register	 2	ra/wb	--	VEC.GASC..	--
+;	VSCATQ		9FFD	scatter quadword vector into register	 2	ra/wb	--	VEC.GASC..	--
+
+;
+;	Entry conditions from specifier flows:
+;		MD.T0	=	first (control word) operand
+;		MD.T2	=	second (base) operand
+;
+;	Exit conditions:
+;		Vector operation completed.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- N
+;		V <-- V				[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+
+.bin
+
+VEC.GASC..:
+	;********** Hardware Dispatch **********;
+	[VA] <-- 000000[VEPR.OPERAND.1],	; load EPR address for operand 1
+	STATE0 <-- 1,				; flag synchronous operation
+	CASE [VECTOR.STATE] AT [VEC.OPRND1.FAULT], ; case on vector unit present
+		sim va <-- epr[vop1]
+
+;	Common entry point to send the operand in MD.T2 to the
+;	vector unit.
+
+;= ALIGNLIST 110*	(VEC.OPRND1.FAULT,	VEC.SEND.OPRND)
+
+VEC.OPRND1.FAULT:
+	;---------------------------------------; vector.state<0> = 0:
+	RESERVED INSTRUCTION FAULT		; no vector unit, fault
+
+VEC.SEND.OPRND:
+	;---------------------------------------; vector.state<0> = 1:
+	MTPR (VA)&, [WBUS] <-- [MD.T2], LONG,	; send first operand to vector unit
+	DISABLE IB PREFETCH,			; no prefetch around EPR write
+	GOTO [VEC.VV..]				; fall into vector - vector flow
+
+.nobin
+.TOC	"	MFVP"
+
+
+;	This instruction reads a vector register and stores it to GPR or memory.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MFVP		31FD	dst.wl <-- vector register		 2	rw/wl	--	VEC.MFVP..	--
+
+;
+;	Entry conditions from specifier flows:
+;		MD.T0	=	first (vector register number) operand
+;		MD.T2	=	address of second (destination) operand, unless register mode
+;		RN	=	register number of destination, if register mode
+;		DL	=	data type of destination operand (longword)
+;
+;	Exit conditions:
+;		Vector register stored in the specified memory location or GPR.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- N
+;		V <-- V				[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+
+.bin
+
+
+VEC.MFVP..:
+	;********** Hardware Dispatch **********;
+	STATE0 <-- 1,				; flag synchronous operation
+	STATE2 <-- 1,				; and register read
+	GOTO [VEC.VV..]				; fall into vector-vector flow
+
+.nobin
+.TOC	"	Vector - Vector Operate Instructions"
+
+
+;	These instructions perform an operation with two vectors.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VVADDL		80FD	vector - vector longword add		 1	 r/w	--	VEC.VV..	--
+;	VVADDG		82FD	vector - vector G-floating add		 1	 r/w	--	VEC.VV..	--
+;	VVADDF		84FD	vector - vector F-floating add		 1	 r/w	--	VEC.VV..	--
+;	VVADDD		86FD	vector - vector D-floating add		 1	 r/w	--	VEC.VV..	--
+;	VVSUBL		88FD	vector - vector longword subtract	 1	 r/w	--	VEC.VV..	--
+;	VVSUBG		8AFD	vector - vector G-floating subtract	 1	 r/w	--	VEC.VV..	--
+;	VVSUBF		8CFD	vector - vector F-floating subtract	 1	 r/w	--	VEC.VV..	--
+;	VVSUBD		8EFD	vector - vector D-floating subtract	 1	 r/w	--	VEC.VV..	--
+
+;	VVMULL		A0FD	vector - vector longword multiply	 1	 r/w	--	VEC.VV..	--
+;	VVMULG		A2FD	vector - vector G-floating multiply	 1	 r/w	--	VEC.VV..	--
+;	VVMULF		A4FD	vector - vector F-floating multiply	 1	 r/w	--	VEC.VV..	--
+;	VVMULD		A6FD	vector - vector D-floating multiply	 1	 r/w	--	VEC.VV..	--
+;	VSYNC		A8FD	synchronize vector memory access	 1	 r/w	--	VEC.VV..	--
+;	VVDIVG		AAFD	vector - vector G-floating divide	 1	 r/w	--	VEC.VV..	--
+;	VVDIVF		ACFD	vector - vector F-floating divide	 1	 r/w	--	VEC.VV..	--
+;	VVDIVD		AEFD	vector - vector D-floating divide	 1	 r/w	--	VEC.VV..	--
+
+;	VVCMPL		C0FD	vector - vector longword compare	 1	 r/w	--	VEC.VV..	--
+;	VVCMPG		C2FD	vector - vector G-floating compare	 1	 r/w	--	VEC.VV..	--
+;	VVCMPF		C4FD	vector - vector F-floating compare	 1	 r/w	--	VEC.VV..	--
+;	VVCMPD		C6FD	vector - vector D-floating compare	 1	 r/w	--	VEC.VV..	--
+;	VVBISL		C8FD	vector - vector longword bit set	 1	 r/w	--	VEC.VV..	--
+;	VVBICL		CCFD	vector - vector longword bit clear	 1	 r/w	--	VEC.VV..	--
+
+;	VVSRLL		E0FD	vector - vector longword shift right	 1	 r/w	--	VEC.VV..	--
+;	VVSLLL		E4FD	vector - vector longword shift left	 1	 r/w	--	VEC.VV..	--
+;	VVXORL		E8FD	vector - vector longword exclusive OR	 1	 r/w	--	VEC.VV..	--
+;	VVCVT		ECFD	vector convert				 1	 r/w	--	VEC.VV..	--
+;	VVMERGE		EEFD	vector - vector merge			 1	 r/w	--	VEC.VV..	--
+
+;
+;	Entry conditions from specifier flows:
+;		MD.T0	=	first (control word) operand
+;
+;	Exit conditions:
+;		Vector operation started.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- N
+;		V <-- V				[Integer overflow trap cannot occur.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+
+.bin
+
+VEC.VV..:
+	;********** Hardware Dispatch **********;
+	[VA] <-- 000000[VEPR.OPCODE],		; load EPR address for opcode
+	CASE [VECTOR.STATE] AT [VEC.NOT.ENABLED.NOT.PRESENT], ; case on vector unit
+		sim va <-- epr[vopc]
+ 						; enable/present
+.TOC	"	Vector Instruction Execution"
+
+
+;	Vector instruction execution, continued.
+;	Vector unit is disabled or not present.  Initiate appropriate fault.
+
+;	At this point,
+;		MD.T0<15:0> =	control word or MxVP/MxPR register number
+;		MD.T2	=	destination address if MFVP memory mode
+;		VA	=	EPR address for control word and opcode
+;		STATE<0> =	1 if synchronous operation is required
+;		STATE<1> =	1 if MFPR, 0 if MFVP
+;		STATE<2> =	1 if register read (MFVP, MFPR)
+
+;= ALIGNLIST 100*	(VEC.NOT.ENABLED.NOT.PRESENT, VEC.NOT.ENABLED.PRESENT,
+;=			 VEC.ENABLED.NOT.PRESENT, VEC.ENABLED.PRESENT)
+
+VEC.NOT.ENABLED.NOT.PRESENT:
+	;---------------------------------------; vector.state = 00:
+	RESERVED INSTRUCTION FAULT		; vector unit not present,
+						; generate reserved instruction fault
+
+VEC.NOT.ENABLED.PRESENT:
+	;---------------------------------------; vector.state = 01:
+	SYNCHRONIZE BIU,			; wait for any outstanding MD reads
+	GOTO [VEC.DISABLED.FAULT]
+
+;	Here from above and from MFVP exit if a vector disabled condition
+;	exits.
+
+VEC.DISABLED.FAULT:
+	;---------------------------------------; vector.state = 0x:
+	[MD.T1] <-- 000000[SCB.VECT.DISABLED],	; offset into SCB for vector unit
+						; disabled
+	DISABLE IB PREFETCH,			; turn off prefetching
+	GOTO [IE.FAULT.COMMON]			; go join common code
+
+VEC.ENABLED.NOT.PRESENT:
+	;---------------------------------------; vector.state = 10:
+	RESERVED INSTRUCTION FAULT		; vector unit not present,
+						; generate reserved instruction fault
+
+;	Vector instruction execution, continued.
+;	Vector unit is both present and enabled, send opcode and control word.
+;	Enter here from MxPR flows for registers in the range [90:9F].
+
+;	At this point,
+;		MD.T0<15:0> =	control word or MxVP/MxPR register number
+;		MD.T2	=	destination address if MFVP memory mode
+;		VA	=	EPR address for control word and opcode
+;		STATE<0> =	1 if synchronous operation is required
+;		STATE<1> =	1 if MFPR, 0 if MFVP
+;		STATE<2> =	1 if register read (MFVP, MFPR)
+
+VEC.ENABLED.PRESENT:
+	;---------------------------------------; vector.state = 11:
+	[MD.T1] <-- [AT.DL.OPCODE.RN] LSH [16.], ; position opcode to <31:24>
+	LONG,
+	CASE [STATE2-0] AT [VEC.ASYNCHRONOUS]	; case on synchronous operation
+
+;= ALIGNLIST 110*	(VEC.ASYNCHRONOUS,	VEC.SYNCHRONOUS)
+
+;	Here to complete an asynchronous vector instruction.  Such instructions
+;	execute in parallel with instruction execution in the scalar CPU and
+;	do not require any additional synchronization.  The instruction
+;	is completed by sending the control word and opcode to the vector
+;	unit, and then decoding the next instruction.
+
+VEC.ASYNCHRONOUS:
+	;---------------------------------------; state<0> = 0 :
+	MTPR (VA)&, [WBUS] <-- [MD.T1] OR [MD.T0], ; send opcode+control word to
+	LONG,					; vector unit
+	ENABLE IB PREFETCH,			; make sure prefetch is back on
+	LAST CYCLE				; decode next instruction
+
+;	Vector instruction execution, continued.
+;	Complete execution of synchronous vector instruction.
+
+;	For memory reference instructions, the current processor
+;	mode must be included in the control word/opcode transfer so
+;	that the vector unit can do the appropriate memory management
+;	checks.  The complement of PSL<CUR_MOD> is ORed into the
+;	remaining bits in the opcode word before the transfer is
+;	made (using the complement optimizes the normal case in
+;	which the vector unit is in user mode).
+
+;	At this point,
+;		MD.T0<15:0> =	control word or MxVP/MxPR register number
+;		MD.T1<31:24> =	instruction opcode
+;		MD.T1<21:20> =	0
+;		MD.T2	=	destination address if MFVP memory mode
+;		VA	=	EPR address for control word and opcode
+;		STATE<0> =	1
+;		STATE<1> =	1 if MFPR, 0 if MFVP
+;		STATE<2> =	1 if register read (MFVP, MFPR)
+
+VEC.SYNCHRONOUS:
+	;---------------------------------------; state<0> = 1:
+	DL <-- QUAD,				; set DL for KDL subtract later
+	CASE [PSL26-24] AT [VEC.SYNCHRONOUS.KERNEL] ; case on psl<cur_mod>
+
+;= ALIGNLIST 100*	(VEC.SYNCHRONOUS.KERNEL, VEC.SYNCHRONOUS.EXEC,
+;=			 VEC.SYNCHRONOUS.SUPER,	 VEC.SYNCHRONOUS.USER)
+
+VEC.SYNCHRONOUS.KERNEL:
+	;---------------------------------------; psl<25:24> = 00:
+	[MD.T1] <-- [MD.T1] OR 00[30]0000, LONG, ; kernel encoding = 11
+	GOTO [VEC.SYNCHRONOUS.USER]		; re-join common code
+
+VEC.SYNCHRONOUS.EXEC:
+	;---------------------------------------; psl<25:24> = 01:
+	[MD.T1] <-- [MD.T1] OR 00[20]0000, LONG, ; exec encoding = 10
+	GOTO [VEC.SYNCHRONOUS.USER]		; re-join common code
+
+VEC.SYNCHRONOUS.SUPER:
+	;---------------------------------------; psl<25:24> = 10:
+	[MD.T1] <-- [MD.T1] OR 00[10]0000, LONG, ; supervisor encoding = 01
+	GOTO [VEC.SYNCHRONOUS.USER]		; re-join common code
+
+VEC.SYNCHRONOUS.USER:
+	;---------------------------------------;
+	MTPR (VA)&, [WBUS] <-- [MD.T1] OR [MD.T0], ; send opcode+cur_mod+control word
+	LONG,					; to vector unit
+	DISABLE IB PREFETCH,			; no prefetch around EPR write
+	CASE [STATE2-0] AT [VEC.MEM.REF]	; case on MFVP vs other instructions
+
+;= ALIGNLIST 011*	(VEC.MEM.REF,		VEC.MFVP.MFPR)
+
+;	Vector instruction execution, continued.
+;	Complete execution of memory reference instructions.
+
+;	The microcode synchronizes with the execution of the
+;	memory reference instruction by issuing an EPR read
+;	to the vector unit.  If memory management checks succeed,
+;	the vector unit terminates the EPR read with RDY_L, and
+;	the microcode ignores the data and decodes the next instruction.
+;	If a memory management check fails, the vector unit terminates
+;	the EPR read with ERR_L and returns status information, which
+;	the microcode decodes to initiate the approriate exception.
+
+;	Note that VEPR.MM.STATUS = VEPR.OPCODE.
+
+;	At this point,
+;		VA	=	VEPR.OPCODE = VEPR.MM.STATUS
+;		STATE<0> =	1
+;		STATE<1> = 	0
+;		STATE<2> =	0
+
+VEC.MEM.REF:
+	;---------------------------------------; state<2> = 0:
+	[MD.T0] <-- MFPR ([VA]), LONG,		; read status back from vector unit
+ 						; >> potential EPR read microtrap
+						; >> no decode next cycle to insure
+						; >> trap handler sees state flags
+		sim addr [vec.rslt] [vmmr]
+
+;	This microinstruction can't include a LAST CYCLE because the
+;	timing of the microtrap would allow first cycle to clear the
+;	state flags.  This microinstruction is also used to exit from
+;	an MTPR to a vector register, when the vector unit isn't present.
+;	No flush must be done in this path to guarantee correct operation
+;	of the console during a write to MAPEN.
+
+MTPR.VECTOR.NOT.PRESENT:
+	;---------------------------------------; vector.state<0> = 0:
+	ACCESS [MD.T0],				; wait for operation to complete
+	ENABLE IB PREFETCH,			; make sure prefetch is back on
+	GOTO [LAST.CYCLE]			; go decode next instruction
+
+;	Vector instruction execution, continued.
+;	Complete execution of the MFVP or MFPR instructions.
+
+;	To complete the MFVP/MFPR, the vector register data is
+;	read from the vector unit.  Rather than special-case
+;	MSYNC, the write buffer/invalidate queue synchronization
+;	that is required of that instruction is done for all
+;	MFVP/MFPR instructions.
+
+;	Note that VEPR.REG.DATA = VEPR.OPCODE - 8.
+
+;	At this point,
+;		MD.T2	=	destination address if MFVP/MFPR memory mode
+;		VA	=	VA.OPCODE = VA.REG.DATA + 8
+;		DL	=	quad (--> KDL = 8)
+;		STATE<0> =	1
+;		STATE<1> =	1 if MFPR, 0 if MFVP
+;		STATE<2> =	1
+
+VEC.MFVP.MFPR:
+	;---------------------------------------; state<2> = 1:
+	[MD.T0] <-- MFPR ([VA] - [KDL]), LONG,	; read result back from vector unit
+ 						; >> potential EPR read microtrap
+						; >> no decode next cycle to insure
+						; >> trap handler sees state flags
+	DL <-- LONG,				; reset DL for store
+	CASE [STATE2-0] AT [VEC.MFVP.EXIT],	; case on MFVP vs. MFPR
+		sim addr [vec.rslt] [vreg]
+
+;= ALIGNLIST 101*	(VEC.MFVP.EXIT,		VEC.MFPR.EXIT)
+
+VEC.MFVP.EXIT:
+	;---------------------------------------; state<1> = 0:
+	ACCESS [MD.T0],				; wait for status to come back
+	FLUSH WRITE BUFFERS			; when it does, flush write buffers
+
+	;---------------------------------------;
+	CASE [VECTOR.STATE] AT [VEC.DISABLED.FAULT] ; make final check for vector disabled condition
+
+;= ALIGNLIST 101*	(VEC.DISABLED.FAULT,	VEC.MFVP.MFPR.EXIT)
+
+VEC.MFPR.EXIT:
+	;---------------------------------------; state<1> = 1:
+	[WBUS] <-- [MD.T0], LONG,		; wait for status to come back
+	SET PSL CC,				; set psl CCs, map is iiip
+	FLUSH WRITE BUFFERS,			; when it does, flush write buffers
+	GOTO [VEC.MFVP.MFPR.EXIT]		; re-join common code
+
+;	Vector instruction execution, continued.
+;	Complete execution of the MFVP or MFPR instructions.
+
+;	To complete MFVP/MFPR, the destination address must be
+;	restored from MD.T2 and a second FLUSH WRITE BUFFERS
+;	must be done to force a stall until the first is
+;	complete.  Note that there must be one cycle between
+;	the first and second write buffer flushes to guarantee
+;	the desired stall.
+
+;	At this point,
+;		MD.T2	=	destination address if MFVP/MFPR memory mode
+;		DL	=	long
+
+VEC.MFVP.MFPR.EXIT:
+	;---------------------------------------; vector.state = 1x:
+	NOP					; insert nop to guarantee
+						; desired stall
+
+	;---------------------------------------;
+	[VA] <-- [MD.T2], LONG,			; reload potential destination addr
+	ENABLE IB PREFETCH,			; make sure prefetch is back on
+	FLUSH WRITE BUFFERS,			; stall until first flush completes
+	CASE [INT.RMODE] AT [WRITE.MEM],	; store result and exit
+		sim va <-- addr,
+		sim addr [ea] [2]
+
+.TOC	"	Vector Exception Processing"
+
+
+;	If the vector unit detects a memory management exception during
+;	the execution of a synchronous instruction, it terminates the
+;	EPR read transaction with ERR_L.  This causes a BIU error microtrap
+;	to IE.BUSERR.READ.EPR.., where state<0> is checked.  If state<0> is
+;	1, the EPR read was done by the vector code above, and the exception
+;	handler dispatches here.
+
+;	Note that an ABORT TRAP has not yet been done, but
+
+;	At this point,
+;		MD.T0	=	error status returned by vector unit
+;		SC	=	copy of MD.T0, loaded last cycle
+
+VECTOR.EPR.READ.ERROR:
+	;---------------------------------------; state<0> = 1:
+	TB INVALIDATE SINGLE&[VA] <-- [MD.T0],	; invalidate TB entry for page,
+						; load address into VA for fault
+						; >> VA write, no read for two cycles
+	CALL [WAIT.ONE.CYCLE]			; wait for sc load before case
+
+	;---------------------------------------;
+	[MMGT2] <-- [MD.T0] AND 000000[7F],	; load status into MMGT2 for
+						; memmgt fault routine
+						; >> mmgt2 write, no read for two cycles
+	CASE [SC8-6] AT [VECTOR.ERROR.1] 	; case on exception type
+
+;= ALIGNLIST 001*	(VECTOR.ERROR.1,	IE.TNV,
+;=			 VECTOR.ERROR.2,	IE.ACV)
+
+VECTOR.ERROR.1:
+	;---------------------------------------; sc<8:7> = 00:
+	MACHINE CHECK [MCHK.VECTOR.STATUS]	; illegal status
+
+VECTOR.ERROR.2:
+	;---------------------------------------; sc<8:7> = 10:
+	MACHINE CHECK [MCHK.VECTOR.STATUS]	; illegal status
+
+;= END VECTOR

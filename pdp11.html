@@ -1,0 +1,256 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>PDP-11 Simulator Configuration</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  PDP-11 Simulator Configuration
+</H1>
+<P>
+The PDP-11 was the most popular 16-bit minicomputer. Introduced by DEC in
+1970, it remained in active production until 1996. The PDP-11 family included
+many processor designs (photographs courtesy of Digital Equipment Corporation):
+<UL>
+  <LI>
+    1970: <A HREF="photos/pdp11_20.jpg">PDP-11/20</A> - first design (also PDP-11/15)
+  <LI>
+    1972: <A HREF="photos/pdp11_45.jpg">PDP-11/45</A> - first design with memory
+    extension, instruction and data space, floating point (with fast bipolar
+    memory, PDP-11/55)
+  <LI>
+    1972: <A HREF="photos/pdp11_05.jpg">PDP-11/05</A> (also PDP-11/10)
+  <LI>
+    1972: <A HREF="photos/pdp11_40.jpg">PDP-11/40</A> (also PDP-11/35)
+  <LI>
+    1975: PDP-11/04 - first single board design
+  <LI>
+    1975: <A HREF="photos/pdp11_34.jpg">PDP-11/34</A>
+  <LI>
+    1975: <A HREF="photos/pdp11_70.jpg">PDP-11/70</A> - first design using cache
+    memory
+  <LI>
+    1975: <A HREF="photos/lsi11.jpg">LSI-11</A> - first LSI design (also PDP-11/03,
+    PDT150)
+  <LI>
+    1977: <A HREF="photos/pdp11_60.jpg">PDP-11/60</A>
+  <LI>
+    1979: <A HREF="photos/lsi11_23.jpg">LSI-11/23</A> (F11)- second LSI design,
+    first with floating point (also <A HREF="photos/pdp11_23.jpg">PDP-11/23</A>,
+    <A HREF="photos/pdp11_24.jpg">PDP-11/24</A>, Pro 350)
+  <LI>
+    1981: <A HREF="photos/pdp11_44.jpg">PDP-11/44 </A>- last TTL design
+  <LI>
+    1983: LSI-11/73 (J-11) - first CMOS design, last design (also PDP-11/53,
+    PDP-11/73, PDP-11/74, <A HREF="photos/pdp11_83.jpg">PDP-11/83</A>, PDP-11/84,
+    PDP-11/93, <A HREF="photos/pdp11_94.jpg">PDP-11/94</A>, Pro 380)
+</UL>
+<P>
+<TABLE BORDER="2" CELLPADDING="2">
+  <TR>
+    <TD><B>Option</B></TD>
+    <TD><B>Description</B></TD>
+    <TD><B>Capacity</B></TD>
+  </TR>
+  <TR>
+    <TD>CPU and memory</TD>
+    <TD>19 models supported (Unibus and Qbus)</TD>
+    <TD>16KB - 4MB</TD>
+  </TR>
+  <TR>
+    <TD>CPU options</TD>
+    <TD>Memory management unit (MMU)</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>Floating instruction set (FIS)</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>Floating point processor (FPP)</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>Commercial instruction set (CIS)</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>KE11-A extended arithmetic element (EAE, 11/20 only)</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>KG11-A communications arithmetic option</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Console</TD>
+    <TD>DL11 full duplex asynchronous interface</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Paper tape</TD>
+    <TD>PC11 paper tape reader and punch</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Real time clock</TD>
+    <TD>KW11L real-time clock</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>KW11P programmable real-time clock</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Card reader</TD>
+    <TD>CR11/CD11 card reader</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Line printer</TD>
+    <TD>LP11 line printer</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Asynchronous interfaces</TD>
+    <TD>DC11 asynchronous interface</TD>
+    <TD>1-16 lines</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>KL11/DL11 asynchronous interface</TD>
+    <TD>1-16 lines</TD>
+  </TR>
+  <TR>
+    <TD>Terminal multiplexor</TD>
+    <TD>DZ11 multiplexor</TD>
+    <TD>8-32 lines</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>DHQ11 multiplexor</TD>
+    <TD>8-32 lines</TD>
+  </TR>
+  <TR>
+    <TD>Floppy Disk</TD>
+    <TD>RX11/RX01 single density floppy disk</TD>
+    <TD>256KB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RX211/RX02 double density floppy disk</TD>
+    <TD>512KB</TD>
+  </TR>
+  <TR>
+    <TD>Fixed head disk</TD>
+    <TD>RC11 fixed head disk</TD>
+    <TD>64-256KW</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RF11 fixed head disk</TD>
+    <TD>256-2048KW</TD>
+  </TR>
+  <TR>
+    <TD>Moving head disk</TD>
+    <TD>RK11/RK05 cartridge disk</TD>
+    <TD>2.5MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RLV12/RL01-RL02 cartridge disk</TD>
+    <TD>5-10MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RK611/RK06-RK07 cartridge disk</TD>
+    <TD>13-26MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH11-RH70/RM03, RM05 disk packs</TD>
+    <TD>67-256MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH11-RH70/RM80 non-removable disk</TD>
+    <TD>124MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH11-RH70/RP04 (RP05), RP06 disk packs</TD>
+    <TD>87-174MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH11-RH70/RP07 non-removable disk</TD>
+    <TD>516MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RQDX3/RX50,RX33 floppy disks</TD>
+    <TD>.4-1.2MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RQDX3/RD51,RD52,RD53,RD54,RD31 disks</TD>
+    <TD>10.8-155.6MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RQDX3/RA60,RA71,RA72,RA73,RA81,RA82,RA90,RA92 disks</TD>
+    <TD>200-1960MB</TD>
+  </TR>
+  <TR>
+    <TD>DECtape</TD>
+    <TD>TC11/TU56 DECtape</TD>
+    <TD>296KB</TD>
+  </TR>
+  <TR>
+    <TD>Cassette tape</TD>
+    <TD>TA11/TU60 cassette tape</TD>
+    <TD>93KB</TD>
+  </TR>
+  <TR>
+    <TD>Magnetic tape</TD>
+    <TD>TM11/TE10 800bpi 9 track magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>TS11/TSV05 1600bpi 9 track magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH11-RH70/TM03/TE16,TU45,TU77 1600bpi 9 track magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>TQK50/TK50 TMSCP magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Network</TD>
+    <TD>DELQA/DEQNA Qbus Ethernet controller</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>DEUNA/DELUA Unibus Ethernet controller</TD>
+    <TD></TD>
+  </TR>
+</TABLE>
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 15-Jun-2008 by Bob Supnik (simh AT trailing-edge DOT com
+- anti-spam encoded)</SMALL></I>
+</BODY></HTML>

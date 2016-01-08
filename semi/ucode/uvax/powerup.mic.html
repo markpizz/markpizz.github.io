@@ -1,0 +1,279 @@
+.TOC	"POWERUP.MIC -- Power Up Initialization"
+.TOC	"Revision 10.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 10	6-Jul-84	[RMS]	Revised for new FPU synchronization protocol
+; 09	14-Feb-84	[RMS]	Editorial changes for pass 2
+;	25-Aug-83	[RMS]	Removed SC increment function
+;	15-Aug-83	[RMS]	Revised for int stk test ucode restriction
+; 08	10-Aug-83	[RMS]	Revised for SC delayed branches
+;	5-Aug-83	[RMS]	Reordered prefetch restart per code review
+;	2-Aug-83	[RMS]	Fixed bug in prefetch restart
+;	15-Jul-83	[RMS]	Fixed bug in FPU powerup protocol
+;	12-Jul-83	[RMS]	Revised to dump possible junk data in bit bucket
+; 07	28-May-83	[RMS]	Revised for new console interface
+;	24-May-83	[RMS]	Created subroutine to update psl
+;	23-May-83	[RMS]	Revised startup address
+;	23-Apr-83	[RMS]	Put in real startup address
+; 06	12-Apr-83	[RMS]	Revised for new memory management
+;	12-Apr-83	[RMS]	Fixed fpu recognition sequence
+; 05	13-Mar-83	[RMS]	Major code compression
+; 04	31-Jan-83	[RMS]	Revised for new fp protocol
+;	27-Dec-82	[RMS]	Added third byte to boot address
+;	28-Nov-82	[RMS]	Consolidated special microinstructions
+; 03	24-Nov-82	[RMS]	Revised allocation limits
+;	11-Nov-82	[RMS]	Re-ordered TB, PC setup
+;	1-Nov-82	[RMS]	Added symbolic powerup addresses
+;	29-Oct-82	[RMS]	New startup address convention
+; 02	20-Oct-82	[RMS]	New powerup information convention
+;	14-Oct-82	[RMS]	Editorial changes
+;	12-Oct-82	[RMS]	Revised allocation limits
+;	4-Oct-82	[RMS]	Eliminated superfluous instruction
+;	1-Oct-82	[RMS]	Revised definition of MMGT_PD
+;	30-Sep-82	[RMS]	Editorial changes
+; 01	27-Sep-82	[RMS]	Initial edit for MicroVAX
+
+.bin
+;= REGION 0 63F
+;= BEGIN POWERUP
+.nobin
+
+;	This module contains the power up and console interface code for MicroVAX.
+;
+;	Entry point POWERUP.. is reached when external logic asserts RESET L.  It
+;	does the following:
+;
+;	   1.	Sets ASTLVL		=	4
+;	   2.   Sets SISR		=	0
+;	   3.	Sets PSL		=	041F0000
+;	   4.	Sets PC			=	20040000
+;	   5.	Sets MAPEN		=	0
+;	   6.   Sends the FPU an initial synchronization signal
+;	   7.	Issues a console halt with halt code ERR.PWRUP
+;
+;	Entry point POWERUP.CONSOLE.. is reached when the microcode issues a console
+;	halt.  It does the following:
+;
+;	   1.	Sets T[MMGT]		=	PC
+;	   2.	Sets T[TEMP]<31:16,7:0>	=	PSL<31:16,7:0>
+;	   3.	Sets T[TEMP]<15>	=	MAPEN
+;	   4.   Sets T[TEMP]<14:8>	=	halt code
+;	   5.   If on interrupt stack, sets T[IS] = IS
+;	   6.   Sets PSL		=	041F0000
+;	   7.   Sets PC			=	20040000
+;	   8.   Sets MAPEN		=	0
+;	   9.   Clears all internal funny flags
+;	  10.   Tests for the presense/absense of the FPU
+;	  11.   Returns to macrocode execution
+;
+.bin
+
+;	Power up sequence for MicroVAX.
+
+;= AT 0
+
+POWERUP..:
+	;---------------------------------------;
+	T[SISR]<--0, DISABLE.IB.PREFETCH,	; clear software interrupt system, disable prefetch
+	CALL[INIT.UVAX]				; init PSL, PC, MAPEN to standard values
+						; these get copied to T[TEMP], T[MMGT] by console code
+
+	;---------------------------------------;
+	T[AST.TRAP]<--K[04]000,			; set ASTLVL = 4 --> no AST pending
+	CALL[INIT.FPU]				; send command to FPU for initial synchronizaton
+
+	;---------------------------------------;
+	CONSOLE.HALT[ERR.PWRUP]			; powerup, invoke console and die
+
+;	Subroutine to initialize PSL, PC, MAPEN to standard values.
+;
+;	Entry conditions:
+;		none
+;
+;	Exit conditions:
+;		PC = W0	=	20040000
+;		PSL	=	041F0000
+;		MAPEN	=	0
+;		prefetching is disabled
+
+INIT.UVAX:
+	;---------------------------------------;
+	T[PSL]<--K[1F]00			; psl<ipl> = 1F
+
+	;---------------------------------------;
+	T[PSL]<--T[PSL].OR.K[04]000		; psl<is> = 1
+
+	;---------------------------------------;
+	W[0]<--K[20]00				; set up future bits<23:16> of powerup address
+
+	;---------------------------------------;
+	MXPR[MAPEN]<--W[0]			; clear memory mapping (W0<0> = 0)
+
+	;---------------------------------------;
+	W[0]<--P[ONE]!!W[0].SHFR.[3],		; create full powerup address:
+						; 1!!00200000 --> 20040000
+	DISABLE.IB.PREFETCH, LOAD.V&PC		; load PC, VIBA, kill IB, keep prefetch off
+
+;	This subroutine updates the hardware PSL from T[PSL].
+;	No other registers are affected.
+
+UPDATE.PSL.HWRE.FROM.TPSL..:
+	;---------------------------------------;
+	MXPR[PSL.HWRE]<--T[PSL], RETURN		; broadcast psl to hardware, return
+
+;	Console halt processing for MicroVAX.
+
+;	At this point,
+;		T[TEMP]<14:8> =	console halt code
+
+;	Don't test psl<is> on first cycle in case still transitioning.
+
+POWERUP.CONSOLE..:
+	;---------------------------------------;
+	W[SC]<--MXPR[MAPEN],			; get current value of MAPEN in SC<0>
+	DISABLE.IB.PREFETCH,			; disable prefetching
+	CALL[READ.PSL.TO.W2..]			; assemble current PSL in W2
+
+	;---------------------------------------;
+	W[0]<--G[PC],				; get current PC
+	CASE2[SC3-0].AT.[POWERUP.SAVE.PC]	; case on SC<0> = saved MAPEN
+
+;= ALIGNLIST 1110*	(POWERUP.SAVE.PC,	POWERUP.SET.SAVED.MAPEN)
+
+POWERUP.SET.SAVED.MAPEN:
+	;---------------------------------------; SC<0> = 1:
+	T[TEMP]<--T[TEMP].OR.K[80]0		; set bit<15> of saved PSL to signify mapping was on
+
+POWERUP.SAVE.PC:
+	;---------------------------------------; SC<0> = 0:
+	T[TEMP]<--T[TEMP].OR.W[2]		; or PSL into error code in T[TEMP]
+
+	;---------------------------------------;
+	T[MMGT]<--W[0],				; copy PC to T[MMGT]
+	IF[NOT.INT.STACK]_[POWERUP.NOT.ISTACK]	; test for running on interrupt stack
+
+	;---------------------------------------;
+	W[1]<--G[SP]				; on int stack, get current SP
+
+	;---------------------------------------;
+	T[IS]<--W[1]				; store current SP as interrupt SP
+
+;	Powerup console interface, continued.
+;	Test for presense of FPU.
+
+POWERUP.NOT.ISTACK:
+	;---------------------------------------;
+	W[0]<--K[4A],				; get opcode for CVTFL
+	CALL[INIT.FPU]				; send command to FPU
+
+	;---------------------------------------;
+	FPU.DATA<--W[0],			; send unclean (but positive) zero as data
+	ENABLE.MM.TRAPS,			; clear mem mgt utrap disable flag
+	CALL[INIT.UVAX]				; initialize PSL, PC, MAPEN to standard values
+
+	;---------------------------------------;
+	WBUS<--FPU.WAIT.NOTRAP,			; tell FPU we are waiting for response
+						; disable traps and dump data in bit bucket
+						; in case FPU not present
+	CLEAR.IB.HALT.BITS			; clear microcode and hardware prefetch halt
+
+	;---------------------------------------;
+	CLEAR.FPU.PRESENT&STATE5<--0&REMOVE.VAX.TRAP.REQUEST,	; assume no FPU in system
+	IF[NOT.FPU.SIGNAL]_[IE.EX.IID..]	; if FPU not yet responded, dead or missing
+
+	;---------------------------------------;
+	SET.FPU.PRESENT,			; FPU in system, set hardware flag
+	GOTO[IE.EX.IID..]			; clear STATE<7:6>, decode first instruction
+
+;	This subroutine sends the command in W0 to the FPU, and clears STATE<3:0>.
+;	No other registers are affected.
+
+INIT.FPU:
+	;---------------------------------------;
+	FPU.CMD<--W[0],				; send opcode to hypothetical FPU
+	STATE.FLAGS<--0, RETURN			; clear STATE<3:0>, return
+
+;	This subroutine assembles the current PSL in W2.
+;	No other registers are affected.
+
+READ.PSL.TO.W2..:
+	;---------------------------------------;
+	W[2]<--T[PSL]				; get microcode copy of PSL
+
+	;---------------------------------------;
+	W[2]<--W[2].OR.P[PSL.CC..TP], RETURN	; or in hardware psl bits, return
+
+.nobin
+
+;	The general decoding flow is shown in the following diagram:
+;
+;							       IID
+;								|
+;				+---------------+---------------+
+;				|		|		|
+;			       IID	       IID	       IID
+;			    exceptions:	    opcodes:	    specifiers:
+;			    interrupts,	    branches,       all other
+;			    traps, etc	    no spec,	    instructions
+;					    XFC, XFD		|
+;								|
+;	+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;     short   index  IB dry  IB halt   reg    reg    autodec autoinc  immed  autoinc  absol   by/wd   long    by/wd   long
+;     lit	|	|	|	|     defer	|	|	|    defer	|     displ   displ   displ   displ
+;	|	|	|	|	|	|	|	|	|	|	|	|       |     defer   defer
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;	+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+;								|
+;							       NSD (second specifier)
+;								|
+;				+---------------+---------------+
+;				|		|		|
+;			       NSD	       NSD	       NSD
+;			    execute:        optimize:       specifiers:
+;			    fork = re       fork = fre &    fork = fre &
+;				|	    spec = 5X	    spec ~ 5X or
+;				|		|	    fork = fse
+;			    dispatch	    dispatch		|
+;								|
+;	+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;     short   index  IB dry  IB halt   reg    reg    autodec autoinc  immed  autoinc  absol   by/wd   long    by/wd   long
+;     lit	|	|	|	|     defer	|	|	|    defer	|     displ   displ   displ   displ
+;	|	|	|	|	|	|	|	|	|	|	|	|       |     defer   defer
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;	+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+;								|
+;							       NSD (third specifier)
+;								|
+;							    dispatch
+;
+.bin
+
+;= END POWERUP

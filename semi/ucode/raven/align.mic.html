@@ -1,0 +1,468 @@
+.TOC 	"ALIGN.MIC -- Alignment Tables for Hardware Dispatches"
+.TOC	"Revision 2.5"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    5 22-Feb-90 RMS	Removed PROBEVMx dispatch.
+;    4 09-Jan-90 RMS	Added XFD dispatch.
+;    3 29-Dec-89 RMS	Added missing index dispatches.
+;    2 05-Dec-89 RMS	Added SCANC.R/SPANC.R dispatches.
+;    1 30-Nov-89 RMS	Revised BXX dispatch.
+; (2)0 15-Nov-89 RMS	Revised for simplified decoder.
+;    5 13-Nov-89 RMS	Editorial changes.
+;    4 02-Nov-89 RMS	Separated ACV from TNV.
+;    3 01-Nov-89 RMS	Revised BSBX dispatch.
+;    2 09-Oct-89 RMS	Added new specifier dispatches.
+;    1 16-Jun-89 RMS	Revised no specifier dispatches.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    9 07-Jun-89 RMS	Revised BRx dispatches.
+;    8 01-Jun-89 RMS	Revised floating point microtrap dispatches.
+;    7 24-May-89 RMS	Revised microtrap, special specifier dispatches.
+;    6 02-May-89 RMS	Moved BBx dispatch.
+;    5 18-Apr-89 RMS	Fixed ACBI, CVTPL.R, FP.R, FP.QM.R dispatches.
+;    4 06-Apr-89 RMS	Revised for actual entry points.
+;    3 30-Mar-89 RMS	Revised for hardware generated first cycles.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 21-Nov-88 RMS	First edit for Raven.
+.TOC	"	Alignment Summary"
+
+;	The microcode contains a number of fixed entry points which define the
+;	start of a new microflow.  These entry points can be divided into two
+;	broad categories, as follows:
+;
+;		- I Box issued entry points
+;		- Microtrap entry points
+;
+;	The I Box issued entry points are those to which the I Box dispatches the E Box
+;	as the result of a DECODE NEXT micro-order.  In this case the I Box supplies
+;	bits <10:1> of the address and the microsequencer defaults bit <0> to zero.
+;
+;	Microtrap entry points are those to which a microtrap dispatches the E Box.
+;	The logic which generates the microtrap supplies bits <6:0> of the address.
+;	The microsequencer defaults bits <10:7> to 1001.
+;
+;	The I Box issued entry points can be further divided into three sub-classes,
+;	as follows:
+;
+;		- IID dispatch entry points
+;		- Specifier flow entry points
+;		- Execution dispatch entry points
+;
+;	The IID dispatch entry points include the I Box generated special condition
+;	entry points such as IB fault, interrupt, trace trap, fpd set, etc.
+;
+;	The specifier flow entry points direct the E Box to parse the next instruction
+;	specifier under the direction of the I Box.
+;
+;	The execution dispatch entry points are used for instruction execution
+;	for all instructions.
+.TOC	"	Specifier Decode Dispatches"
+
+;	Specifier dispatch entry points are allocated in page 8 (with special
+;	dispatches in page 9) of the control store.  The address is constructed
+;	by concatenating several terms supplied by the I Box:
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  1 |  0 |  0 |Spcl|     Spec type     | AT | Idx|  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Spcl:		0:	Normal flow
+;				1:	Special flow
+;
+;		Spec type:	0000:	Short literal
+;				0100:	Index
+;				0101:	Register
+;				0110:	Register deferred
+;				0111:	Auto decrement
+;				1000:	Auto increment
+;				1001:	Auto increment deferred
+;				1010:	Displacement
+;				1011:	Displacement deferred
+;				1100:	Immediate
+;				1101:	Absolute
+;				1110:	Relative
+;				1111:	Relative deferred
+;
+;		AT:		0:	Access type = read or modify (.rx, .mx)
+;				1:	Access type = address or write (.ax, .wx)
+;
+;		Idx:		0:	Base specifier not indexed
+;				1:	Base specifier indexed
+;
+;	The special dispatches are:
+;
+;		register vfield		1001'0101'1x0
+;		quadword immediate	1001'1100'x00
+
+.bin
+
+;	Specifier dispatches.
+
+;= AT 400
+;= ALIGNLIST 00000*	(
+;=	SPEC.RM.SLIT,		SPEC.RM.SLIT.I,		; 1000'0000'A'I'0
+;=	SPEC.AW.SLIT,		SPEC.AW.SLIT.I,
+;=			,			,	; 1000'0001'A'I'0
+;=			,			,
+;=			,			,	; 1000'0010'A'I'0
+;=			,			,
+;=			,			,	; 1000'0011'A'I'0
+;=			,			,
+;=	SPEC.RM.INDEX,		SPEC.RM.INDEX.I,	; 1000'0100'A'I'0
+;=	SPEC.AW.INDEX,		SPEC.AW.INDEX.I,
+;=	SPEC.RM.REG,		SPEC.RM.REG.I,		; 1000'0101'A'I'0
+;=	SPEC.AW.REG,		SPEC.AW.REG.I,
+;=	SPEC.RM.REG.DEF,	SPEC.RM.REG.DEF.I,	; 1000'0110'A'I'0
+;=	SPEC.AW.REG.DEF,	SPEC.AW.REG.DEF.I,
+;=	SPEC.RM.AUTO.DEC,	SPEC.RM.AUTO.DEC.I,	; 1000'0111'A'I'0
+;=	SPEC.AW.AUTO.DEC,	SPEC.AW.AUTO.DEC.I)
+
+;= AT 440
+;= ALIGNLIST 00000*	(
+;=	SPEC.RM.AUTO.INC,	SPEC.RM.AUTO.INC.I,	; 1000'1000'A'I'0
+;=	SPEC.AW.AUTO.INC,	SPEC.AW.AUTO.INC.I,
+;=	SPEC.RM.AI.DEF,		SPEC.RM.AI.DEF.I,	; 1000'1001'A'I'0
+;=	SPEC.AW.AI.DEF,		SPEC.AW.AI.DEF.I,
+;=	SPEC.RM.DISPL,		SPEC.RM.DISPL.I,	; 1000'1010'A'I'0
+;=	SPEC.AW.DISPL,		SPEC.AW.DISPL.I,
+;=	SPEC.RM.DISPL.DEF,	SPEC.RM.DISPL.DEF.I,	; 1000'1011'A'I'0
+;=	SPEC.AW.DISPL.DEF,	SPEC.AW.DISPL.DEF.I,
+;=	SPEC.RM.IMM,		SPEC.RM.IMM.I,		; 1000'1100'A'I'0
+;=	SPEC.AW.IMM,		SPEC.AW.IMM.I,
+;=	SPEC.RM.ABS,		SPEC.RM.ABS.I,		; 1000'1101'A'I'0
+;=	SPEC.AW.ABS,		SPEC.AW.ABS.I,
+;=	SPEC.RM.REL,		SPEC.RM.REL.I,		; 1000'1110'A'I'0
+;=	SPEC.AW.REL,		SPEC.AW.REL.I,
+;=	SPEC.RM.REL.DEF,	SPEC.RM.REL.DEF.I,	; 1000'1111'A'I'0
+;=	SPEC.AW.REL.DEF,	SPEC.AW.REL.DEF.I)
+
+;= AT 4AC
+;= ALIGNLIST 0*	(
+;=	SPEC.VF.REG,		SPEC.VF.REG.I)		; 1001'0101'0'I'0
+
+;= AT 4E0
+;= ALIGNLIST 0**	(
+;=	SPEC.RM.IMM.QW.SECOND,	SPEC.AW.IMM.QW.SECOND)	; 1001'1100'A'0'0
+
+.nobin
+.TOC	"	Microtrap and Special Dispatches"
+
+;	Microtrap and special entry points are allocated in page 9 of the control
+;	store.  The address is constructed as follows:
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|  1 |  0 |  0 |  1 |  Disp class  |  Prob type   |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Disp class:	000:	Memory management microtrap, integer overflow
+;				001:	P chip/CF chip microtrap
+;				010:	reserved
+;				011:	reserved
+;				100:	reserved
+;				101:	reserved
+;				110:	reserved
+;				111:	Decoder special dispatch
+;
+;		Prob type:	nnn:	Problem type within the dispatch class
+
+.bin
+
+;	Memory management microtraps.
+;
+;		480	TB miss
+;		482	ACV
+;		483	TNV
+;		484	Modify bit clear
+;		486	Cross page
+;		488	Alignment
+;		48A	Integer overflow
+
+;= AT 480
+;= ALIGNLIST 0000	(
+;=	MM.TBM,			,			; 1001'000'000'x
+;=	MM.ACV,			MM.TNV,			; 1001'000'001'x
+;=	MM.M.EQL.0,		,			; 1001'000'010'x
+;=	MM.CPB,			,			; 1001'000'011'x
+;=	MM.ALIGN,		,			; 1001'000'100'x
+;=	IE.INTOV,		)			; 1001'000'101'x
+
+;	Chip error microtraps.
+;
+;		490	P chip error
+;		494	Floating point underflow
+;		496	Floating point overflow
+;		49C	Floating divide by zero
+;		49E	Floating point reserved operand
+
+;= AT 490
+;= ALIGNLIST 000*		(
+;=	IE.ERR.PCHIP,			,		; 1001'001'00x'0
+;=	FP.UNDERFLOW,		FP.OVERFLOW, 		; 1001'001'01x'0
+;=			,		,		; 1001'001'10x'0
+;=	FP.DIVIDE.BY.ZERO,	FP.RSVD.OPERAND)	; 1001'001'11x'0
+
+;	Decoder special dispatches.
+;
+;		4F0	Reserved addressing mode
+;		4F2	Trace pending
+;		4F4	First part done
+;		4F6	Interrupt pending
+;		4F8	IB stall
+;		4FA	IB page cross
+;		4FC	IB TB problem
+;		4FE	IB parity error
+
+;= AT 4F0
+;= ALIGNLIST 000*		(
+;=	IE.RSRV.ADDRESS,	IE.TRACE.TRAP,		; 1001'111'00x'0
+;=	IE.FPD,			IE.HWRE.INT,		; 1001'111'01x'0
+;=	IE.IB.STALL,		IE.IB.CPB,		; 1001'111'10x'0
+;=	IE.IB.TBM,		IE.IB.PERR)		; 1001'111'11x'0
+
+.nobin
+.TOC	"	Instruction Execution Dispatches"
+
+;	Instruction dispatch addresses are allocated throughout the control store.
+;	The address is supplied by the I Box:
+;
+;
+;		  10   09   08   07   06   05   04   03   02   01   00
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;		|                  Execution offset          | Rm |  0 |
+;		+----+----+----+----+----+----+----+----+----+----+----+
+;
+;	where:
+;
+;		Execution offset:	Instruction execution offset
+;		Rm = 0:	 		Last specifier for the instruction wasn't
+;					register mode.
+;		   = 1:	 		Last specifier for the instruction was
+;					 register mode.
+;
+
+.bin
+
+;	Microcode page 0.
+
+;	Note:  opcodes without specifiers dispatch to the REGISTER entry point.
+
+;= AT 0
+;= ALIGNLIST 000000*	(
+;=	POWERUP,	HALT,		,		NOP,		; 00000000'xx'0
+;=	,		REI,		,		BPT,		; 00000001'xx'0
+;=	,		RET,		,		RSB,		; 00000010'xx'0
+;=	,		LDPCTX,		,		SVPCTX,		; 00000011'xx'0
+;=	,		,		,		,		; 00000100'xx'0
+;=	INDEX,		INDEX.R,	,		,		; 00000101'xx'0
+;=	PROBEX,		,		,		,		; 00000110'xx'0
+;=	INSQUE,		,		REMQUE,		REMQUE.R,	; 00000111'xx'0
+;=	,		BSBX,		,		,		; 00001000'xx'0
+;=	,		,		,		,		; 00001001'xx'0
+;=	,		,		,		,		; 00001010'xx'0
+;=	JSB,		,		JMP,		,		; 00001011'xx'0
+;=	,		,		,		,		; 00001100'xx'0
+;=	,		,		,		,		; 00001101'xx'0
+;=	,		,		,		,		; 00001110'xx'0
+;=	,		,		,		BXX)		; 00001111'xx'0
+
+
+;	Microcode page 1.
+
+;= AT 80
+;= ALIGNLIST 000000*	(
+;=	EMULATE,	CVTPL.R,	,		,		; 00010000'xx'0
+;=	,		,		,		,		; 00010001'xx'0
+;=	,		,		,		,		; 00010010'xx'0
+;=	,		,		,		,		; 00010011'xx'0
+;=	MOVC3,		,		CMPC3,		,		; 00010100'xx'0
+;=	SCANC,		SCANC.R,	SPANC,		SPANC.R,	; 00010101'xx'0
+;=	MOVC5,		,		CMPC5,		,		; 00010110'xx'0
+;=	,		,		,		,		; 00010111'xx'0
+;=	,		,		,		,		; 00011000'xx'0
+;=	CVTWL,		CVTWL.R,	CVTWB,		CVTWB.R,	; 00011001'xx'0
+;=	,		,		,		,		; 00011010'xx'0
+;=	,		,		,		,		; 00011011'xx'0
+;=	,		,		,		,		; 00011100'xx'0
+;=	LOCC,		,		SKPC,		,		; 00011101'xx'0
+;=	MOVZWL,		MOVZWL.R,	ACBI,		ACBI.R,		; 00011110'xx'0
+;=	,		,		,		)		; 00011111'xx'0
+
+;	Microcode page 2.
+
+;= AT 100
+;= ALIGNLIST 000000*	(
+;=	FP,		FP.R,		,		,		; 00100000'xx'0
+;=	,		,		,		,		; 00100001'xx'0
+;=	,		,		,		,		; 00100010'xx'0
+;=	,		,		,		,		; 00100011'xx'0
+;=	,		,		,		,		; 00100100'xx'0
+;=	,		,		,		,		; 00100101'xx'0
+;=	,		,		,		,		; 00100110'xx'0
+;=	,		,		,		,		; 00100111'xx'0
+;=	MOVF,		MOVF.R,		CMPF,		CMPF.R,		; 00101000'xx'0
+;=	,		,		,		,		; 00101001'xx'0
+;=	,		,		,		,		; 00101010'xx'0
+;=	,		,		,		,		; 00101011'xx'0
+;=	ADAWI,		ADAWI.R,	,		,		; 00101100'xx'0
+;=	,		,		,		,		; 00101101'xx'0
+;=	INSQXI,		,		,		,		; 00101110'xx'0
+;=	REMQXI,		REMQXI.R,	,		)		; 00101111'xx'0
+
+
+;	Microcode page 3.
+
+;= AT 180
+;= ALIGNLIST 000000*	(
+;=	FP.QM,		FP.QM.R,	,		,		; 00110000'xx'0
+;=	,		,		,		,		; 00110001'xx'0
+;=	,		,		,		,		; 00110010'xx'0
+;=	,		,		,		,		; 00110011'xx'0
+;=	,		,		,		,		; 00110100'xx'0
+;=	,		,		,		,		; 00110101'xx'0
+;=	,		,		,		,		; 00110110'xx'0
+;=	,		,		,		,		; 00110111'xx'0
+;=	MOVDG,		MOVDG.R,	,		,		; 00111000'xx'0
+;=	,		,		,		,		; 00111001'xx'0
+;=	,		,		,		,		; 00111010'xx'0
+;=	,		,		,		,		; 00111011'xx'0
+;=	ASHL,		ASHL.R,		ASHQ,		ASHQ.R,		; 00111100'xx'0
+;=	EMUL,		EMUL.R,		EDIV,		EDIV.R,		; 00111101'xx'0
+;=	CLRQ,		CLRQ.R,		MOVQ,		MOVQ.R,		; 00111110'xx'0
+;=	,		,		,		)		; 00111111'xx'0
+
+;	Microcode page 4.
+
+;= AT 200
+;= ALIGNLIST 000000*	(
+;=	ADDBW2,		ADDBW2.R,	ADDBW3,		ADDBW3.R,	; 01000000'xx'0
+;=	SUBBW2,		SUBBW2.R,	SUBBW3,		SUBBW3.R,	; 01000001'xx'0
+;=	MULBW2,		MULBW2.R,	MULBW3,		MULBW3.R,	; 01000010'xx'0
+;=	DIVBW2,		DIVBW2.R,	DIVBW3,		DIVBW3.R,	; 01000011'xx'0
+;=	BISBW2,		BISBW2.R,	BISBW3,		BISBW3.R,	; 01000100'xx'0
+;=	BICBW2,		BICBW2.R,	BICBW3,		BICBW3.R,	; 01000101'xx'0
+;=	XORBW2,		XORBW2.R,	XORBW3,		XORBW3.R,	; 01000110'xx'0
+;=	MNEGBW,		MNEGBW.R,	CASEX,		CASEX.R,	; 01000111'xx'0
+;=	MOVBW,		MOVBW.R,	CMPI,		CMPI.R,		; 01001000'xx'0
+;=	MCOMBW,		MCOMBW.R,	BITX,		BITX.R,		; 01001001'xx'0
+;=	CLRBW,		CLRBW.R,	TSTX,		TSTX.R,		; 01001010'xx'0
+;=	INCBW,		INCBW.R,	DECBW,		DECBW.R,	; 01001011'xx'0
+;=	CVTBL,		CVTBL.R,	CVTBW,		CVTBW.R,	; 01001100'xx'0
+;=	MOVZBL,		MOVZBL.R,	MOVZBW,		MOVZBW.R,	; 01001101'xx'0
+;=	ROTL,		ROTL.R,		,		,		; 01001110'xx'0
+;=	MOVL,		MOVL.R,		PUSHX,		PUSHX.R)	; 01001111'xx'0
+
+
+;	Microcode page 5.
+;	280 : 2DE unused.
+
+;= AT 2E0
+;= ALIGNLIST 0000*	(
+;=	BISPSW,		BISPSW.R,	BICPSW,		BICPSW.R,	; 01011100'xx'0
+;=	POPR,		POPR.R,		PUSHR,		PUSHR.R,	; 01011101'xx'0
+;=	CHMK,		CHMK.R,		CHME,		CHME.R,		; 01011110'xx'0
+;=	CHMS,		CHMS.R,		CHMU,		CHMU.R)		; 01011111'xx'0
+
+;	Microcode page 6.
+
+;= AT 300
+;= ALIGNLIST 000000*	(
+;=	ADDL2,		ADDL2.R,	ADDL3,		ADDL3.R,	; 01100000'xx'0
+;=	SUBL2,		SUBL2.R,	SUBL3,		SUBL3.R,	; 01100001'xx'0
+;=	MULL2,		MULL2.R,	MULL3,		MULL3.R,	; 01100010'xx'0
+;=	DIVL2,		DIVL2.R,	DIVL3,		DIVL3.R,	; 01100011'xx'0
+;=	BISL2,		BISL2.R,	BISL3,		BISL3.R,	; 01100100'xx'0
+;=	BICL2,		BICL2.R,	BICL3,		BICL3.R,	; 01100101'xx'0
+;=	XORL2,		XORL2.R,	XORL3,		XORL3.R,	; 01100110'xx'0
+;=	MNEGL,		MNEGL.R,	,		,		; 01100111'xx'0
+;=	,		,		,		,		; 01101000'xx'0
+;=	MCOML,		MCOML.R,	,		,		; 01101001'xx'0
+;=	CLRL,		CLRL.R,		,		,		; 01101010'xx'0
+;=	INCL,		INCL.R,		DECL,		DECL.R,		; 01101011'xx'0
+;=	ADWC,		ADWC.R,		SBWC,		SBWC.R,		; 01101100'xx'0
+;=	MTPR,		MTPR.R,		MFPR,		MFPR.R,		; 01101101'xx'0
+;=	MOVPSL,		MOVPSL.R,	,		,		; 01101110'xx'0
+;=	,		,		,		)		; 01101111'xx'0
+
+
+;	Microcode page 7.
+;	380 : 386 unused.
+
+;= AT 388
+;= ALIGNLIST 0*	(BBX,		BBX.R)					; 01110001'0x'0
+
+;	38C : 39E unused.
+
+;= AT 3A0
+;= ALIGNLIST 0000*	(
+;=	BLBX,		BLBX.R,		,		,		; 01110100'xx'0
+;=	FFS,		FFS.R,		FFC,		FFC.R,		; 01110101'xx'0
+;=	CMPV,		CMPV.R,		CMPZV,		CMPZV.R,	; 01110110'xx'0
+;=	EXTV,		EXTV.R,		EXTZV,		EXTZV.R)	; 01110111'xx'0
+
+;= AT 3C0
+;= ALIGNLIST 00000*	(
+;=	INSV,		INSV.R,		,		,		; 01111000'xx'0
+;=	AOBLXX,		AOBLXX.R,	,		,		; 01111001'xx'0
+;=	SOBGXX,		SOBGXX.R,	,		,		; 01111010'xx'0
+;=	CVTLB,		CVTLB.R,	CVTLW,		CVTLW.R,	; 01111011'xx'0
+;=	,		,		,		,		; 01111100'xx'0
+;=	CALLG,		,		CALLS,		,		; 01111101'xx'0
+;=	,		XFC,		,		IE.XFD,		; 01111110'xx'0
+;=	,		,		,		IE.RSRV.OPCODE)	; 01111111'xx'0
+
+;	Microcode page 9.
+
+;= AT 4C4
+;= ALIGNLIST 0*		(VEC.MFVP,	VEC.MFVP.R)			; 10011000'1x'0
+
+;= AT 4D0
+;= ALIGNLIST 00*	(
+;=	VEC.LDX,	VEC.LDX.R,	VEC.GATHX,	)		; 10011010'xx'0
+
+
+;	Microcode page 12.
+
+;= AT 670
+;= ALIGNLIST 00*	(
+;=	VEC.STX,	VEC.STX.R,	VEC.SCATX,	)		; 11001110'xx'0
+
+
+;	Microcode page 14.
+
+;= AT 700
+;= ALIGNLIST 000*	(
+;=	VEC.VV,		VEC.VV.R,	VEC.VS.L,	VEC.VS.L.R,	; 11100000'xx'0
+;=	,		,		VEC.VS.Q,	VEC.VS.Q.R)	; 11100001'xx'0

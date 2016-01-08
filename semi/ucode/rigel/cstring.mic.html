@@ -1,0 +1,2191 @@
+.TOC	"CSTRING.MIC -- Character String Instructions"
+.TOC	"Revision 3.2"
+
+;	Rick Calcagni, Bob Supnik, Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989, 1990 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 19-Apr-90 REC	Touch MD4 before exit in MOVC5 for srclen = dstlen = 0,
+;			and in CMPC5 for src1len = src2len = 0
+; (3)1 21-Aug-87 RMS	Editorial changes; pass 1 code freeze.
+;
+;    7 27-Apr-87 GMU	Made PC <-- BACKUP PC a subroutine.
+;    6 09-Jan-87 GMU	Re-enabled prefetch after FPD unpack entry.
+;    5 10-Dec-86 GMU	Completed code for six new string instructions.
+;    4  7-Nov-86 GMU	Corrected R0 on exit from MOVCx.
+;    3  1-Oct-86 RMS	Swizzed registers in MOVCx for additional string instructions.
+;    2 30-Sep-86 GMU	Added six additional string instructions: CMPC3, CMPC5,
+;			LOCC, SKPC, SPANC, and SCANC.
+; (2)1 12-Sep-86 RMS	Initial production microcode.
+
+.bin
+;= BEGIN CSTRING
+.nobin
+
+;	This module implements the character string instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	29	 CMPC3 len.rw, src1addr.ab, src2addr.ab				* * 0 *
+;	2D	 CMPC5 src1len.rw, src1addr.ab, fill.rb,
+;		       src2len.rw, src2addr.ab					* * 0 *
+;
+;	3A	 LOCC char.rb, len.rw, srcaddr.ab				0 * 0 0
+;	3B	 SKPC char.rb, len.rw, srcaddr.ab				0 * 0 0
+;
+;	28	 MOVC3 len.rw, srcaddr.ab, dstaddr.ab				0 1 0 0
+;	2C	 MOVC5 srclen.rw, srcaddr.ab, fill.rb,
+;		       dstlen.rw, dstaddr.ab					* * 0 *
+;
+;	2A	 SCANC len.rw, srcaddr.ab, tbladdr.ab, mask.rb			0 * 0 0
+;	2B	 SPANC len.rw, srcaddr.ab, tbladdr.ab, mask.rb			0 * 0 0
+.TOC	"	MOVC3, MOVC5"
+
+;	These instructions move a string of characters from one area of memory to another.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC's	Dispatch   BCOND
+;	--------      ------	---------				----	-----	----	--------   -----
+;	MOVC3		28	M[dstaddr...dstaddr+len-1] <--		3	raa/wbb	iiii	MOVCX..	   --
+;					M[srcaddr...srcaddr+len-1]
+;
+;	MOVC5		2C	let len = minu(srclen,dstlen)		5   rarra/wbbwb	jizj	MOVCX..	   --
+;				M[dstaddr...dstaddr+len-1] <--
+;					M[srcaddr...srcaddr+len-1]
+;				if srclen < dstlen,
+;					M[dstaddr+len-1...dstaddr+dstlen-1] <-- fill
+;
+;	Entry conditions:
+;		MD.T0(S1) =	first (source length) operand
+;		MD.T2(S2) =	second (source address) operand
+;		MD.T4(S3) =	third (destination address) operand (MOVC3 only)
+;		MD.T4<7:0> =	third (fill character) operand (MOVC5 only)
+;		MD.T6(S4) =	fourth (destination length) operand (MOVC5 only)
+;		MD.T3(S5) =	fifth (destination address) operand (MOVC5 only)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		R0 - R5 have been updated to the SRM specified values.
+;
+;	Condition codes:
+;		(MOVC3)			(MOVC5)
+;		N <-- 0			N <-- srclen LSS dstlen
+;		Z <-- 1			Z <-- srclen EQL dstlen
+;		V <-- 0			V <-- 0				[Integer overflow trap cannot occur.]
+;		C <-- 0			C <-- srclen LSSU dstlen
+;
+;	Note:	MOVC3/MOVC5 are interruptible instructions.  If a memory management fault or interrupt
+;		occurs in mid instruction, the outstanding state is packed into R0 - R5, FPD is set,
+;		and the exception is processed.  When the instruction is redecoded, the state is unpacked
+;		and the instruction is resumed at the interruption point.
+;
+;	Note:	MOVC5 sets the condition codes before the accessibility of the fifth operand
+;		specifier is proven.
+;
+;	Size/performance tradeoffs:
+;		Too numerous to mention.
+;
+
+;	The microcode uses a control block which is kept partially in the general
+;	registers, and partially in the working registers.  In greater detail:
+;
+;	General registers:
+;		R0	=	loop count (at packup only: delta PC, fill character, count)
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		R5	=	at packup only:   state flags
+;
+;	Working registers:
+;		MD.T2	=	running srcaddr
+;		MD.T4	=	fill character
+;		SC	=	running dstaddr
+;
+;	State flags:
+;		<1>	=	set if destination is longword aligned
+;		<2,0>	=	type of move
+;				00 --> forward
+;				10 --> backward
+;				01 --> fill
+;		<3>	=	set for interruptible instruction
+;
+.bin
+
+;	MOVC3, MOVC5 operation:
+;
+;		let len = minu(srclen, dstlen)
+;		if len > 0 then
+;			{ for i = 0 to len - 1
+;				{ dst[i] <-- src[i] }}
+;		if srclen < dstlen
+;			{ for i = srclen to dstlen - 1
+;				{ dst[i] <-- fill }}
+
+;	Note:	STATE<3> must not be set in the first two microinstuctions
+;		to avoid calling the packup routine on a memory management
+;		microtrap caused by the last specifier.
+
+MOVCX..:
+	;********** Hardware dispatch **********;
+	[G.0] <-- [MD.T0], LONG,		; [1] R0 gets srclen, check if fill only
+	DL <-- WORD,				; set dl = word for MOVC5
+	CASE [OPCODE2-0] AT [MOVC3.CONTINUE],	; case on MOVC3 vs MOVC5
+		sim r[0] <-- movc len,
+		sim wbus.nzvc <-- [movc.src.0z00]
+
+;	MOVC3 setup.
+;	Compare srcaddr:dstaddr, load dstaddr, clear R4.
+;	Get out fast if srclen = 0.
+
+;	At this point,
+;		R0	=	srclen
+;		MD.T2	=	srcaddr
+;		MD.T4	=	dstaddr
+
+;= ALIGNLIST 0***	(MOVC3.CONTINUE,	MOVC5.CONTINUE)
+;  Opcodes = 28, 2C --> opcode<2:0> = ?00
+
+MOVC3.CONTINUE:
+	;---------------------------------------; opcode<2:0> = 000 (MOVC3):
+	[WBUS] <-- [MD.T2] - [MD.T4], LONG,	; [2] compare srcaddr to dstaddr
+	CALL [LOAD.SC.AND.R3.FROM.T4],		; [3] load dstadr
+		sim wbus.nzvc <-- [movc.dir.000c],
+		sim sc <-- movc dst addr
+
+	;---------------------------------------;
+	[G.4] <-- [K0],				; [4] fill count is zero
+	SET PSL CC, MAP.IIII, LONG,		; set psl cc's, psl map is iiii
+	CASE [WBUS.NZV] AT [MOVC.GET.DIRECTION]	; case on srclen = 0 from [1]
+
+;= ALIGNLIST 10**	(MOVC.GET.DIRECTION,	MOVC3.SRC.ZERO)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+MOVC3.SRC.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	[G.1] <-- [MD.T2], LONG,		; srclen = 0, complete register setup
+	GOTO [MOVC.COMPLETE.R4.CLEAR]		; r4 = 0 from above, clear the
+						; rest and exit
+
+;	MOVC5 setup.
+;	Compare srclen:dstlen, load dstaddr, compare srcaddr:dstaddr.
+
+;	At this point,
+;		R0	=	srclen
+;		MD.T0	=	srclen
+;		MD.T2	=	srcaddr
+;		MD.T4<7:0> =	fill character
+;		MD.T6	=	dstlen
+;		MD.T3	=	dstaddr
+;		DL	=	word
+
+MOVC5.CONTINUE:
+	;---------------------------------------; opcode<2:0> = 100 (MOVC5):
+	[MD.T1] <-- [MD.T0] - [MD.T6],		; [2] MD.T1 gets srclen - dstlen, dl is word
+	SET PSL CC, MAP.JIZJ, LEN(DL),		; set psl cc's, psl map is jizj
+		sim wbus.nzvc <-- [movc.slen-dlen.n00c]
+
+	;---------------------------------------;
+	SC&, [G.3] <-- [MD.T3], LONG,		; [3] load dstaddr
+		sim sc <-- movc dst addr
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T2] - [MD.T3], LONG,	; [4] compare srcaddr to dstaddr
+	CASE [WBUS.NZV] AT [MOVC5.SET.COUNT],	; case on srclen = 0 from [1]
+		sim wbus.nzvc <-- [movc.dir.000c]
+
+;= ALIGNLIST 10**	(MOVC5.SET.COUNT,	MOVC5.FILL.ONLY)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+MOVC5.FILL.ONLY:
+	;---------------------------------------; wbus.z = 1:
+	[G.1] <-- [MD.T2], LONG,		; [5] srclen = 0, complete register setup
+	ACCESS B[MD.T4],			; touch MD4 for dstlen = 0 case
+	CASE [WBUS.NZC] AT [MOVC5.DST.NOT.ZERO]	; case on srclen - dstlen from [2]
+
+;= ALIGNLIST 110*	(MOVC5.DST.NOT.ZERO,	MOVC.COMPLETE)
+
+MOVC5.DST.NOT.ZERO:
+	;---------------------------------------; wbus.c = 0:
+	[G.4] <-- [MD.T1] - 00[01]0000, LONG,	; srclen < dstlen, change upper 0s to 1s
+	GOTO [MOVC.FILL]			; srclen = 0, go fill 
+
+;	MOVC5 setup, continued.
+;	Not a fill only.
+;	Load the correct controlling count in R4.
+
+;	At this point,
+;		R0	=	srclen
+;		R3	=	dstaddr
+;		MD.T1	=	srclen - dstlen
+;		MD.T2	=	srcaddr
+;		MD.T4<7:0> =	fill character
+;		MD.T6	=	dstlen
+;		SC	=	dstaddr
+
+MOVC5.SET.COUNT:
+	;---------------------------------------; wbus.z = 0:
+	[G.4] <-- [MD.T1], LONG,		; [5] load unsigned srclen - dstlen into R4
+	CASE [WBUS.NZC] AT [MOVC5.DST.LONGER]	; case on srclen - dstlen from [2]
+
+;= ALIGNLIST 110*	(MOVC5.DST.LONGER,	MOVC5.SRC.LONGER)
+
+MOVC5.SRC.LONGER:
+	;---------------------------------------; wbus.c = 1:
+	[G.0] <-- [MD.T6], LONG,		; [6] R0 = dstlen is the controlling count
+	GOTO [MOVC.GET.DIRECTION]		; join common code
+
+MOVC5.DST.LONGER:
+	;---------------------------------------; wbus.c = 0:
+	[G.4] <-- [MD.T1] - 00[01]0000, LONG,	; [6] srclen < dstlen, change upper 0s to 1s
+	GOTO [MOVC.GET.DIRECTION]		; R0 = srclen is the controlling count
+
+;	MOVCx, continued.
+;	Load srcaddr, determine direction, load initial loop count.
+
+;	At this point,
+;		R0	=	loop count = min (srclen, dstlen)
+;		R3	=	dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	srcaddr
+;		MD.T4<7:0> =	fill character
+;		SC	=	dstaddr, testable in [6]
+
+MOVC.GET.DIRECTION:
+	;---------------------------------------; wbus.z = 0:
+	[G.1] <-- S[MD.T2], LONG,		; [5/7] save the srcaddr in R1
+	STATE3 <-- 1,				; flag interruptible instruction
+	CASE [WBUS.NZC] AT [MOVC.BACKWARD]	; case on srcaddr - dstaddr from [2/4]
+
+;= ALIGNLIST 110*	(MOVC.BACKWARD,		MOVC.FORWARD)
+
+MOVC.BACKWARD:
+	;---------------------------------------; wbus.c = 0:
+	[SC] <-- [G.0] + [SC],			; [6/8] calculate END dstaddr
+	CALL [WAIT.ONE.CYCLE],			; wait for SC to settle
+		sim sc <-- sc + r[0]
+
+	;---------------------------------------;
+	STATE2 <-- 1				; flag backwards move
+
+MOVC.FORWARD:
+	;---------------------------------------; wbus.c = 1:
+	[G.2] <-- [G.0], LONG,			; set initial loop count
+	CASE [SC2-0] AT [MOVC.ALIGN.DST.00]	; case on dstaddr<1:0>
+
+;	MOVCx, continued.
+;	Case here to align destination.
+
+;	This code section is used by move (forward or backward) and
+;	by fill to set up the data length of the upcoming transfer.
+;	Based on the present destination alignment (SC<1:0>), the data
+;	length is set to byte, word, or longword, and the data
+;	alignment flag (STATE<1>) updated.  This code is, in effect,
+;	an inline subroutine, which exits by casing on the STATE
+;	flags to get back to the proper move loop.
+
+;	At this point,
+;		R0	=	current loop count
+;		R1	=	srcaddr
+;		R2	=	initial loop count (forward, backward)
+;		R3	=	dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<2:0> =	<forward/backward><aligned><move/fill>
+
+;= ALIGNLIST 100*	(MOVC.ALIGN.DST.00,	MOVC.ALIGN.DST.01,
+;=			 MOVC.ALIGN.DST.10,	MOVC.ALIGN.DST.11)
+
+MOVC.ALIGN.DST.00:
+	;---------------------------------------; sc<1:0> = 00:
+	[G.0] <-- [G.0] - 000000[4], LONG,	; test if specified move length fits
+	STATE1 <-- 1,				; set flag to indicate dstaddr aligned
+	GOTO [MOVC.ALIGN.WAIT.LONG],		; wait for the alu cc's
+		sim r[0] <-- r[0] - [4],
+		sim wbus.nzvc <-- [rn.nz00]
+
+MOVC.ALIGN.DST.01:
+	;---------------------------------------; sc<1:0> = 01:
+	[G.0] <-- [G.0] - 000000[1], LONG,	; test if specified move length fits
+	GOTO [MOVC.ALIGN.WAIT.BYTE],		; wait for the alu cc's
+		sim r[0] <-- r[0] - [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+MOVC.ALIGN.DST.10:
+	;---------------------------------------; sc<1:0> = 10:
+	[G.0] <-- [G.0] - 000000[2], LONG,	; test if specified move length fits
+	GOTO [MOVC.ALIGN.WAIT.WORD],		; wait for the alu cc's
+		sim r[0] <-- r[0] - [2],
+		sim wbus.nzvc <-- [rn.nz00]
+
+MOVC.ALIGN.DST.11:
+	;---------------------------------------; sc<1:0> = 11:
+	[G.0] <-- [G.0] - 000000[1], LONG,	; test if specified move length fits
+	GOTO [MOVC.ALIGN.WAIT.BYTE],		; wait for the alu cc's
+		sim r[0] <-- r[0] - [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;	MOVCx, continued.
+;	This code is reached when DL has to be changed due to destination
+;	not aligned or data length too big.  DL is set to its proper value,
+;	and the source and destination addresses are biased as required
+;	by the move direction.
+
+;	Note that the setting of DL has been deferred to this point to
+;	guarantee that we are out of the "trap shadow" of the reads and
+;	writes in the move loops.
+
+;	At this point,
+;		R0	=	current loop count - kdl, not yet testable
+;		R1	=	srcaddr
+;		R2	=	initial loop count (forward, backward)
+;		R3	=	dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<2:0> =	<forward/backward><aligned><move/fill>
+
+MOVC.ALIGN.WAIT.BYTE:
+	;---------------------------------------;
+	[MD.T1] <-- [G.2] - 000000[2],		; calc init loop count - 2*kdl
+	DL <-- BYTE,				; set dl = byte
+	CASE [STATE2-0] AT [MOVC.FORWARD.CHECK.DL] ; case on forward vs backward vs fill
+
+MOVC.ALIGN.WAIT.WORD:
+	;---------------------------------------;
+	[MD.T1] <-- [G.2] - 000000[4],		; calc init loop count - 2*kdl
+	DL <-- WORD,				; set dl = word
+	CASE [STATE2-0] AT [MOVC.FORWARD.CHECK.DL] ; case on forward vs backward vs fill
+
+MOVC.ALIGN.WAIT.LONG:
+	;---------------------------------------;
+	[MD.T1] <-- [G.2] - 000000[8.],		; calc init loop count - 2*kdl
+	DL <-- LONG,				; set dl = long
+	CASE [STATE2-0] AT [MOVC.FORWARD.CHECK.DL] ; case on forward vs backward vs fill
+
+;	MOVCx, continued.
+;	Bias source and destination addresses as required.
+;	
+;	At this point,
+;		R0	=	current loop count - kdl, not yet testable
+;		R1	=	srcaddr
+;		R2	=	initial loop count (forward, backward)
+;		R3	=	dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T1	=	initial loop count - 2*kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<2:0> =	<forward/backward><aligned><move/fill>
+
+;= ALIGNLIST 010*	(MOVC.FORWARD.CHECK.DL,		MOVC.FILL.CHECK.DL,
+;=			 MOVC.BACKWARD.CHECK.DL,	MOVC.UNKNOWN.CHECK.DL)
+
+MOVC.FORWARD.CHECK.DL:
+	;---------------------------------------; state<2,0> = 00:
+	[MD.T2] <-- [G.1] + [MD.T1],		; set b.src = srcaddr + init ct - 2*kdl
+		sim load movc addr [1]
+
+	;---------------------------------------;
+	[MD.T3] <-- [G.3] + [MD.T1],		; set b.dst = dstaddr + init ct - 2*kdl
+	CASE [WBUS.NZV] AT [MOVC.FORWARD.LOOP]	; case on whether data item will fit
+
+MOVC.BACKWARD.CHECK.DL:
+	;---------------------------------------; state<2,0> = 10:
+	[MD.T2] <-- [G.1] + [KDL],		; set b.src = srcaddr + kdl
+		sim load movc addr [0]
+
+	;---------------------------------------;
+	[MD.T3] <-- [G.3] + [KDL],		; set b.dst = dstaddr + kdl
+	CASE [WBUS.NZV] AT [MOVC.BACKWARD.LOOP] ; case on whether data item will fit
+
+MOVC.FILL.CHECK.DL:
+	;---------------------------------------; state<2,0> = 01:
+	NOP					; do something here...
+
+	;---------------------------------------;
+	NOP,					; do something here...
+	CASE [WBUS.NZV] AT [MOVC.FILL.LOOP]	; continue fill
+
+MOVC.UNKNOWN.CHECK.DL:
+	;---------------------------------------; state<2,0> = 11:
+	MACHINE CHECK [MCHK.MOVC.STATUS]	; impossible state, machine check
+
+;	MOVCx, continued.
+;	Move forward: main loop.
+;	Move the next data item from srcaddr to dstaddr.
+
+;	At this point,
+;		R0	=	loop count - kdl
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = srcaddr + init ct - 2*kdl
+;		MD.T3	=	biased dstaddr = dstaddr + init ct - 2*kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	10<aligned>0
+
+;= ALIGNLIST 00**	(MOVC.FORWARD.LOOP,		MOVC.FORWARD.COMPLETE,
+;=			 MOVC.FORWARD.DL.TOO.BIG,			)
+;  WBUS.NZVC set by subtract of words in longword --> V = 0
+
+MOVC.FORWARD.LOOP:
+	;---------------------------------------; wbus.nz = 00:
+	[G.0] <-- [G.0] - [KDL], LONG,		; decr loop count for NEXT iteration
+	CASE [INT.RMODE] AT [MOVC.FORWARD.NO.INTERRUPTS], ; case on interrupt pending
+		sim r[0] <-- r[0] - kdl,
+		sim wbus.nzvc <-- [rn.nz00]
+
+;= ALIGNLIST 011*	(MOVC.FORWARD.NO.INTERRUPTS,	MOVC.FORWARD.INTERRUPT)
+
+MOVC.FORWARD.INTERRUPT:
+	;---------------------------------------; int = 1:
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+MOVC.FORWARD.NO.INTERRUPTS:
+	;---------------------------------------; int = 0:
+	[MD.T5] <-- MEM (-[G.0] + [MD.T2]), 	; read next data item at
+	LEN(DL),				; srcaddr + init cnt - loop cnt, in effect
+						; loop cnt 2*kdl low, b.src biased by 2*kdl
+		sim r[0],
+		sim addr [movcx.src] [0]
+
+	;---------------------------------------;
+	VA.WCHK&, [SC] <-- (-[G.0] + [MD.T3]),	; write next data item at
+	LEN(DL),				; dstaddr + init cnt - loop cnt, in effect
+						; loop cnt 2*kdl low, b.src biased by 2*kdl
+						; capture low bits of dstaddr in SC
+	CASE [STATE2-0] AT [MOVC.FORWARD.NOT.ALIGNED], ; case on dstaddr aligned
+		sim addr [movcx.dst] [0],
+		sim sc <-- movc dst - r[0]
+
+;= ALIGNLIST *0**	(MOVC.FORWARD.NOT.ALIGNED,	MOVC.FORWARD.ALIGNED)
+;  STATE<2,0> = 00 --> STATE<2:0> = 0?0
+
+MOVC.FORWARD.ALIGNED:
+	;---------------------------------------; state<1> = 1:
+	MEM (VA)&, [WBUS] <-- [MD.T5], LEN(DL),	; write data to destination
+	CASE [WBUS.NZV] AT [MOVC.FORWARD.LOOP]	; case on whether next iteration will work
+
+;	MOVCx, continued.
+;	Move forward: destination not aligned.
+;	Attempt to align if not already.
+
+;	At this point,
+;		R0	=	loop count - 2*kdl
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = srcaddr + init ct - 2*kdl
+;		MD.T3	=	biased dstaddr = dstaddr + init ct - 2*kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		SC<7:0>	=	low byte of effective dstaddr
+;		STATE<3:0> =	10<aligned>0
+
+MOVC.FORWARD.NOT.ALIGNED:
+	;---------------------------------------; state<1> = 0:
+	[SC] <-- [SC] + [KDL],			; get low bits of updated dstaddr
+		sim sc <-- sc + kdl
+
+MOVC.BACKWARD.NOT.ALIGNED:
+	;---------------------------------------; state<1> = 0:
+	MEM (VA)&, [WBUS] <-- [MD.T5], LEN(DL)	; write data to destination
+
+MOVC.NOT.ALIGNED.COMMON:
+	;---------------------------------------;
+	[G.0] <-- [G.0] + [KDL], LONG,		; restore decremented count
+		sim r[0] <-- r[0] + kdl
+
+MOVC.ALIGN.DST:
+	;---------------------------------------;
+	NOP,					; do something here...
+	CASE [SC2-0] AT [MOVC.ALIGN.DST.00]	; case into alignment routine
+
+;	MOVCx, continued.
+;	Move forward: data length too big.
+;	Cut down the current data length and retry the move.
+
+;	At this point,
+;		R0	=	loop count - [kdl]
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = srcaddr + init ct - 2*kdl
+;		MD.T3	=	biased dstaddr = dstaddr + init ct - 2*kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	10<aligned>0
+
+MOVC.FORWARD.DL.TOO.BIG:
+	;---------------------------------------; wbus.nz = 10:
+	NOP,					; do something here...
+	STATE1 <-- 1,				; force "aligned" from now on
+	CASE [FPU.DL] AT [MOVC.DL.BYTE]		; case on data length
+
+;= ALIGNLIST 100*	(MOVC.DL.BYTE,	MOVC.DL.WORD,
+;=			 MOVC.DL.LONG,		)
+
+MOVC.DL.BYTE:
+	;---------------------------------------; dl = 00 (byte):
+	[G.0] <-- [G.4], LONG,			; dstlen = 0, R0 =
+	GOTO [MOVC.COMPLETE]			; srclen = (srclen - dstlen)
+
+MOVC.DL.WORD:
+	;---------------------------------------; dl = 01 (word):
+	[G.0] <-- [G.0] + 000000[1], LONG,	; add back half the data length
+	GOTO [MOVC.ALIGN.WAIT.BYTE],		; see if the adjusted length will fit
+		sim r[0] <-- r[0] + [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+MOVC.DL.LONG:
+	;---------------------------------------; dl = 10 (long):
+	[G.0] <-- [G.0] + 000000[2], LONG,	; add back half the data length
+	GOTO [MOVC.ALIGN.WAIT.WORD],		; see if the adjusted length will fit
+		sim r[0] <-- r[0] + [2],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;	MOVCx, continued.
+;	Move forward: move completed.
+;	Move last data item, fix up registers, go fill.
+
+;	At this point,
+;		R0	=	loop count = 0
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = srcaddr + init ct - 2*kdl
+;		MD.T3	=	biased dstaddr = dstaddr + init ct - 2*kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	10<aligned>0
+
+MOVC.FORWARD.COMPLETE:
+	;---------------------------------------; wbus.nz = 01:
+	[G.0] <-- [G.0] - [KDL], LONG,		; decrement the loop count
+		sim r[0] <-- r[0] - kdl
+
+	;---------------------------------------;
+	[MD.T5] <-- MEM (-[G.0] + [MD.T2]), 	; read next data item at
+	LEN(DL),				; srcaddr + init cnt - loop cnt, in effect
+ 						; loop cnt 2*kdl low, b.src biased by 2*kdl
+		sim r[0],
+		sim addr [movcx.src] [0]
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- (-[G.0] + [MD.T3]), ; write next data item at
+	LEN(DL),				; dstaddr + init cnt - loop cnt, in effect
+						; loop cnt 2*kdl low, b.dst biased by 2*kdl
+		sim r[0],
+		sim addr [movcx.dst] [0]
+
+;	MOVCx, continued.
+;	Forward or backward move completed.
+;	Write last data item, fix up registers, go fill.
+
+;	At this point,
+;		R0	=	loop count - KDL { = 0 - KDL }
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = srcaddr + init ct - 2*kdl
+;		MD.T3	=	biased dstaddr = dstaddr + init ct - 2*kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	10<aligned>0
+
+MOVC.MOVE.COMPLETE:
+	;---------------------------------------;
+	[MD.T1] <-- [G.2]			; get initial loop count
+
+	;---------------------------------------;
+	SC&, [G.3] <-- [G.3] + [MD.T1], LONG,	; calc dstaddr + init loop count =
+						; final dstaddr or initial fill addr
+	CALL [WRITE.VA.T5],			; write last data item to memory
+		sim sc <-- movc fill addr
+
+	;---------------------------------------;
+	[G.1] <-- [G.1] + [MD.T1], LONG,	; calc srcaddr + init loop count =
+						; final srcaddr
+	STATE3-0 <-- 0,				; clear state flags
+	CASE [OPCODE2-0] AT [MOVC3.COMPLETE]	; get out fast if MOVC3, else fill
+
+;= ALIGNLIST 0***	(MOVC3.COMPLETE,	MOVC.FILL)
+;  Opcodes = 28, 2C --> opcode<2:0> = 0??
+
+MOVC3.COMPLETE:
+	;---------------------------------------; opcode<2:0> = 000 (MOVC3):
+	[G.0] <-- 000000[0], LONG,		; clear R0
+	GOTO [MOVC.COMPLETE.R4.CLEAR]		; go finish register cleanup
+
+;	MOVCx, continued.
+;	Move backward: main loop.
+;	Move the next data item from srcaddr to dstaddr.
+
+;	At this point,
+;		R0	=	loop count - kdl
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = initial srcaddr + kdl
+;		MD.T3	=	biased dstaddr = initial dstaddr + kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	11<aligned>0
+
+;= ALIGNLIST 00**	(MOVC.BACKWARD.LOOP,	MOVC.BACKWARD.COMPLETE,
+;=			 MOVC.BACKWARD.DL.TOO.BIG,			)
+;  WBUS.NZVC set by subtract of words in longword --> V = 0
+
+MOVC.BACKWARD.LOOP:
+	;---------------------------------------; wbus.nz = 00:
+	[G.0] <-- [G.0] - [KDL], LONG,		; decr loop count for NEXT iteration
+	CASE [INT.RMODE] AT [MOVC.BACKWARD.NO.INTERRUPTS], ; case on interrupt pending
+		sim r[0] <-- r[0] - kdl,
+		sim wbus.nzvc <-- [rn.nz00]
+
+;= ALIGNLIST 011*	(MOVC.BACKWARD.NO.INTERRUPTS,	MOVC.BACKWARD.INTERRUPT)
+
+MOVC.BACKWARD.INTERRUPT:
+	;---------------------------------------; int = 1:
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+MOVC.BACKWARD.NO.INTERRUPTS:
+	;---------------------------------------; int = 0:
+	[MD.T5] <-- MEM ([G.0] + [MD.T2]),	; read next data item at
+	LEN(DL),				; srcaddr + loop cnt - kdl, in effect
+ 						; loop cnt 2*kdl low, b.src biased by kdl
+		sim r[0],
+		sim addr [movcx.src] [1]
+
+	;---------------------------------------;
+	VA.WCHK&, [SC] <-- [G.0] + [MD.T3],	; write next data item at
+	LEN(DL),				; dstaddr + loop cnt - kdl, in effect
+ 						; loop cnt 2*kdl low, b.src biased by kdl
+						; capture low bits of dstaddr in SC
+	CASE [STATE2-0] AT [MOVC.BACKWARD.NOT.ALIGNED], ; case on dstaddr aligned
+		sim sc <-- movc dst + r[0],
+		sim addr [movcx.dst] [1]
+
+;= ALIGNLIST 10**	(MOVC.BACKWARD.NOT.ALIGNED,	MOVC.BACKWARD.ALIGNED)
+;  STATE<0> = 0 --> STATE<2:0> = 1?0
+
+MOVC.BACKWARD.ALIGNED:
+	;---------------------------------------; state<1> = 1:
+	MEM (VA)&, [WBUS] <-- [MD.T5], LEN(DL),	; write data to destination
+	CASE [WBUS.NZV] AT [MOVC.BACKWARD.LOOP]	; case on whether next iteration will work
+
+;	MOVCx, continued.
+;	Move backward: destination not aligned.
+;	Attempt to align if not already.
+
+;	At this point,
+;		R0	=	loop count - 2*kdl
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = initial srcaddr + kdl
+;		MD.T3	=	biased dstaddr = initial dstaddr + kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		SC<7:0>	=	low order byte of effective dstaddr
+;		STATE<3:0> =	11<aligned>0
+
+;MOVC.BACKWARD.NOT.ALIGNED:			; see MOVC.FORWARD.NOT.ALIGNED
+
+;	At MOVC.BACKWARD.NOT.ALIGNED, the current data item is written out,
+;	and the erroneous decrement of R0 is undone.  The destination address
+;	is then checked to select a new move length.  SC was set one cycle ago.
+
+;	MOVCx, continued.
+;	Move backward: data length too big.
+;	Cut down the current data length and retry the move.
+
+;	At this point,
+;		R0	=	loop count - kdl
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = initial srcaddr + kdl
+;		MD.T3	=	biased dstaddr = initial dstaddr + kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	11<aligned>0
+
+MOVC.BACKWARD.DL.TOO.BIG:
+	;---------------------------------------; wbus.nz = 10:
+	NOP,					; do something here...
+	STATE1 <-- 1,				; force "aligned" from now on
+	CASE [FPU.DL] AT [MOVC.DL.BYTE]		; case on data length
+
+;	At MOVC.DL.BYTE/WORD/LONG, the erroneous decrement of R0 is undone
+;	while simultaneously choosing a new data length that is half the
+;	current data length.
+
+;	MOVCx, continued.
+;	Move backward: move completed.
+;	Move the last data item, fix up registers, go fill.
+
+;	At this point,
+;		R0	=	loop count = 0
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T2	=	biased srcaddr = initial srcaddr + kdl
+;		MD.T3	=	biased dstaddr = initial dstaddr + kdl
+;		MD.T4<7:0> =	fill character (MOVC5 only)
+;		STATE<3:0> =	11<aligned>0
+
+MOVC.BACKWARD.COMPLETE:
+	;---------------------------------------; wbus.nz = 01:
+	[G.0] <-- [G.0] - [KDL], LONG,		; decrement the loop count
+		sim r[0] <-- r[0] - kdl
+
+	;---------------------------------------;
+	[MD.T5] <-- MEM ([G.0] + [MD.T2]),	; read next data item at
+	LEN(DL),				; srcaddr + loop cnt - kdl, in effect
+ 						; loop cnt 2*kdl low, b.src biased by kdl
+		sim r[0],
+		sim addr [movcx.src] [1]
+
+	;---------------------------------------;
+	VA.WCHK&, [VA.BUS] <-- [G.0] + [MD.T3],	; write next data item at
+	LEN(DL),				; dstaddr + loop cnt - kdl, in effect
+ 						; loop cnt 2*kdl low, b.dst biased by kdl
+	GOTO [MOVC.MOVE.COMPLETE],		; go finish register fixup
+		sim r[0],
+		sim addr [movcx.dst] [1]
+
+;	MOVCx, continued.
+;	MOVC5 main move completed, test for fill.
+
+;	At this point,
+;		R1	=	final srcaddr
+;		R3	=	current dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character
+;		SC	=	dstaddr
+;		DL	=	word
+;		STATE<3:0> =	0000
+
+MOVC.FILL:
+	;---------------------------------------; opcode<2:0> = 100 (MOVC5):
+	[MD.T1] <-- S[G.4], LONG,		; check srclen - dstlen
+	STATE3 <-- 1,				; flag interruptible instruction
+		sim wbus.nzvc <-- [movc.slen-dlen.n00c]
+
+	;---------------------------------------;
+	[G.0] <-- -[MD.T1], LONG,		; negate so that if srclen < dstlen
+						; the fill count will be positive
+	CALL [DUPLICATE.FILL.CHARACTER],	; duplicate the fill character in t5<31:24>
+		sim r[0] <-- fill count
+
+	;---------------------------------------;
+	[MD.T5] <-- [MD.T4]!![MD.T5] RSH [8.],	; MD.T5<31:16> now contains word of fill
+	CASE [WBUS.NZV] AT [MOVC.NO.FILL.LENGTH] ; if negative, fill, else done
+
+;= ALIGNLIST 01**	(MOVC.NO.FILL.LENGTH,	MOVC.FILL.SETUP)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+MOVC.FILL.SETUP:
+	;---------------------------------------; wbus.n = 1:
+	[MD.T0] <-- ZEXT.[MD.T5] RSH [16.]	; MD.T0<15:0> contains word of fill
+
+	;---------------------------------------;
+	[MD.T5] <-- [MD.T0]!![MD.T5] RSH [16.],	; MD.T5 now contains longword of fill
+	STATE0 <-- 1,				; flag fill mode
+	CASE [SC2-0] AT [MOVC.ALIGN.DST.00]	; case on dstaddr<1:0>
+
+MOVC.NO.FILL.LENGTH:
+	;---------------------------------------; wbus.n = 0:
+	[G.0] <-- [G.4],			; no fill, put srclen - dstlen in R0
+	GOTO [MOVC.COMPLETE]			; join exit flow
+
+;	MOVCx, continued.
+;	Move fill: main loop.
+;	Move the fill character to the next dstaddr.
+
+;	At this point,
+;		R0	=	loop count
+;		R1	=	final srcaddr
+;		R3	=	current dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	fill longword
+;		SC	=	dstaddr
+;		STATE<3:0> =	10<aligned>1
+
+;= ALIGNLIST 00**	(MOVC.FILL.LOOP,	MOVC.FILL.COMPLETE,
+;=			 MOVC.FILL.DL.TOO.BIG,			)
+;  WBUS.NZVC set by subtract of words in longword --> V = 0
+
+MOVC.FILL.LOOP:
+	;---------------------------------------; wbus.nz = 00:
+	[G.0] <-- [G.0] - [KDL], LONG,		; decr loop count for NEXT iteration
+	CASE [INT.RMODE] AT [MOVC.FILL.NO.INTERRUPTS], ; case on interrupt pending
+		sim r[0] <-- r[0] - kdl,
+		sim wbus.nzvc <-- [rn.nz00]
+
+;= ALIGNLIST 011*	(MOVC.FILL.NO.INTERRUPTS,	MOVC.FILL.INTERRUPT)
+
+MOVC.FILL.INTERRUPT:
+	;---------------------------------------; int = 1:
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+MOVC.FILL.NO.INTERRUPTS:
+	;---------------------------------------; int = 0:
+	VA.WCHK&, [WBUS] <-- [SC], LEN(DL),	; write check the destination
+		sim addr [movcx.fill] [0]
+
+	;---------------------------------------;
+	SC&, [G.3] <-- [SC] + [KDL],		; increment dstaddr by data length
+	CASE [STATE2-0] AT [MOVC.FILL.NOT.ALIGNED], ; case on dstaddr aligned
+		sim sc <-- sc + kdl
+
+;= ALIGNLIST *01*	(MOVC.FILL.NOT.ALIGNED,		MOVC.FILL.ALIGNED)
+;  STATE<2> = 0 --> STATE<2:0> = 0?1
+
+MOVC.FILL.ALIGNED:
+	;---------------------------------------; state<1> = 1:
+	MEM (VA)&, [WBUS] <-- [MD.T5], LEN(DL),	; write data to destination
+	CASE [WBUS.NZV] AT [MOVC.FILL.LOOP]	; test whether next fill will fit
+
+;	MOVCx, continued.
+;	Move fill: destination not aligned.
+;	Finish the current write.
+;	Attempt to align if not already.
+
+;	At this point,
+;		R0	=	loop count - kdl
+;		R1	=	final srcaddr
+;		R3	=	current dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	fill longword
+;		SC	=	dstaddr + kdl
+;		STATE<3:0> =	10<align>1
+
+MOVC.FILL.NOT.ALIGNED:
+	;---------------------------------------; state<1> = 0:
+	MEM (VA)&, [WBUS] <-- [MD.T5], LEN(DL),	; write data to destination
+	GOTO [MOVC.NOT.ALIGNED.COMMON]		; join common code
+
+;	At MOVC.NOT.ALIGNED.COMMON, the erroneous decrement of R0 is undone.
+;	The destination address is then checked to select a new move length.
+;	Note that SC was set one cycle ago.
+
+;	MOVCx, continued.
+;	Move fill: data length too big.
+;	Cut down the current data length and retry the move.
+
+;	At this point,
+;		R0	=	loop count - kdl
+;		R1	=	final srcaddr
+;		R3	=	current dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	fill longword
+;		SC	=	dstaddr
+;		STATE<3:0> =	10<aligned>1
+
+MOVC.FILL.DL.TOO.BIG:
+	;---------------------------------------; wbus.nz = 10:
+	NOP,					; do something here...
+	STATE1 <-- 1,				; force "aligned" from now on
+	CASE [FPU.DL] AT [MOVC.DL.BYTE]		; case on data length
+
+;	At MOVC.DL.BYTE/WORD/LONG, the erroneous decrement of R0 is undone
+;	while simultaneously choosing a new data length that is half the
+;	current data length.
+
+;	MOVCx, continued.
+;	Move fill: move completed.
+;	Write last fill item, go exit.
+
+;	At this point,
+;		R0	=	loop count = 0
+;		R1	=	final srcaddr
+;		R3	=	current dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	fill longword
+;		SC	=	dstaddr
+;		STATE<3:0> =	10?1
+
+MOVC.FILL.COMPLETE:
+	;---------------------------------------; wbus.nz = 01:
+	[G.0] <-- [G.0] - [KDL], LONG		; decrement the loop count again
+
+	;---------------------------------------;
+	VA.WCHK&, [WBUS] <-- [SC], LEN(DL),	; write check the destination
+		sim addr [movcx.fill] [0]
+
+	;---------------------------------------;
+	[G.3] <-- [SC] + [KDL], LONG,		; final dstaddr
+	CALL [WRITE.VA.T5]			; write last data item to dstaddr
+
+	;---------------------------------------;
+	[G.0] <-- 000000[0], LONG,		; dstlen = 0, clear R0
+	GOTO [MOVC.COMPLETE]			; go finish register cleanup
+
+;	One line subroutine to write MD.T5 to memory, len(dl).
+
+WRITE.VA.T5:
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.T5], LEN(DL),	; write data to memory
+	RETURN					; return to caller
+
+;	MOVCx, continued.
+;	Clean up general registers and exit.
+
+;	At this point,
+;		R0	=	final R0 value (0 or tmp1)
+;		R1	=	final srcaddr
+;		R3	=	final dstaddr
+;		R4	=	srclen - dstlen
+
+MOVC.COMPLETE:
+	;---------------------------------------; wbus.c = 1:
+	[G.4] <-- 000000[0], LONG		; clear R4
+
+MOVC.COMPLETE.R4.CLEAR:
+	;---------------------------------------;
+	[G.5] <-- 000000[0], LONG		; clear R5
+
+SCANC.SPANC.EXIT:
+	;---------------------------------------; wbus.z = 1:
+	[G.2] <-- 000000[0], LONG,		; clear R2
+	STATE3-0 <-- 0,				; clear all flags
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	CMPC3, CMPC5"
+
+;	These instructions compare two strings of characters.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC's	Dispatch   BCOND
+;	--------      ------	---------				----	-----		----	--------   -----
+;	CMPC3		29	M[src1addr...src1addr+len-1] :		3	raa/wbb		jizj	CMPCX..	   --
+;					M[src2addr...src2addr+len-1]
+;
+;	CMPC5		2D	let len = minu(src1len, src2len)	5	rarra/wbbwb 	jizj	CMPCX..	   --
+;				M[src1addr...src1addr+len-1] :
+;					M[src2addr...src2addr+len-1]
+;				if src1len < src2len,
+;					fill : M[src2addr+len-1...src2addr+src2len-1]
+;				if src1len > src2len,
+;					M[src1addr+len-1...src1addr+src2len-1] : fill
+;
+;	CMPC3 -	entry conditions from specifier flows:
+;		MD.T0(S1) =	first (length) operand
+;		MD.T2(S2) =	second (source1 address) operand
+;		MD.T4(S3) = 	third (source2 address) operand, unless register mode
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand (byte)
+;
+;	CMPC5 - entry conditions from specifier flows:
+;		MD.T0(S1) =	first (source1 length) operand
+;		MD.T2(S2) =	second (source1 address) operand
+;		MD.T4(S3) =	third (fill character) operand
+;		MD.T6(S4) =	fourth (source2 length) operand
+;		MD.T3(S5) =	fifth (source2 address) operand, unless register mode
+;		RN	=	register number of fifth specifier
+;		DL	=	data type of fifth operand (byte)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		R0 - R3 have been updated to the SRM specified values.
+;
+;	Condition codes reflect last byte compared:
+;		N <-- src1byte LSS src2byte
+;		Z <-- src1byte EQL src2byte
+;		V <-- 0				[Integer overflow trap cannot occur.]
+;		C <-- src1byte LSSU src2byte
+;
+;	Note:	CMPC3/CMPC5 are interruptible instructions.  If a memory management fault or interrupt
+;		occurs in mid instruction, the outstanding state is packed into R0 - R3, FPD is set,
+;		and the exception is processed.  When the instruction is redecoded, the state is unpacked
+;		and the instruction is resumed at the interruption point.
+;
+;	Size/performance tradeoffs:
+;		CMPC3/CMPC5 are coded for minimum microcode size.
+
+;	The microcode uses a control block which is kept partially in the general registers,
+;	and partially in the working registers.  In greater detail:
+;
+;	General registers:
+;		R0	=	src1 count (at packup only: delta PC, fill character, count)
+;		R1	=	src1addr
+;		R2	=	src2 count
+;		R3	=	src2addr
+;
+;	Working registers:
+;		MD.T4	=	fill character
+
+.bin
+
+;	CMPC3, CMPC5 operat5ion:
+;
+;		let len = minu(src1len, src2len)
+;		if len > 0 then
+;			{for i = 0 to len - 1
+;				{if src1[i] ne src2[i] then exit}}
+;		if src1len < src2len then
+;			{for i = src1len to src2len - 1
+;				{if fill ne src2[i] then exit}}
+;		if src1len > src2len then
+;			{for i = src2len to src1len - 1
+;				{if src1[i] ne fill then exit}}
+
+;	Note:	STATE<3> must not be set in the first two microinstuctions
+;		to avoid calling the packup routine on a memory management
+;		microtrap caused by the last specifier.
+
+CMPCX..:
+	;********** Hardware dispatch **********;
+	[G.0] <-- [MD.T0],			; [1] copy src1len to R0,
+						; test for zero
+	SET PSL CC, MAP.IIII, LONG,		; set psl CCs, map is iiii
+	CASE [OPCODE2-0] AT [CMPC3],		; case on CMPC3 vs CMPC5
+		sim load character gprs,
+		sim r[0],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;= ALIGNLIST 0*1*	(CMPC3,		CMPC5)
+;  Opcodes = 29, 2D --> opcode<2:0> = ?01
+
+CMPC5:
+	;---------------------------------------; opcode<2> = 1 --> CMPC5:
+	[G.2] <-- [MD.T6], LONG,		; [2] copy src2len to R2,
+ 						; test for zero
+		sim r[2],
+		sim wbus.nzvc <-- [rn.nz00]
+
+	;---------------------------------------;
+	[G.3] <-- [MD.T3], LONG,		; [3] copy src2addr to R3
+	GOTO [CMPCX.CONTINUE]			; rejoin common code
+
+CMPC3:
+	;---------------------------------------; opcode<2> = 0 --> CMPC3:
+	[G.2] <-- [MD.T0], LONG,		; [2] set src2len = src1len,
+ 						; test for zero
+	CALL [LOAD.SC.AND.R3.FROM.T4],		; copy src2addr to R3 (SC load
+ 						; is a side-effect)
+		sim r[2],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;	CMPCx, continued.
+;	Determine initial entry into compare loops.
+
+;	At this point,
+;		R0	=	src1len
+;		R2	=	src2len
+;		R3	=	src2addr
+;		MD.T2	=	src1addr
+;		MD.T4	=	fill character
+
+CMPCX.CONTINUE:
+	;---------------------------------------;
+	[G.1] <-- [MD.T2], LONG,		; [4] copy src1addr to R1
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.NEQ.ZERO] ; case on src1len = 0
+
+;= ALIGNLIST 10**	(CMPCX.SRC1.NEQ.ZERO,	CMPCX.SRC1.EQL.ZERO)
+;  WBUS.NZVC set by pass operation --> V = C = 0
+
+CMPCX.SRC1.NEQ.ZERO:
+	;---------------------------------------; wbus.z = 0 --> src1 NEQ 0
+	STATE3 <-- 1,				; [5] flag interruptable instruction
+	DL <-- BYTE,				; set DL = byte for reads
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.SRC2.LOOP] ; case on src2len = 0
+
+CMPCX.SRC1.EQL.ZERO:
+	;---------------------------------------; wbus.z = 1 --> src1 EQL 0
+	STATE3 <-- 1,				; [5] flag interruptable instruction
+	DL <-- BYTE,				; set DL = byte for reads
+	CASE [WBUS.NZV] AT [CMPCX.FILL.SRC2.LOOP] ; case on src2len = 0
+
+;	CMPCX, continued.
+;	Compare src1 to src2.
+
+;	At this point,
+;		R0	=	src1len
+;		R1	=	src1addr
+;		R2	=	src2len
+;		R3	=	src2addr
+;		MD.T4	=	fill character
+;		STATE<3> =	1
+
+;= ALIGNLIST 10**	(CMPCX.SRC1.SRC2.LOOP,	CMPCX.SRC2.DONE)
+;  WBUS.NZVC set by pass or subtract of word in longword --> V = 0
+
+CMPCX.SRC1.SRC2.LOOP:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T1] <-- MEM ([G.1]), LEN(DL),	; [L1] read next byte from src1
+	CASE [INT.RMODE] AT [CMPCX.SRC1.SRC2.NO.INTERRUPT], ; case on int pending
+		sim addr [rn] [1]
+
+;= ALIGNLIST 011*	(CMPCX.SRC1.SRC2.NO.INTERRUPT, CMPCX.SRC1.SRC2.INTERRUPT)
+
+CMPCX.SRC1.SRC2.INTERRUPT:
+	;---------------------------------------; int = 1:
+	ACCESS [MD.T1],				; [L2] wait for read to complete
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+CMPCX.SRC1.SRC2.NO.INTERRUPT:
+	;---------------------------------------; int = 0:
+	[MD.T3] <-- MEM ([G.3]), LEN(DL),	; [L2] read next byte from src2
+		sim addr [rn] [3]
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T1] - [MD.T3],		; [L3] compare src1 char with src2 char
+	SET PSL CC, MAP.JIZJ, LEN(DL),		; set psl CCs, map is jizj
+	CALL [DECR.R0],				; [L4] decrement src1len
+		sim wbus.nzvc <-- [char.match.0z00]
+
+	;---------------------------------------;
+	[G.2] <-- [G.2] - 1, LONG,		; [L5] decrement src2len
+		sim r[2] <-- r[2] - [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+	;---------------------------------------;
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.SRC2.NEQ] ; [L6] case on compare from [L3]
+
+;	CMPCX, continued.
+;	Compare src1 to src2, decrement counts, increment addresses.
+
+;	At this point,
+;		R0	=	decremented src1len
+;		R1	=	src1addr
+;		R2	=	decremented src2len
+;		R3	=	src2addr
+;		MD.T4	=	fill character
+;		WBUS.Z	=	set from decremented value of R0 (cycle L4)
+;		WBUS.Z	=	set from decremented value of R2 (cycle L5)
+;		STATE<3> =	1
+
+;= ALIGNLIST 101*	(CMPCX.SRC1.SRC2.NEQ,	CMPCX.SRC1.SRC2.EQL)
+
+CMPCX.SRC1.SRC2.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.2] <-- [G.2] + 1, LONG,		; [L7] difference found, correct src2len
+	GOTO [CMPCX.CORRECT.R0]			; correct src1len and exit
+
+CMPCX.SRC1.SRC2.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.1] <-- [G.1] + 1, LONG,		; [L7] increment src1addr
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.SRC2.CONTINUE], ; case on src1len = 0
+		sim r[1] <-- r[1] + [1]
+
+;= ALIGNLIST 10**	(CMPCX.SRC1.SRC2.CONTINUE, CMPCX.SRC1.DONE)
+
+CMPCX.SRC1.SRC2.CONTINUE:
+	;---------------------------------------; wbus.z = 0:
+	[G.3] <-- [G.3] + 1, LONG,		; [L8] increment src2addr
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.SRC2.LOOP], ; case on src2len = 0
+		sim r[3] <-- r[3] + [1]
+
+;	Here when src2len = 0.  Src1len is known to be non-zero, join
+;	src1.fill loop.
+
+CMPCX.SRC2.DONE:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T1] <-- MEM ([G.1]), LEN(DL),	; [L9] read next byte from src1
+	CASE [INT.RMODE] AT [CMPCX.SRC1.FILL.NO.INTERRUPT], ; case on int pending
+		sim addr [rn] [1]
+
+;	Here when src1len = 0.  Increment src2addr and case into the
+;	fill.src2 loop.
+
+CMPCX.SRC1.DONE:
+	;---------------------------------------; wbus.z = 1:
+	[G.3] <-- [G.3] + 1, LONG,		; [L8] increment src2addr
+	CASE [WBUS.NZV] AT [CMPCX.FILL.SRC2.LOOP], ; case on src2len = 0
+		sim r[3] <-- r[3] + [1]
+
+;	CMPCX, continued.
+;	Compare src1 to fill.
+
+;	At this point,
+;		R0	=	src1len
+;		R1	=	src1addr
+;		R2	=	src2len
+;		R3	=	src2addr
+;		MD.T4	=	fill character
+;		STATE<3> =	1
+
+;= ALIGNLIST 10**	(CMPCX.SRC1.FILL.LOOP,	CMPCX.SRC1.FILL.EXIT)
+;  WBUS.NZVC set by pass or subtract of word in longword --> V = 0
+
+CMPCX.SRC1.FILL.LOOP:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T1] <-- MEM ([G.1]), LEN(DL),	; [L1] read next byte from src1
+	CASE [INT.RMODE] AT [CMPCX.SRC1.FILL.NO.INTERRUPT], ; case on int pending
+		sim addr [rn] [1]
+
+;= ALIGNLIST 011*	(CMPCX.SRC1.FILL.NO.INTERRUPT, CMPCX.SRC1.FILL.INTERRUPT)
+
+CMPCX.SRC1.FILL.INTERRUPT:
+	;---------------------------------------; int = 1:
+	ACCESS [MD.T1],				; [L2] wait for read to complete
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+CMPCX.SRC1.FILL.NO.INTERRUPT:
+	;---------------------------------------; int = 0:
+	[WBUS] <-- [MD.T1] - [MD.T4],		; [L2] compare src1 char to fill
+	SET PSL CC, MAP.JIZJ, LEN(DL),		; set psl CCs, map is jizj
+		sim wbus.nzvc <-- [char.match.0z00]
+
+	;---------------------------------------;
+	[G.0] <-- [G.0] - 1, LONG,		; [L3] decrement src1len, test for 0
+	CALL [WAIT.ONE.CYCLE],			; [L4] wait for wbus CCs
+		sim r[0] <-- r[0] - [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;	CMPCx, continued.
+;	Complete compare of src1 to fill.
+
+;	At this point,
+;		R0	=	decremented src1len
+;		R1	=	src1addr
+;		R2	=	src2len
+;		R3	=	src2addr
+;		MD.T4	=	fill character
+;		STATE<3> =	1
+;		WBUS.Z	=	set from compare (cycle L2)
+;		WBUS.Z	=	set from decrement of R0 (cycle L3)
+
+	;---------------------------------------;
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.FILL.NEQ] ; [L5] case on compare from [L2]
+
+;= ALIGNLIST 101*	(CMPCX.SRC1.FILL.NEQ,	CMPCX.SRC1.FILL.EQL)
+
+CMPCX.CORRECT.R0:
+CMPCX.SRC1.FILL.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.0] <-- [G.0] + 1, LONG,		; [L6] difference found, correct src1len
+	STATE3-0 <-- 0,				; clear state flags
+	LAST CYCLE				; decode next instruction
+
+CMPCX.SRC1.FILL.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.1] <-- [G.1] + 1, LONG,		; [L6] increment src1addr
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.FILL.LOOP], ; case on loop count = 0 from [L3]
+		sim r[1] <-- r[1] + [1]
+
+CMPCX.SRC1.FILL.EXIT:
+	;---------------------------------------; wbus.z = 1:
+	STATE3-0 <-- 0,				; [L7] clear state bits
+	LAST CYCLE				; decode next instruction
+
+;	CMPCX, continued.
+;	Compare fill to src2.
+
+;	At this point,
+;		R0	=	src1len
+;		R1	=	src1addr
+;		R2	=	src2len
+;		R3	=	src2addr
+;		MD.T4	=	fill character
+;		STATE<3> =	1
+
+;= ALIGNLIST 10**	(CMPCX.FILL.SRC2.LOOP,	CMPCX.FILL.SRC2.EXIT)
+;  WBUS.NZVC set by pass or subtract of word in longword --> V = 0
+
+CMPCX.FILL.SRC2.LOOP:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T1] <-- MEM ([G.3]), LEN(DL),	; [L1] read next byte from src2
+	CASE [INT.RMODE] AT [CMPCX.FILL.SRC2.NO.INTERRUPT], ; case on int pending
+		sim addr [rn] [3]
+
+;= ALIGNLIST 011*	(CMPCX.FILL.SRC2.NO.INTERRUPT, CMPCX.FILL.SRC2.INTERRUPT)
+
+CMPCX.FILL.SRC2.INTERRUPT:
+	;---------------------------------------; int = 1:
+	ACCESS [MD.T1],				; [L2] wait for read to complete
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+CMPCX.FILL.SRC2.NO.INTERRUPT:
+	;---------------------------------------; int = 0:
+	[WBUS] <-- [MD.T4] - [MD.T1],		; [L2] compare fill to src2 char
+	SET PSL CC, MAP.JIZJ, LEN(DL),		; set psl CCs, map is jizj
+		sim wbus.nzvc <-- [char.match.0z00]
+
+	;---------------------------------------;
+	[G.2] <-- [G.2] - 1, LONG,		; [L3] decrement src2len, test for 0
+	CALL [WAIT.ONE.CYCLE],			; [L4] wait for wbus CCs
+		sim r[2] <-- r[2] - [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;	CMPCx, continued.
+;	Complete compare of fill to src2.
+
+;	At this point,
+;		R0	=	src1len
+;		R1	=	src1addr
+;		R2	=	decremented src2len
+;		R3	=	src2addr
+;		MD.T4	=	fill character
+;		STATE<3> =	1
+;		WBUS.Z	=	set from compare (cycle L2)
+;		WBUS.Z	=	set from decrement of R2 (cycle L3)
+
+	;---------------------------------------;
+	CASE [WBUS.NZV] AT [CMPCX.FILL.SRC2.NEQ] ; [L5] case on result of compare
+
+;= ALIGNLIST 101*	(CMPCX.FILL.SRC2.NEQ,	CMPCX.FILL.SRC2.EQL)
+
+CMPCX.FILL.SRC2.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.2] <-- [G.2] + 1, LONG,		; [L6] match found, correct src2len
+	STATE3-0 <-- 0,				; clear state flags
+	LAST CYCLE				; decode next instruction
+
+CMPCX.FILL.SRC2.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.3] <-- [G.3] + 1, LONG,		; [L6] increment src2addr
+	CASE [WBUS.NZV] AT [CMPCX.FILL.SRC2.LOOP], ; case on loop count = 0
+		sim r[3] <-- r[3] + [1]
+
+CMPCX.FILL.SRC2.EXIT:
+	;---------------------------------------; wbus.z = 1:
+	ACCESS B[MD.T4],			; touch MD4 for src1len = src2len = 0
+	STATE3-0 <-- 0,				; [L7] clear state bits
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	SCANC, SPANC"
+
+;	These instructions test a string of characters against a table.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC's	Dispatch   BCOND
+;	--------      ------	---------				----	-----		----	--------   -----
+;	SCANC		2A	see below				4	raar/wbbb	iiii	SCANC.SPANC.. --
+;
+;	SPANC		2B	see below				4	raar/wbbb 	iiii	SCANC.SPANC.. --
+;
+;	Operation:	
+;		if len > 0 then
+;			{for i = 0 to len - 1
+;				{char = table[src[i]]
+;				if char and mask eq/neq 0 then exit}}
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(S1) =	first (source length) operand
+;		MD.T2(S2) =	second (source address) operand
+;		MD.T4(S3) =	third (table address) operand
+;		MD.T6(S4) =	fourth (mask) operand, unless register mode
+;		RN	=	register number of fourth specifier
+;		DL	=	data type of fourth operand (byte)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		R0 - R3 have been updated to the SRM specified values.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- R0 EQL 0
+;		V <-- 0				[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Note:	SCANC/SPANC are interruptible instructions.  If a memory management fault or interrupt
+;		occurs in mid instruction, the outstanding state is packed into R0 - R3, FPD is set,
+;		and the exception is processed.  When the instruction is redecoded, the state is unpacked
+;		and the instruction is resumed at the interruption point.
+;
+;	Size/performance tradeoffs:
+;		Testing the loop count before the mask evaluation saves a cycle but costs more than 6 microwords.
+;		Unrolling the loop saves two to four cycles, but costs many microwords.
+
+;	The microcode uses a control block which is kept partially in the general registers,
+;	and partially in the working registers.  In greater detail:
+;
+;	General registers:
+;		R0	=	source count (at packup only: delta PC, mask, count)
+;		R1	=	srcaddr
+;		R2	=	0
+;		R3	=	table address
+;
+;	Working registers:
+;		MD.T4	=	mask
+;
+.bin
+
+;	SCANC, SPANC operation:
+;
+;		if len > 0 then
+;			{for i = 0 to len - 1
+;				{char = table[src[i]]
+;				if char and mask eq/neq 0 then exit}}
+
+;	Note:	STATE<3> must not be set in the first two microinstuctions
+;		to avoid calling the packup routine on a memory management
+;		microtrap caused by the last specifier.
+
+SCANC.SPANC..:
+	;********** Hardware dispatch **********;
+	[G.1] <-- [MD.T2], LONG			; [1] copy string address to R1
+
+	;---------------------------------------;
+	[G.0] <-- [MD.T0],			; [2] copy loop count to R0
+ 						; test for count = 0
+	SET PSL CC, MAP.IIII, LONG,		; set PSL CCs, map is iiii
+	CALL [LOAD.SC.AND.R3.FROM.T4],		; [3] copy table address to R3
+ 						; (SC load is a side-effect)
+		sim load character gprs,
+		sim r[0],
+		sim wbus.nzvc <-- [rn.nz00]
+
+	;---------------------------------------;
+	[MD.T4] <-- [MD.T6], LONG		; [4] copy match character to T4
+
+SCANC.SPANC.RESTART:				; restart here from FPD entry
+	;---------------------------------------; opcode<4> = 0 --> SCANC/SPANC:
+	STATE3 <-- 1,				; [5] flag interruptable instruction
+	DL <-- BYTE,				; set DL to byte for reads
+	CASE [WBUS.NZV] AT [SCANC.SPANC.LOOP]	; case on string length = 0
+
+;	SCANC/SPANC, continued.
+;	Main loop: read character, test for interrupts, compute table
+;	address, read table.
+
+;	At this point:
+;		R0	=	loop count
+;		R1	=	source address
+;		R3	=	table address
+;		MD.T4	=	mask
+;		STATE<3> =	1
+
+;= ALIGNLIST 10**	(SCANC.SPANC.LOOP,	SCANC.SPANC.EXIT)
+;  WBUS.NZVC set by pass or subtract of word in longword --> V = 0
+
+SCANC.SPANC.LOOP:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T1] <-- MEM ([G.1]), LEN(DL),	; [L1] read next byte from string
+	CASE [INT.RMODE] AT [SCANC.SPANC.NO.INTERRUPTS], ; case on interrupt pending
+		sim addr [rn] [1]
+
+;= ALIGNLIST 011*	(SCANC.SPANC.NO.INTERRUPTS, SCANC.SPANC.INTERRUPT)
+
+SCANC.SPANC.INTERRUPT:
+	;---------------------------------------; int = 1:
+	ACCESS [MD.T1],				; [L2] wait for read to complete
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+SCANC.SPANC.NO.INTERRUPTS:
+	;---------------------------------------; int = 0:
+	[MD.T3] <-- MEM ([G.3] + [MD.T1]),	; [L2] index table with character,
+	LEN(DL),				; read table entry
+		sim addr [ea] [3]
+
+;	SCANC/SPANC, continued.
+;	Main loop: mask table entry, decrement loop count.
+
+;	At this point:
+;		R0	=	loop count
+;		R1	=	source address
+;		R3	=	table address
+;		MD.T3	=	table entry
+;		MD.T4	=	mask
+;		STATE<3> =	1
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T3] AND [MD.T4], LEN(DL), ; [L3] mask table entry for compare
+	CALL [DECR.R0],				; [L4] decrement loop count
+		sim wbus.nzvc <-- [char.match.0z00]
+
+	;---------------------------------------;
+	[WBUS] <-- [G.0],			; [L5] set psl CCs, map is iiii
+	SET PSL CC, MAP.IIII, LONG,		; if exit cond met, psl CCs redone
+ 						; if loop count = 0, psl CCs = 0100
+	CASE [OPCODE2-0] AT [SCANC.COMPARE]	; case on SCANC vs. SPANC
+
+;	SCANC/SPANC, continued.
+;	SCANC: case on table entry AND mask EQL 0.
+
+;	At this point:
+;		R0	=	decremented loop count
+;		R1	=	source address
+;		R3	=	table address
+;		MD.T4	=	mask
+;		WBUS.Z	=	1 if table entry AND mask EQL 0
+;		STATE<3> =	1
+
+;= ALIGNLIST *10*	(SCANC.COMPARE,		SPANC.COMPARE)
+;  Opcodes = 2A, 2B --> opcode<2:0> = 01?
+
+SCANC.COMPARE:
+	;---------------------------------------; opcode<0> = 0 --> SCANC:
+	CASE [WBUS.NZV] AT [SCANC.NEQ]		; [L6] case on entry AND mask EQL 0
+
+;= ALIGNLIST 10**	(SCANC.NEQ,	SCANC.EQL)
+;  WBUS.NZVC set by AND --> V = C = 0
+
+SCANC.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.0] <-- [G.0] + 1,			; [L7] correct loop count
+	SET PSL CC, MAP.IIII, LONG,		; set PSL CCs, map is iiii
+						; count > 0, PSL CCs = 0000
+	GOTO [SCANC.SPANC.EXIT]			; clear R2 and exit
+
+SCANC.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.1] <-- [G.1] + 1, LONG,		; [L7] increment source address
+	CASE [WBUS.NZV] AT [SCANC.SPANC.LOOP],	; test loop count = 0
+		sim r[1] <-- r[1] + [1]
+
+;	SCANC/SPANC, continued.
+;	SPANC: case on table entry AND mask NEQ 0.
+
+;	At this point:
+;		R0	=	decremented loop count
+;		R1	=	source address
+;		R3	=	table address
+;		MD.T4	=	mask
+;		WBUS.Z	=	1 if table entry AND mask EQL 0
+;		STATE<3> =	1
+
+SPANC.COMPARE:
+	;---------------------------------------; opcode<0> = 1 --> SPANC:
+	CASE [WBUS.NZV] AT [SPANC.NEQ]		; [L6] case on entry AND mask NEQ 0
+
+;= ALIGNLIST 10**	(SPANC.NEQ,	SPANC.EQL)
+;  WBUS.NZVC set by AND --> V = C = 0
+
+SPANC.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.0] <-- [G.0] + 1,			; [L7] correct loop count
+	SET PSL CC, MAP.IIII, LONG,		; set PSL CCs, map is iiii
+						; count > 0, PSL CCs = 0000
+	GOTO [SCANC.SPANC.EXIT]			; clear R2 and exit
+
+SPANC.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.1] <-- [G.1] + 1, LONG,		; [L7] increment source address
+	CASE [WBUS.NZV] AT [SCANC.SPANC.LOOP],	; test loop count = 0
+		sim r[1] <-- r[1] + [1]
+
+;	One-line subroutine to decrement R0.
+
+DECR.R0:
+	;---------------------------------------;
+	[G.0] <-- [G.0] - 1, LONG,		; decrement loop count
+	RETURN,					; return to caller
+		sim r[0] <-- r[0] - [1],
+		sim wbus.nzvc <-- [rn.nz00]
+
+;	One-line subroutine to copy MD.T4 to SC and R3.
+
+LOAD.SC.AND.R3.FROM.T4:
+	;---------------------------------------;
+	SC&, [G.3] <-- [MD.T4], LONG,		; copy t4 to SC and R3
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	LOCC, SKPC"
+
+;	These instructions test a string of characters against a character.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC's	Dispatch   BCOND
+;	--------      ------	---------				----	-----		----	--------   -----
+;	LOCC		3A	search M[srcaddr...srcaddr+len-1]	3	rra/bwb		iiii	LOCC.SKPC.. --
+;					until char found
+;
+;	SKPC		3B	search M[srcaddr...srcaddr+len-1]	3	rra/bwb		iiii	LOCC.SKPC.. --
+;
+;	Entry conditions from specifier flows:
+;		MD.T0(S1) =	first (character) operand
+;		MD.T2(S2) =	second (source length) operand
+;		MD.T4(S3) =	third (source address) operand, unless register mode
+;		RN	=	register number of fourth specifier
+;		DL	=	data type of fourth operand (byte)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		R0 - R1 have been updated to the SRM specified values.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- R0 EQL 0
+;		V <-- 0				[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Note:	SCANC/SPANC are interruptible instructions.  If a memory management fault or interrupt
+;		occurs in mid instruction, the outstanding state is packed into R0 - R1, FPD is set,
+;		and the exception is processed.  When the instruction is redecoded, the state is unpacked
+;		and the instruction is resumed at the interruption point.
+;
+;	Size/performance tradeoffs:
+;		Testing the loop count before the character saves a cycle but costs 6 microwords.
+;		Unrolling the loop saves two cycles, but costs many microwords.
+
+;	The microcode uses a control block which is kept partially in the general registers,
+;	and partially in the working registers.  In greater detail:
+;
+;	General registers:
+;		R0	=	source count (at packup only: delta PC, match character, count)
+;		R1	=	srcaddr
+;
+;	Working registers:
+;		MD.T4	=	match character
+;
+.bin
+
+;	LOCC, SKPC operation:
+;
+;		if len > 0 then
+;			{for i = 0 to len - 1
+;				if src[i] eq/neq char then exit}}
+
+;	Note:	STATE<3> must not be set in the first two microinstuctions
+;		to avoid calling the packup routine on a memory management
+;		microtrap caused by the last specifier.
+
+LOCC.SKPC..:
+	;********** Hardware dispatch **********;
+	[G.0] <-- [MD.T2],			; [1] copy loop count to R0
+						; test for count = 0
+	SET PSL CC, MAP.IIII, LONG,		; set PSL CCs, map is iiii
+		sim load character gprs,
+		sim r[0],
+		sim wbus.nzvc <-- [rn.nz00]
+
+	;---------------------------------------;
+	[G.1] <-- [MD.T4], LONG			; [2] copy string address to R1
+
+	;---------------------------------------;
+	[MD.T4] <-- [MD.T0], LONG		; [3] copy match character to T4
+
+LOCC.SKPC.RESTART:				; restart here from FPD entry
+	;---------------------------------------; opcode<4> = 1 --> LOCC/SKPC:
+	STATE3 <-- 1,				; [4] flag interruptable instruction
+	DL <-- BYTE,				; set DL to byte for reads
+	CASE [WBUS.NZV] AT [LOCC.SKPC.LOOP]	; case on string length = 0
+
+;	LOCC/SKPC, continued.
+;	Main loop: read character, test for interrupts,
+;	compare with match character, decrement loop count.
+
+;	At this point:
+;		R0	=	loop count
+;		R1	=	source address
+;		MD.T4	=	match character
+;		PSL map =	IIII
+;		STATE<3> =	1
+
+;= ALIGNLIST 10**	(LOCC.SKPC.LOOP,	LOCC.SKPC.EXIT)
+;  WBUS.NZVC set by pass or subtract of word in longword --> V = 0
+
+LOCC.SKPC.LOOP:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T1] <-- MEM ([G.1]), LEN(DL),	; [L1] read next byte from string
+	CASE [INT.RMODE] AT [LOCC.SKPC.NO.INTERRUPTS], ; case on interrupt pending
+		sim addr [rn] [1]
+
+;= ALIGNLIST 011*	(LOCC.SKPC.NO.INTERRUPTS, LOCC.SKPC.INTERRUPT)
+
+LOCC.SKPC.INTERRUPT:
+	;---------------------------------------; int = 1:
+	ACCESS [MD.T1],				; [L2] wait for read to complete
+	GOTO [IE.INTERRUPT]			; enter interrupt fault processor
+
+LOCC.SKPC.NO.INTERRUPTS:
+	;---------------------------------------; int = 0:
+	[WBUS] <-- [MD.T1] XOR [MD.T4], LEN(DL), ; [L3] compare with match character
+	CALL [DECR.R0],				; [L4] decrement loop count
+		sim wbus.nzvc <-- [char.match.0z00]
+
+	;---------------------------------------;
+	[WBUS] <-- [G.0],			; [L5] set psl CCs, map is iiii
+	SET PSL CC, MAP.IIII, LONG,		; if exit cond met, psl CCs redone
+						; if loop count = 0, psl CCs = 0100
+	CASE [OPCODE2-0] AT [LOCC.COMPARE]	; case on LOCC vs. SKPC
+
+;	LOCC/SKPC, continued.
+;	LOCC: case on source character EQL match character.
+
+;	At this point:
+;		R0	=	decremented loop count
+;		R1	=	source address
+;		MD.T4	=	match character
+;		WBUS.Z	=	1 if source character EQL match character
+;		PSL map	=	IIII
+;		STATE<3> =	1
+
+;= ALIGNLIST *10*	(LOCC.COMPARE,		SKPC.COMPARE)
+;  Opcodes = 3A, 3B --> opcode<2:0> = 01?
+
+LOCC.COMPARE:
+	;---------------------------------------; opcode<0> = 0 --> LOCC:
+	CASE [WBUS.NZV] AT [LOCC.NEQ]		; [L4] case on result of compare
+
+;= ALIGNLIST 10**	(LOCC.NEQ,	LOCC.EQL)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+LOCC.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.0] <-- [G.0] + 1,			; [L5] correct loop count
+	SET PSL CC, LONG,			; set PSL CCs, map is iiii
+						; count > 0, PSL CCs = 0000
+	STATE3-0 <-- 0,				; clear state flags
+	LAST CYCLE				; decode next instruction
+
+LOCC.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.1] <-- [G.1] + 1, LONG,		; [L5] increment source address
+	CASE [WBUS.NZV] AT [LOCC.SKPC.LOOP],	; case on loop count = 0
+		sim r[1] <-- r[1] + [1]
+
+LOCC.SKPC.EXIT:
+	;---------------------------------------; wbus.z = 1:
+	STATE3-0 <-- 0,				; clear state bits
+	LAST CYCLE				; decode next instruction
+
+;	LOCC/SKPC, continued.
+;	SKPC: case on source character NEQ match character.
+
+;	At this point:
+;		R0	=	decremented loop count
+;		R1	=	source address
+;		MD.T4	=	match character
+;		WBUS.Z	=	1 if source character EQL match character
+;		PSL map	=	IIII
+;		STATE<3> =	1
+
+SKPC.COMPARE:
+	;---------------------------------------; opcode<0> = 1 --> SKPC:
+	CASE [WBUS.NZV] AT [SKPC.NEQ]		; [L4] case on result of compare
+
+;= ALIGNLIST 10**	(SKPC.NEQ,	SKPC.EQL)
+;  WBUS.NZVC set by XOR --> V = C = 0
+
+SKPC.NEQ:
+	;---------------------------------------; wbus.z = 0:
+	[G.0] <-- [G.0] + 1,			; [L5] correct loop count
+	SET PSL CC, LONG,			; set PSL CCs, map is iiii
+						; count > 0, PSL CCs = 0000
+	STATE3-0 <-- 0,				; clear state flags
+	LAST CYCLE				; decode next instruction
+
+SKPC.EQL:
+	;---------------------------------------; wbus.z = 1:
+	[G.1] <-- [G.1] + 1, LONG,		; [L5] increment source address
+	CASE [WBUS.NZV] AT [LOCC.SKPC.LOOP],	; test loop count = 0
+		sim r[1] <-- r[1] + [1]
+
+.nobin
+.TOC	"	String Packup Routine"
+
+;	This routine is invoked by the exception processor microcode
+;	if an interrupt or exception occurs during one of the eight
+;	string instructions.  It packs up the current instruction
+;	state into the general registers, sets FPD, and returns to the
+;	exception processor.
+
+;	On entry, MD.T6 contains the current PC and MD.T4 contains the
+;	left-justified fill character, mask, or match character.
+;	For each instruction, state needed to restart the instruction is
+;	collected and packed into the general registers as indicated:
+
+;	MOVCx:
+;		Entry						Exit
+;		R0	=	loop count - 2*[kdl]		R0	=	delta PC, fill character, loop count
+;		R1	=	initial srcaddr			R1	=	initial srcaddr
+;		R2	=	initial loop count		R2	=	initial loop count
+;		R3	=	initial dstaddr			R3	=	initial dstaddr
+;		R4	=	srclen - dstlen			R4	=	srclen - dstlen
+;		MD.T4<31:24> =	fill character			R5	=	state flags
+;		state<2,0> =	type of move			
+
+;	CMPCx:
+;		Entry						Exit
+;		R0	=	src1 count			R0	=	delta PC, fill character, src1 count
+;		R1	=	src1addr			R1	=	src1addr
+;		R2	=	src2 count			R2	=	src2count
+;		R3	=	src2addr			R3	=	src2addr
+;		MD.T4<31:24> =	fill character
+
+;	LOCC/SKPC:
+;		Entry						Exit
+;		R0	=	source count			R0	=	delta PC, match character, source count
+;		R1	=	srcaddr				R1	=	srcaddr
+;		MD.T4<31:24> =	match character
+
+;	SCANC/SPANC:
+;		Entry						Exit
+;		R0	=	source count			R0	=	delta PC, mask, source count
+;		R1	=	srcaddr				R1	=	srcaddr
+;		R3	=	table address			R3	=	table address
+;		MD.T4<31:24> =	mask
+
+.bin
+
+;	String packup, Continued.
+
+;	At this point, the general registers contain all required state,
+;	except as noted:
+;		R0	=	loop count {- 2*[kdl] if MOVCx}
+;		MD.T4<31:24> =	fill character, mask, or match character
+;		MD.T6	=	current PC
+;		STATE<2,0> =	type of move {if MOVCx}
+
+STRING.PACK:
+	;---------------------------------------; wbus.z = 1 --> opcode<6> = 0 --> string:
+	[PSL] <-- [PSL] OR [08]000000,		; set PSL<fpd>
+	CALL [BACKUP.PC]			; set PC to backup PC
+
+	;---------------------------------------;
+	[MD.T6] <-- (-[PC] + [MD.T6]),		; calculate delta PC
+	CALL [FLUSH.AND.RETURN]			; flush I-box after PSL change
+
+	;---------------------------------------;
+	[MD.T4] <-- [MD.T6]!![MD.T4] RSH [8.],	; combine delta PC, char/mask
+	CASE [OPCODE2-0] AT [MOVC.PACK]		; case on opcode
+
+;	String packup, continued
+;	MOVCx-specific packup routine.  Adjust the loop count and
+;	save the state flags.
+;
+;	At this point,
+;		R0	=	loop count - 2*[kdl]
+;		MD.T4	=	delta PC, char/mask in <31:16>
+;		STATE<2,0> =	type of move {if MOVCx}
+
+;= ALIGNLIST 100*	(MOVC.PACK,		CMPC.PACK,
+;=			 SCANC.LOCC.PACK,	SPANC.SKPC.PACK)
+
+MOVC.PACK:
+	;---------------------------------------; opcode<1:0> = 00 --> MOVCx:
+	[G.0] <-- [G.0] + [KDL], LONG		; restore loop count
+
+	;---------------------------------------;
+	[G.0] <-- [G.0] + [KDL], LONG,		; restore loop count
+	STATE3-0 <-- 0,				; clear state<3> to avoid potential
+						; machine check loop below
+	CASE [STATE2-0] AT [MOVC.PACK.00]	; fill in flags via case
+
+;= ALIGNLIST 010*	(MOVC.PACK.00,	MOVC.PACK.01,
+;=			 MOVC.PACK.10,	MOVC.PACK.UNKNOWN)
+
+MOVC.PACK.00:
+	;---------------------------------------; state<2,0> = 00:
+	[G.5] <-- 000000[00], LONG,		; save state<2,0>
+	GOTO [MOVC.PACK.EXIT]			; exit thru common exit
+
+MOVC.PACK.01:
+	;---------------------------------------; state<2,0> = 01:
+	[G.5] <-- 000000[01], LONG,		; save state<2,0>
+	GOTO [MOVC.PACK.EXIT]			; exit thru common exit
+
+MOVC.PACK.10:
+	;---------------------------------------; state<2,0> = 10:
+	[G.5] <-- 000000[04], LONG,		; save state<2,0>
+	GOTO [MOVC.PACK.EXIT]			; exit thru common exit
+
+MOVC.PACK.UNKNOWN:
+	;---------------------------------------; state<2,0> = 11:
+	MACHINE CHECK [MCHK.MOVC.STATUS]	; impossible state, die
+
+;	String packup, continued
+;	CMPCx, LOCC, SKPC, SCANC, SPANC-specific packup routines.  Combine
+;	delta PC, char/mask, and loop count.
+;
+;	At this point,
+;		R0	=	loop count
+;		MD.T4	=	delta PC, char/mask in <31:16>
+
+MOVC.PACK.EXIT:
+CMPC.PACK:
+	;---------------------------------------; opcode<1:0> = 01 --> CMPCx:
+	[G.0] <-- [G.0] OR [MD.T4], LONG,	; merge delta PC, char, count
+	STATE3-0 <-- 0, RETURN			; clear state, return to INTEXC caller
+
+SCANC.LOCC.PACK:
+	;---------------------------------------; opcode<1:0> = 10 --> SCANC/LOCC:
+	[G.0] <-- [G.0] OR [MD.T4], LONG,	; merge delta PC, char, count
+	STATE3-0 <-- 0, RETURN			; clear state, return to INTEXC caller
+
+SPANC.SKPC.PACK:
+	;---------------------------------------; opcode<1:0> = 11 --> SPANC/SKPC:
+	[G.0] <-- [G.0] OR [MD.T4], LONG,	; merge delta PC, char, count
+	STATE3-0 <-- 0, RETURN			; clear state, return to INTEXC caller
+
+;	One line subroutine to flush instruction buffer, reload PC, VIBA.
+
+FLUSH.AND.RETURN:
+	;---------------------------------------;
+	[WBUS] <-- [PC],			; for interrupt passive release
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+	ENABLE IB PREFETCH,			; enable prefetching in case disabled
+	RETURN					; return
+
+;	One-line subroutine to set PC to backup PC.
+
+BACKUP.PC:
+	;---------------------------------------;
+	PC <-- BACKUP PC,			; set PC to BPC
+	RETURN					; return
+
+.nobin
+.TOC	"	String Unpack Routine"
+
+;	This routine is invoked by the FPD processor microcode
+;	to restart a string instruction following an interrupt or exception.
+;	It unpacks the current instruction state from the general
+;	registers, clears FPD, and restarts the instruction.
+
+;	On entry at SCANC.LOCC.FPD, SC<7:3,1> contains opcode<7:3,1>.
+;	For each instruction, state needed to restart the instruction is
+;	extracted from the general registers and restored as indicated:
+
+;	MOVCx:
+;		Entry							Exit
+;		R0	=	delta PC, fill character, loop count	R0	=	loop count
+;		R1	=	initial srcaddr				R1	=	initial srcaddr
+;		R2	=	initial loop count			R2	=	initial loop count
+;		R3	=	initial dstaddr				R3	=	initial dstaddr
+;		R4	=	srclen - dstlen				R4	=	srclen - dstlen
+;		R5	=	state flags				MD.T4<7:0> =	fill character
+;									MD.T5<15:0> =	two copies of fill character
+;											(fill state only)
+;									STATE<2,0> =	type of move
+;									STATE<3> =	1
+
+;	CMPCx:
+;		Entry							Exit
+;		R0	=	delta PC, fill character, src1 count	R0	=	src1 count
+;		R1	=	src1addr				R1	=	src1addr
+;		R2	=	src2 count				R2	=	src2 count
+;		R3	=	src2addr				R3	=	src2addr
+;									MD.T4<7:0> =	fill character
+
+;	LOCC/SKPC:
+;		Entry							Exit
+;		R0	=	delta PC, match character, source count	R0	=	source count
+;		R1	=	srcaddr					R1	=	srcaddr
+;									MD.T4<7:0> =	match character
+
+;	SCANC/SPANC:
+;		Entry							Exit
+;		R0	=	delta PC, mask, source count		R0	=	source count
+;		R1	=	srcaddr					R1	=	srcaddr
+;		R3	=	table address				R3	=	table address
+;									MD.T4<7:0> =	mask
+
+.bin
+
+;	String unpack, continued.
+
+;	At this point,
+;		SC	=	opcode<7:3,1> (SCANC.LOCC.FPD entry only)
+
+;	The general registers contain instruction-specific data, with the
+;	following exceptions:
+;		R0	=	<delta PC><char/mask><loop count>
+;		R5	=	state flags {if MOVCx}
+
+;	Prefetch is disabled for both entry points.
+
+MOVC.CMPC.FPD:
+	;---------------------------------------; wbus.z = 1:
+	[SC] <-- [G.5], LONG			; [1] copy flags to SC for case
+
+SCANC.LOCC.FPD:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T4] <-- S[G.0], LONG,		; [2] get delta PC, char, count
+						;   <31:24> = delta PC
+						;   <23:16> = char
+						;   <15:0>  = loop count
+	PC <-- BACKUP PC			; set PC to BPC
+
+	;---------------------------------------;
+	[PSL] <-- [PSL] ANDNOT [8]000000,	; [3] clear PSL<fpd>
+	DL <-- WORD				; set DL to word for extract
+
+	;---------------------------------------;
+	[MD.T6] <-- ZEXT.[MD.T4] RSH [24.]	; [4] isolate delta PC
+
+	;---------------------------------------;
+	[WBUS] <-- [PC] + [MD.T6],		; [5] add delta PC to PC
+	LOAD VIBA AND PC,			; load PC, VIBA, flush IB
+						; >> load PC, no decode in next 2 cycles
+	ENABLE IB PREFETCH			; re-enable prefetch
+
+	;---------------------------------------;
+	[MD.T6] <-- [G.0], LEN(DL)		; [6] zero-extend loop count,
+						; test for zero
+
+	;---------------------------------------;
+	[G.0] <-- S[MD.T6], LONG,		; [7] zero-extend loop count,
+						; test for zero
+	STATE3 <-- 1,				; flag interruptible instruction
+	CASE [OPCODE2-0] AT [MOVC.CMPC.UNPACK]	; case on opcode<1> = MOVC/CMPC vs others
+
+;= ALIGNLIST 101*	(MOVC.CMPC.UNPACK,	SCANC.LOCC.UNPACK)
+
+;	SCANC/SPANC/LOCC/SKPC unpack.
+;	Complete unpack and return to interrupted instruction.
+
+;	At this point,
+;		R0	=	zero-extended source count
+;		R1	=	srcaddr
+;		R3	=	table address (SCANC/SPANC only)
+;		MD.T4<23:16> =	mask or match character
+;		SC	=	opcode<7:3,1>
+;		STATE<3> =	1
+;		WBUS.Z	=	set from MD.T6 (cycle 6)
+
+SCANC.LOCC.UNPACK:
+	;---------------------------------------; opcode<1> = 1 --> SCANC/SPANC/LOCC/SKPC:
+	[MD.T4] <-- ZEXT.[MD.T4] RSH [16.],	; [8] right justify char/mask
+	CASE [SC5-3] AT [SCANC.SPANC.RESTART]	; case on SCANC/SPANC vs LOCC/SKPC
+						; destination cases on
+						; srclen = 0 from cycle [6]
+
+;= ALIGNLIST 101*	(SCANC.SPANC.RESTART,	LOCC.SKPC.RESTART)
+
+;	MOVCx/CMPCx unpack.
+;	Complete unpack and return to interrupted instruction.
+
+;	At this point, R0, R1, and R3 are correct,
+;		MD.T4<23:16> =	fill character
+;		MD.T6	=	loop or src1 count, zero extended
+;		STATE<3> =	1
+;		SC	=	state flags (MOVCx only)
+;		WBUS.Z	=	set from R0 (cycle 7)
+
+MOVC.CMPC.UNPACK:
+	;---------------------------------------; opcode<1> = 0 --> MOVCx, CMPCx:
+	[MD.T5] <-- [G.2], LEN(DL)		; [8] isolate 16 bits of count,
+						; test for zero
+
+	;---------------------------------------;
+	[MD.T4] <-- ZEXT.[MD.T4] RSH [16.],	; [9] right justify char/mask
+	CASE [OPCODE2-0] AT [MOVC.UNPACK]	; case on MOVC vs CMPC
+
+;= ALIGNLIST 1*0*	(MOVC.UNPACK,		CMPC.UNPACK)
+;  Opcodes = 28, 29, 2C, 2D --> opcode<2:0> = ?0?
+
+CMPC.UNPACK:
+	;---------------------------------------; opcode<0> = 1 --> CMPCx:
+	[G.2] <-- [MD.T5], LONG,		; [10] zero extend src2len
+	CASE [WBUS.NZV] AT [CMPCX.SRC1.NEQ.ZERO] ; case on src1len = 0
+						; from cycle [7]
+						; destination then cases on
+						; src2len = 0 from cycle [8]
+
+MOVC.UNPACK:
+	;---------------------------------------; opcode<0> = 0 --> MOVCx:
+	[MD.T0] <-- [MD.T5] - [MD.T6],		; [10] calculate
+						; initial - current loop count
+	CASE [SC2-0] AT [MOVC.FPD.FORWARD]	; case on SC<2,0> = STATE<2,0>
+
+;	MOVCx unpack, continued.
+;	Restore state and restart move forward operation.
+
+;	At this point,
+;		R0	=	loop count, zero extended
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T0	=	initial loop count - current loop count
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	initial loop count, zero extended
+;		MD.T6	=	current loop count, zero extended
+;		STATE<3:0> =	1000
+
+;= ALIGNLIST 010*	(MOVC.FPD.FORWARD,	MOVC.FPD.FILL,
+;=			 MOVC.FPD.BACKWARD,	MOVC.FPD.ERROR)
+
+MOVC.FPD.FORWARD:
+	;---------------------------------------; sc<2,0> = 00:
+	[SC] <-- [G.3] + [MD.T0],		; [11] calculate next dstaddr for
+						; alignment
+	CALL [WAIT.ONE.CYCLE]			; [12] wait for SC load
+
+	;---------------------------------------;
+	[G.2] <-- [MD.T5], LONG,		; [13] set R2 = initial loop count
+	GOTO [MOVC.ALIGN.DST]			; go case into forward loop
+
+MOVC.FPD.ERROR:
+	;---------------------------------------; sc<2,0> = 11:
+	RESERVED OPERAND FAULT			; [11] impossible state, fault
+
+;	MOVCx unpack, continued.
+;	Restore state and restart move backward operation.
+
+;	At this point,
+;		R0	=	loop count, zero extended
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	srclen - dstlen
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	initial loop count, zero extended
+;		MD.T6	=	current loop count, zero extended
+;		STATE<3:0> =	1000
+
+MOVC.FPD.BACKWARD:
+	;---------------------------------------; sc<2,0> = 10:
+	[SC] <-- [G.3] + [MD.T6],		; [11] initial dstaddr + loop count
+	CALL [WAIT.ONE.CYCLE]			; [12] wait for SC load
+
+	;---------------------------------------;
+	[G.2] <-- S[MD.T5], LONG,		; [13] set R2 = initial loop count
+	STATE2 <-- 1,				; flag backward move
+	GOTO [MOVC.ALIGN.DST]			; go case into backward loop
+
+;	MOVCx unpack, continued.
+;	Restore state and restart fill operation.
+
+;	At this point,
+;		R0	=	loop count, zero extended
+;		R1	=	final srcaddr
+;		R3	=	current dstaddr
+;		MD.T4<7:0> =	fill character
+;		MD.T5	=	initial loop count, zero extended
+;		MD.T6	=	current loop count, zero extended
+;		STATE<3:0> =	1000
+
+MOVC.FPD.FILL:
+	;---------------------------------------; sc<2,0> = 01:
+	[SC] <-- [G.3],				; [11] current dstaddr
+	CALL [DUPLICATE.FILL.CHARACTER]		; [12] duplicate fill character
+
+	;---------------------------------------;
+	[MD.T5] <-- [MD.T4]!![MD.T5] RSH [8.],	; [13] MD.T5<31:24> contains a
+						; word of fill
+	GOTO [MOVC.FILL.SETUP]			; go rejoin fill code
+
+;	One-line subroutine to duplicate the fill character into MD.T5<31:24>.
+
+DUPLICATE.FILL.CHARACTER:
+	;---------------------------------------;
+	[MD.T5] <-- [MD.T4] LSH [24.],		; duplicate fill character
+	RETURN
+
+;= END CSTRING

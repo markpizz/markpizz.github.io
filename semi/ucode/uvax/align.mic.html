@@ -1,0 +1,312 @@
+.TOC 	"ALIGN.MIC -- Alignment Tables for MicroVAX Hardware Dispatches"
+.TOC	"Revision 8.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 08	12-Apr-84	[RMS]	Editorial changes for pass 2
+;	21-Nov-83	[RMS]	Revised dispatch for CHMx
+;	7-Oct-83	[RMS]	Revised dispatch for AOBLSS, AOBLEQ
+;	19-Sep-83	[RMS]	Revised for BECSR removal
+; 07	15-Sep-83	[RMS]	Revised for memory management changes
+;	10-Jun-83	[RMS]	Removed duplicate IID exception dispatches
+; 06	1-Jun-83	[RMS]	Removed third at/dl field
+;	5-May-83	[RMS]	Revised for separate POLYD dispatch
+; 05	13-Mar-83	[RMS]	Major code compression
+;	3-Jan-83	[RMS]	Revised microtrap address assignments
+;	27-Dec-82	[RMS]	Editorial changes
+;	22-Nov-82	[RMS]	Added EMODf, POLYf
+; 04	3-Nov-82	[RMS]	Added d_floating instructions
+;	14-Oct-82	[RMS]	Added ACBf
+;				Consolidated F,G instructions
+; 03	13-Oct-82	[RMS]	Added emulated instructions
+;				Fixed EMUL allocation problem
+;	12-Oct-82	[RMS]	Revised for smaller microstore
+; 02	22-Sep-82	[RMS]	Revised for floating point dispatch
+;	6-Sep-82	[RMS]	Editorial changes
+;	5-Sep-82	[RMS]	Revised dispatch for REMQUE, REMQHI, REMQTI
+;	1-Sep-82	[RMS]	Revised dispatch for memory management microtraps
+;	30-Aug-82	[RMS]	Revised dispatch for DIVx2
+;	29-Aug-82	[RMS]	Revised dispatch for MULx2, MULx3
+;	23-Aug-82	[RMS]	Created ASHLX to solve ASHL allocation problem
+;	20-Aug-82	[RMS]	Revised dispatch for BLBC
+;	19-Aug-82	[RMS]	Revised dispatch for all complex branches
+;	18-Aug-82	[RMS]	Fixed missing quotes for .TOC's, added .bins for allocator
+;	17-Aug-82	[RMS]	Removed optimized dispatch for BBxx
+;	15-Aug-82	[RMS]	Revised alignment for new EXTV dispatch
+;	13-Aug-82	[RMS]	Revised alignments for PUSHX, CVTFG, CVTGF
+; 01	11-Aug-82	[RMS]	Initial edit for MicroVAX
+.bin
+
+.TOC	"	Microtrap Dispatches"
+
+;	These microtrap addresses occur as the result of memory management
+;	or hardware errors.
+
+;	The microtraps and their offsets are:
+;
+;	Cross page boundary				00
+;	TB miss 					02
+;	ACV/TNV						04
+;	M = 0						06
+;	Bus error, read virtual				08
+;	Bus error, read physical			0A
+;	Bus error, write virtual			0C
+;	Bus error, write physical			0E
+;	Optimized integer overflow			10
+;							12
+;							14
+;							16
+;	Illegal opcode					18
+;	Bus error, interrupt vector			1A
+;	FPU error					1C
+;							1E
+
+;= AT 40
+;= ALIGNLIST 0000*		(			; offset
+;= MM.CPB..A,			MM.TBM..A,		; 00 - 02
+;= MM.ACV.TNV..A,		MM.M0..A,		; 04 - 06
+;= IE.BUSERR.READ.VIRT..A,	IE.BUSERR.READ.PHYS..A,	; 08 - 0A
+;= IE.BUSERR.WRITE.VIRT..A,	IE.BUSERR.WRITE.PHYS..A,; 0C - 0E
+;= IE.INTOV..A,				,		; 10 - 12
+;=			,		,		; 14 - 16
+;= IE.ILLOP..A,			IE.BUSERR.INT.VEC..A,	; 18 - 1A
+;= FP.ERR..A,				)		; 1C - 1E
+
+.TOC	"	IID Dispatches"
+
+;	IID can dispatch down one of three general trees:
+;		IID exceptions
+;		IID opcodes (zero specifiers)
+;		IID first specifier decode
+
+;= AT 100
+;= ALIGNLIST 0000*	(			; offset
+;=		,			,
+;= IID.PREFETCH.STALL..A,  IID.PREFETCH.HALT..A,; 00 - 06 ;I
+;= 		,			,
+;= IID.VAX.TRACE.TRAP..A, IID.INTERRUPT..A,  	; 08 - 0E ;I
+;= 		,			,
+;= IID.VAX.ARITH.TRAP..A,		,	; 10 - 16 ;I
+;= 		,			,
+;=		,			,	; 18 - 1E ;I
+;= BRB..A,				,
+;= BSBB..A,				,	; 20 - 26 ;I
+;= XFC..A,		XFD..A,
+;= FPD..A,				,	; 28 - 2E ;I
+;= HALT..A,		NOP..A,
+;= REI..A,         	BPT..A,			; 30 - 36 ;I
+;= RET..A,		RSB..A,
+;= LDPCTX..A,		SVPCTX..A, 		; 38 - 3E ;I
+;= FSD.SH.LIT..A,	FSD.INDEX..A,
+;= FSD.IB.STALL..A,	FSD.IB.HALTED..A,	; 40 - 46 ;I
+;= FSD.IMED..A,		FSD.RMODE..A,
+;= FSD.REG.DEFER..A,	FSD.PC.FAULT..A,        ; 48 - 4E ;I
+;= FSD.AUTODEC..A,	FSD.AUTOINC..A,
+;= FSD.AUTOINC.DEFER..A,FSD.ABSOLUTE..A,	; 50 - 56 ;I
+;= FSD.BW.DISP..A,	FSD.L.DISP..A,
+;= FSD.BW.DISP.DEFER..A,FSD.L.DISP.DEFER..A)	; 58 - 5E ;I
+
+.TOC	"	NSD Dispatches"
+
+;	NSD can dispatch down one of three general trees:
+;		NSD specifier dispatch
+;		NSD execution dispatch
+;		NSD optimized execution dispatch
+
+.TOC	"		NSD Specifier Dispatch"
+
+;	The offsets for SSD dispatch are, relative to 280, the same as for FSD
+;	dispatch, relative to 240.
+
+;= AT 180
+;= ALIGNLIST 0000*	(			; offset
+;= SSD.SH.LIT..A,	SSD.INDEX..A,
+;= SSD.IB.STALL..A,	SSD.IB.HALTED..A,	; 00 - 06
+;= SSD.IMED..A,		SSD.RMODE..A,
+;= SSD.REG.DEFER..A,	SSD.PC.FAULT..A,       	; 08 - 0E
+;= SSD.AUTODEC..A,	SSD.AUTOINC..A,
+;= SSD.AUTOINC.DEFER..A,SSD.ABSOLUTE..A,	; 10 - 16
+;= SSD.BW.DISP..A,	SSD.L.DISP..A,
+;= SSD.BW.DISP.DEFER..A,SSD.L.DISP.DEFER..A)	; 18 - 1E
+
+.TOC	"		NSD Execution Dispatch"
+
+;	The execution dispatch offset is merely the opcode*2, except in cases
+;	where the dispatch mask has been used to combine or displace groups of opcodes.
+
+;	Note the following special mappings:
+;
+;		MOVX	=	10		;MOVx, MOVAx, MOVZxy
+;		CLRX	=	14		;CLRx
+;		PUSHX	=	15		;PUSHL, PUSHAx
+;		ASHLX	=	18		;ASHL
+;		EMULX	=	1A		;EMUL
+;		CVTGFX	=	30		;CVTGF
+;		POLYDX	=	71		;POLYD
+
+;= AT 200
+;= ALIGNLIST 0000*	( 					; opcode
+;= 	,		,		,		,	; 00 - 03 ;X
+;= 	,		,		,		,	; 04 - 07 ;X
+;= CVTPS..A,		,	INDEX..A,		,	; 08 - 0B ;X
+;= PROBER..A,		,	INSQUE..A,	REMQUE..A,	; 0C - 0F ;X
+;= MOVX..A,		,		,		,	; 10 - 13 ;X
+;= CLRX..A,	PUSHX..A,	JSB..A,		JMP..A,		; 14 - 17 ;X
+;= ASHLX..A,		,	EMULX..A,		,	; 18 - 1B ;X
+;=	,		,		,		,	; 1C - 1F ;X
+;= ADDP4..A,	ADDP6..A,		,		,	; 20 - 23 ;X
+;= CVTPT..A,		,		,		,	; 24 - 27 ;X
+;= MOVC3..A,	CMPC3..A,	SCANC..A,		,	; 28 - 2B ;X
+;= MOVC5..A,	CMPC5..A, 	MOVTC..A,		,	; 2C - 2F ;X
+;= CVTGFX..A,		,	CVTWL..A,	CVTWB..A,	; 30 - 33 ;X
+;= MOVP..A,		,	CVTPL..A,	CMPP4..A,	; 34 - 37 ;X
+;= EDITPC..A,	MATCHC..A,	LOCC..A,		,	; 38 - 3B ;X
+;= 	,	ACBW..A, 		,		,	; 3C - 3F ;X
+;= ADDF2..A,	ADDF3..A,		,		,	; 40 - 43 ;X
+;= 	,		,		,		,	; 44 - 47 ;X
+;= CVTFB..A,		,		,		,	; 48 - 4B ;X
+;= CVTBF..A,		,		,	ACBF..A,	; 4C - 4F ;X
+;= MOVF..A,	CMPF..A,		,		,	; 50 - 53 ;X
+;= EMODF..A,	POLYF..A,	CVTFD..A,		,	; 54 - 57 ;X
+;= ADAWI..A,		,		,		,	; 58 - 5B ;X
+;= INSQHI..A,		,	REMQHI..A,		,	; 5C - 5F ;X
+;= 	,		,		,		,	; 60 - 63 ;X
+;= 	,		,		,		,	; 64 - 67 ;X
+;= CVTGB..A,		,		,		,	; 68 - 6B ;X
+;= CVTBG..A,		,		,	ACBG..A,	; 6C - 6F ;X
+;= MOVG..A,	POLYDX..A,		,	TSTD..A,	; 70 - 73 ;X
+;= EMODG..A,	POLYG..A,	CVTDF..A,		,	; 74 - 77 ;X
+;= 	,	ASHQ..A,		,	EDIV..A,	; 78 - 7B ;X
+;=	,		,		,		,	; 7C - 7F ;X
+;= ADDB2..A,  	ADDB3..A,  	SUBB2..A,  	SUBB3..A,	; 80 - 83 ;X  
+;= MULB2..A,  		,	DIVB2..A,  	DIVB3..A,	; 84 - 87 ;X
+;= BISB2..A,  	BISB3..A,  	BICB2..A,  	BICB3..A,	; 88 - 8B ;X  
+;= XORB2..A,  	XORB3..A,  	MNEGB..A,  	CASEB..A,	; 8C - 8F ;X
+;= 	,	CMPB..A,	MCOMB..A,	BITB..A,	; 90 - 93 ;X
+;= 	,	TSTB..A,	INCB..A,	DECB..A, 	; 94 - 97 ;X
+;= CVTBL..A,		,		,		,	; 98 - 9C ;X
+;= ROTL..A,	ACBB..A,		,		,	; 9D - 9F ;X
+;= 	,		,		,		,	; A0 - A3 ;X
+;= MULW2..A,		,		,		,	; A4 - A7 ;X
+;= 	,		,		,		,	; A8 - AB ;X
+;= 	,		,		,		,	; AC - AF ;X
+;= 	,		,		,		,	; B0 - B3 ;X
+;= 	,		,		,		,	; B4 - B7 ;X
+;= BISPSW..A,	CVTFG..A,	POPR..A,	PUSHR..A,	; B8 - BB ;X
+;= CHMK..A,	CHME..A,	CHMS..A,	CHMU..A,	; BC - BF ;X
+;= 	,		,		,		,	; C0 - C3 ;X
+;= MULL2..A,		,		,		,	; C4 - C7 ;X
+;= 	,		,		,		,	; C8 - CB ;X
+;= 	,		,		,		,	; CC - CF ;X
+;= 	,		,		,		,	; D0 - D3 ;X
+;= 	,		,		,		,	; D4 - D7 ;X
+;= ADWC..A,	SBWC..A,	MTPR..A,	MFPR..A,	; D8 - DB ;X
+;= MOVPSL..A,  		,		,		,	; DC - DF ;X
+;= BBS..A, 	BBC..A, 		,		,	; E0 - E3 ;X
+;= 	,		,		,		,	; E4 - E7 ;X
+;= BLBS..A,	BLBC..A,	FFS..A,			,	; E8 - EB ;X
+;= CMPV..A,		,		,		,	; EC - EF ;X
+;= INSV..A,	ACBL..A,	AOBLSS..A,		,	; F0 - F3 ;X
+;= SOBGEQ..A,		,	CVTLB..A,	CVTLW..A,	; F4 - F7 ;X
+;= ASHP..A,	CVTLP..A,	CALLG..A,		,	; F8 - FB ;X
+;=	,		,		,		)	; FC - FF ;X
+
+.TOC	"		NSD Optimization Dispatch"
+
+;	The optimization dispatch offset is merely the opcode*2, except in cases
+;	where the dispatch mask has been used to combine or displace groups of opcodes.
+
+;	Note the following special mappings:
+;		MOVX	=	10		;MOVx, MOVAx, MOVZxy
+
+;= AT 400
+;= ALIGNLIST 0000*	( 					; opcode
+;= 	,		,		,		,	; 00 - 03 ;X
+;= 	,		,		,		,	; 04 - 07 ;X
+;= 	,		,		,		,	; 08 - 0B ;X
+;= 	,		,		,		,	; 0C - 0F ;X
+;= MOVX.OP..A,		,		,		,	; 10 - 13 ;X
+;= 	,		,		,		,	; 14 - 17 ;X
+;= 	,		,		,		,	; 18 - 1B ;X
+;=	,		,		,		,	; 1C - 1F ;X
+;= 	,		,		,		,	; 20 - 23 ;X
+;=	,		,		,		,	; 24 - 27 ;X
+;= 	,		,		,		,	; 28 - 2B ;X
+;= 	,		, 		,		,	; 2C - 2F ;X
+;= 	,		,		,		,	; 30 - 33 ;X
+;= 	,		,		,		,	; 34 - 37 ;X
+;=	,		,		,		,	; 38 - 3B ;X
+;= 	,		,		,		,	; 3C - 3F ;X
+;= ADDF2.OP..A,	ADDF3.OP..A,		,		,	; 40 - 43 ;X
+;= 	,		,		,		,	; 44 - 47 ;X
+;= 	,		,		,		,	; 48 - 4B ;X
+;= 	,		,		,		,	; 4C - 4F ;X
+;= 	,		,		,		,	; 50 - 53 ;X
+;= 	,		,		,		,	; 54 - 57 ;X
+;= ADAWI.OP..A,		,		,		,	; 58 - 5B ;X
+;= 	,		,	REMQHI.OP..A,		,	; 5C - 5F ;X
+;= 	,		,		,		,	; 60 - 63 ;X
+;= 	,		,		,		,	; 64 - 67 ;X
+;= 	,		,		,		,	; 68 - 6B ;X
+;= 	,		,		,		,	; 6C - 6F ;X
+;= 	,		,		,		,	; 70 - 73 ;X
+;= 	,		,		,		,	; 74 - 77 ;X
+;= 	,		,		,		,	; 78 - 7B ;X
+;=	,		,		,		,	; 7C - 7F ;X
+;= ADDB2.OP..A,	ADDB3.OP..A,	SUBB2.OP..A,  	SUBB3.OP..A,	; 80 - 83 ;X  
+;= 	,		,	DIVB2.OP..A,		,	; 84 - 87 ;X
+;= BISB2.OP..A,	BISB3.OP..A,  	BICB2.OP..A,  	BICB3.OP..A,	; 88 - 8B ;X  
+;= XORB2.OP..A,	XORB3.OP..A,  	MNEGB.OP..A,  		,	; 8C - 8F ;X
+;= 	,	CMPB.OP..A,	MCOMB.OP..A,	BITB.OP..A,	; 90 - 93 ;X
+;= 	,		,		,		,	; 94 - 97 ;X
+;= 	,		,		,		,	; 98 - 9C ;X
+;= 	,		,		,		,	; 9D - 9F ;X
+;= 	,		,		,		,	; A0 - A3 ;X
+;= 	,		,		,		,	; A4 - A7 ;X
+;= 	,		,		,		,	; A8 - AB ;X
+;= 	,		,		,		,	; AC - AF ;X
+;= 	,		,		,		,	; B0 - B3 ;X
+;= 	,		,		,		,	; B4 - B7 ;X
+;= 	,		,		,		,	; B8 - BB ;X
+;= 	,		,		,		,	; BC - BF ;X
+;= 	,		,		,		,	; C0 - C3 ;X
+;= 	,		,		,		,	; C4 - C7 ;X
+;= 	,		,		,		,	; C8 - CB ;X
+;= 	,		,		,		,	; CC - CF ;X
+;= 	,		,		,		,	; D0 - D3 ;X
+;= 	,		,		,		,	; D4 - D7 ;X
+;= ADWC.OP..A,	SBWC.OP..A,		,		,	; D8 - DB ;X
+;= 	,		,		,		,	; DC - DF ;X
+;= BBS.OP..A,	BBC.OP..A,		,		,	; E0 - E3 ;X
+;= 	,		,		,		,	; E4 - E7 ;X
+;= 	,		,		,		,	; E8 - EB ;X
+;= 	,		,		,		,	; EC - EF ;X
+;= 	,		,	AOBLSS.OP..A,		,	; F0 - F3 ;X
+;= 	,		,		,		,	; F4 - F7 ;X
+;=  	,		,		,		,	; F8 - FB ;X
+;=	,		,		,		)	; FC - FF ;X

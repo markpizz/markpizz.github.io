@@ -1,0 +1,812 @@
+.TOC	"CALRET.MIC -- Procedure Call Instructions"
+.TOC	"Revision 9.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	11-May-84	[RMS]	Editorial changes
+;	8-May-84	[RMS]	Optimized register pop loop in RET
+; 09	14-Feb-84	[RMS]	Saved cycle in RET for pass 2
+; 08	20-Jan-84	[RMS]	Saved cycle in CALLx, fixed fault ordering
+;	12-Oct-83	[RMS]	Saved word, cycle in CALLx (RG)
+;	22-Sep-83	[RMS]	Editorial changes
+;	02-Sep-83	[RTW]	Fix bug in RET stack unalignment
+;	31-Aug-83	[RMS]	Saved cycle in CALLS (RG)
+; 07	10-Aug-83	[RMS]	Revised for SC delayed branches
+;	6-Jul-83	[RMS]	Fixed bug in CALL register count loop (EVKAE)
+;	6-Jun-83	[RMS]	Editorial change
+; 06	1-Jun-83	[RMS]	Removed third at/dl field
+; 05	19-May-83	[RMS]	Revised CALL flows to fix fault problem
+;	11-May-83	[RMS]	Increased padding following PSL update
+;	26-Apr-83	[RMS]	Fixed bad edit of 29-Mar-83
+;	7-Apr-83	[RMS]	Editorial changes (code review by WS)
+;	31-Mar-83	[RMS]	Optimized RET register pop loop
+;	30-Mar-83	[RMS]	Fixed RET probe problem
+;	29-Mar-83	[RMS]	Optimized CALLx by one cycle
+;	17-Mar-83	[RMS]	Eliminated CALLx length override
+;	16-Mar-83	[RMS]	Eliminated RET length override
+; 04	13-Mar-83	[RMS]	Major code compression
+;	4-Mar-83	[RMS]	Revamped VAP macros
+;	4-Jan-83	[RMS]	Fixed incomplete edit of 27-Dec-82
+;	27-Dec-82	[RMS]	Fixed G[SP].RLOG problem
+;	6-Dec-82	[RMS]	Fixed VAP+4 dependency in RET
+;	28-Nov-82	[RMS]	Editorial changes
+; 03	24-Nov-82	[RMS]	Revised allocation limits and constraints
+;	18-Nov-82	[RMS]	Revised for automatic TNV elimination
+;	14-Oct-82	[RMS]	Fixed alignment constraints
+;	13-Oct-82	[RMS]	Fixed allocation problem
+;	12-Oct-82	[RMS]	Revised allocation limits
+; 02	14-Sep-82	[RMS]	Revised allocation limits
+;	5-Sep-82	[RMS]	Split read probe check from write probe check
+;	4-Sep-82	[RMS]	Replaced jump to mmgt with forced fault
+;	1-Sep-82	[RMS]	Added jump to memory management exception
+;	31-Aug-82	[RMS]	Editorial changes on case statements
+;	30-Aug-82	[RMS]	Fixed validity check on MEM(VAP) reference
+;	26-Aug-82	[RMS]	Fixed problems with probe
+;				Revised for W5 restriction
+; 01	24-Aug-82	[RMS]	Initial edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN CALRET
+.nobin
+
+;	This module implements the procedure call class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	FA	 CALLG arglist.ab, dst.ab, {-(SP).w*}				0 0 0 0		rsv
+;
+;	FB	 CALLS numarg.rl, dst.ab, {-(SP).w*}				0 0 0 0		rsv
+;
+;	04	 RET {(SP)+.r*}							* * * *		rsv
+;
+
+;	These instructions implement a generalized procedure call and return facility.
+;	The principal data structure involved is the stack frame.
+;	CALLS and CALLG build a stack frame in the following format:
+;
+;									   direction of stack build
+;	+---------------------------------------------------------------+
+;	|		  condition handler (initially 0)		|	^	<-- SP,FP on exit
+;	+---+-+-+-----------------------+--------------------+----------+	|
+;	|SPA|S|0|   entry mask<11:0>	|   saved PSW<15:5>  | 0 0 0 0 0|	|	SPA = # bytes to force stack alignment
+;	+---+-+-+-----------------------+--------------------+----------+	|	S   = 0 for CALLG, 1 for CALLS
+;	|			    saved AP				|	|
+;	+---------------------------------------------------------------+	|
+;	|			    saved FP				|	|
+;	+---------------------------------------------------------------+	|
+;	|			    saved PC				|	|
+;	+---------------------------------------------------------------+	|
+;	|			    saved R0 (...)			|	|
+;	+---------------------------------------------------------------+	|
+;		.						.		|
+;		.	(according to entry mask<11:0>)		.		|
+;		.						.		|
+;	+---------------------------------------------------------------+	|
+;	|			    saved R11 (...)			|	|
+;	+---------------+-----------------------------------------------+	|
+;	| #args (CALLS)	|	(0-3 bytes needed to align stack)	|	|
+;	+---------------+-----------------------------------------------+	|
+;	|		|	0	0	0	(CALLS)		|	|
+;	+---------------+-----------------------------------------------+    ---+---
+;
+;	RET expects to find this structure based at the frame pointer (FP).
+
+;	For CALLG and CALLS, the entry mask specifies the new settings of DV and IV,
+;	and also which registers are to be saved on entry:
+;
+;	 15 14 13 12 11                               0
+;	+--+--+-----+----------------------------------+
+;	|DV|IV| MBZ |		register mask	       |
+;	+--+--+-----+----------------------------------+
+;
+.bin
+
+.nobin
+.TOC	"	CALLG, CALLS"
+
+;	These instructions invoke a procedure with a general (a stack based) argument list.
+;	The condition codes are cleared at exit.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	CALLG		FA	call procedure with general arg list	fse	aa/bb	x	CALLG
+;	CALLS		FB	call procedure with stack arg list	fse	ra/lb	x	CALLG
+;
+;	Entry conditions:
+;		W0	=	first (argument) operand
+;		W2	=	address of procedure entry
+;		VA	=	address of procedure entry
+;		DL	=	data type of second operand (byte)
+;
+;	Exit conditions:
+;		The procedure stack frame has been created.
+;		SP, FP point to the new top of stack.
+;		AP points to the argument list.
+;		PC points to the first instruction of the procedure (entry+2).
+;		PSW<7,5> are equal to mask<15,14>.
+;		PSW<6,3:0> are clear.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		The detailed probe loop can count registers at 2, 3, or 4 bits per cycle,
+;		at the cost of an additional 4, 8, or 16 words.
+;
+.bin
+
+;	CALLG/CALLS operation:
+;
+;		read the procedure entry mask
+;		make sure that the stack frame will be accessible
+;		if CALLS, push the number of arguments onto the stack
+;		align the stack to the next lower longword boundary
+;		push the registers specified by the procedure entry mask
+;		push PC, AP, FP, saved spa/s/mask/psw, condition handler
+;		update PC, SP, FP, AP
+;		update PSW traps, clear condition codes
+
+CALLG..:					; opcode = FA
+;CALLS:						; opcode = FB
+	;********** Hardware dispatch **********;
+	W[6]<--T[PSL], DL<--WORD		; get PSW to W6, length is WORD to read mask
+
+	;---------------------------------------;
+	W[4]<--MEM(VA), LEN(DL),		; read entry mask to W4 (length is WORD)
+	DL<--LONG				; from now on, length is LONG
+
+	;---------------------------------------;
+	SC&, W[3]<--W[4].SHFL.[20.], SET.ALUCC,	; left justify reg mask in W3<31:20> for shift loop
+						; sneak zero into SC<3:0> to load RN
+	CASE2[OPCODE3-0].AT.[CALLG.SET.VA]	; set up quick probe for each instruction
+
+;= ALIGNLIST 1*10*	(CALLG.SET.VA,	CALLS.SET.VA)
+;  Opcodes = FA, FB --> opcode<3:0> = 101?
+
+CALLG.SET.VA:
+	;---------------------------------------; CALLG:
+	VA<--G[SP]-K[68.],			; max stack frame is 12 lw of mask reg +
+	GOTO[CALL.QUICK.PROBE]			; 5 lw of std reg = 17 low = 68 bytes
+
+CALLS.SET.VA:
+	;---------------------------------------; CALLS:
+	VA<--G[SP]-K[72.]			; max stack frame is 12 lw of mask reg +
+						; 5 lw of std reg + # args = 18 lw = 72 bytes
+
+CALL.QUICK.PROBE:
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[4].SHFR.[12.],		; put dv.iv.mbz in SC<3:0>
+	RN<--SC					; sneak zero from SC to RN
+
+	;---------------------------------------;
+	PROBE.WRITE.CURMODE,			; quick probe of stack for accessibility,
+	RN<--RN-1,				; RN now = 15.
+	CASE4[SC3-0].AT.[CALL.MBZ.00]		; case on mask<13:12> = SC<1:0>
+
+;	Probe to top of new stack tried.
+;	Test mbz part of mask, test probe results.
+
+;	At this point,
+;		W0	=	arg list (CALLG), # args (CALLS)
+;		W2	=	address of procedure
+;		W3	=	mask shfl 20, bits<19:0> are zero
+;		W4	=	mask
+;		W6	=	microcode PSL
+;		SC	=	mask shfr 12 (dv.iv.mbz)
+;		RN	=	15.
+;		alu cc's =	set from W3
+
+;= ALIGNLIST 1100*	(CALL.MBZ.00,	CALL.MBZ.01,	CALL.MBZ.10,	CALL.MBZ.11)
+
+CALL.MBZ.01:
+CALL.RET.RSRV.OPER:
+	;---------------------------------------; SC<1:0> = 01:
+	GOTO[RSRV.OPER.FLT..]			; reserved operand fault
+
+CALL.MBZ.10:
+	;---------------------------------------; SC<1:0> = 10:
+	GOTO[RSRV.OPER.FLT..]			; reserved operand fault
+
+CALL.MBZ.11:
+	;---------------------------------------; SC<1:0> = 11:
+	GOTO[RSRV.OPER.FLT..]			; reserved operand fault
+
+CALL.MBZ.00:
+	;---------------------------------------; SC<1:0> = 00:
+	W[6]<--W[6].SHFL.[16.],			; shift PSW part of PSL to W6<31:16>
+	RN<--RN-1,				; RN now = 14.
+	IF[VA.MEM.REF.NOT.OK]_[CALL.PROBE.ERROR]	; branch out if probe failed
+
+CALL.PROBE.OK:
+	;---------------------------------------;
+	VA&, W[1]<--G(RN)-M[FOUR],		; decrement SP for push and save
+						; note than RN = 14!!
+	CASE2[OPCODE3-0].AT.[CALL.SAVE.SPA]	; case on opcode<0> to align stack
+
+;	RN almost at right value, mask.mbz tested.
+
+;	Push # args if CALLS, save SPA, trim VA.
+;	Bottom of stack is proven writeable by push of # args (CALLS),
+;	of first register in mask or PC (CALLG).
+
+;	At this point:
+;		W0	=	arg list (CALLG), # args (CALLS)
+;		W1	=	decremented G[SP]
+;		W2	=	address of procedure
+;		W3	=	mask shfl 20, bits<19:0> are zero
+;		W4	=	mask
+;		W6	=	microcode PSL shfl 16
+;		SC	=	mask shfr 12 (dv.iv.mbz)
+;		VA	=	running stack pointer, predecremented
+;		RN	=	14.
+;		alu cc's =	set from W3
+
+;= ALIGNLIST 1*10*	(CALL.SAVE.SPA,	CALLS.PUSH.NUMARG)
+;  Opcodes = FA, FB --> opcode<3:0> = 101?
+
+CALLS.PUSH.NUMARG:
+	;---------------------------------------; CALLS:
+	MEM(VA)<--W[0], LONG			; write # arguments to memory
+
+	;---------------------------------------;
+	VA<--VA-M[FOUR]				; decrement running stk ptr after push
+
+CALL.SAVE.SPA:
+	;---------------------------------------; CALLG:
+						;       |--W4--||--W6--|
+	W[4]<--W[4]!!W[6].SHFL.[18.],		; shift xy/mask!!psw/000 to W4 as 00/mask/psw/00
+						; W4<31:30> = mask<13:12> = 00 (already checked!)
+	RN<--RN-1				; RN now = 13.
+
+	;---------------------------------------;
+	W[4]<--W[1]!!W[4].SHFR.[2],		; shift in saved SP<1:0> to get spa/00/mask/psw
+	RN<--RN-1				; RN now = 12. (at last!)
+
+	;---------------------------------------;
+	VA<--VA.ANDNOT.K[3],			; align running stack to nearest longword
+	IF[ALU.Z]_[CALL.SHIFT.DONE]		; if mask zero, skip register push loop
+
+;	Number of arguments pushed, stack aligned, mask non-zero.
+;	Now push registers onto stack as specified by entry mask.
+;	Also push PC and set new PC value.
+
+;	At this point:
+;		W0	=	arg list (CALLG)
+;		W1	=	saved G[SP]
+;		W2	=	address of procedure
+;		W3	=	mask shfl 20, bits<19:0> are zero
+;		W4 	=	spa/00/mask/psw
+;		SC	=	mask shfr 12 (dv.iv.mbz)
+;		VA	=	running stack pointer, predecremented
+;		RN	=	12.
+;		alu cc's =	set from W3
+
+;= ALIGNLIST 01*** 	(CALL.SHIFT,	CALL.PUSH)
+;  ALU.NZVC set by SHIFT --> V = C = 0
+
+CALL.SHIFT:
+	;---------------------------------------; alu.n = 0:
+	W[3]<--W[3].SHFL.[1], SET.ALUCC,	; shift mask left, test for set bit (N) and
+	RN<--RN-1,				; mask done (Z), decrement register number
+	CASE2[ALU.NZVC].AT.[CALL.SHIFT]		; case on previous state of mask (must be non-zero)
+
+CALL.PUSH:
+	;---------------------------------------; alu.n = 1:
+	MEM(VA)<--G(RN), LONG			; write register into memory
+
+	;---------------------------------------;
+	VA<--VA-M[FOUR],			; decrement running stack pointer
+	IF[NOT.ALU.Z]_[CALL.SHIFT]		; if mask not zero, go test next bit
+
+;	Mask in W3 initially or now zero.
+
+CALL.SHIFT.DONE:
+	;---------------------------------------;
+	MEM(VA)<--G[PC], LONG			; write PC into memory
+						; for CALLG, this is the first memory reference
+						; that is ALWAYS done
+
+;***	NO MORE BAILOUTS PAST THIS POINT ***
+
+;	Registers and PC pushed, stack validity proven at both current top and new top.
+;	Now push remaining items.  Take advantage of VAP and push in reverse order (saves 2 cycles).
+
+;	At this point:
+;		W0	=	arg list (CALLG)
+;		W1	=	saved G[SP]
+;		W2	=	address of procedure
+;		W3	=	zero!!!
+;		W4	=	spa/00/mask/psw
+;		SC	=	mask shfr 12 (dv.iv.mbz)
+
+	;---------------------------------------;
+	W(6)<--VA-K[16.]			; push remaining 4 items in reverse order
+
+	;---------------------------------------;
+	VA&, G[SP]<--W[6]			; save new top of stack, set VA
+
+	;---------------------------------------;
+	MEM(VA)<--W[3], LONG,			; push condition handler (zero), set VAP = VA + 4
+						; W3 is zero from register push loop exit!!
+	CASE2[OPCODE3-0].AT.[CALL.WRITE.MASK]	; case on opcode<0> to complete mask
+
+;= ALIGNLIST 1*10*	(CALL.WRITE.MASK,	CALLS.SET.S)
+;  Opcodes = FA, FB --> opcode<3:0> = 101?
+
+CALLS.SET.S:
+	;---------------------------------------; CALLS:
+	W[4]<--W[4].OR.K[20]000			; set bit <29> of mask
+
+CALL.WRITE.MASK:
+	;---------------------------------------; CALLG, CALLS:
+	MEM(VAP)<--W[4], LONG			; write spa/s/mask/psw to memory, VAP <-- VAP + 4
+
+;	Registers, PC, condition handler, spa/s/mask/psw written to memory.
+;	Now write out AP, FP, update general registers.
+
+;	At this point:
+;		W0	=	arg list (CALLG)
+;		W1	=	saved G[SP]
+;		W2	=	address of procedure
+;		W6	=	new top of stack
+;		SC	=	mask shfr 12 (dv.iv.mbz)
+;		VAP	=	(VA)+8
+
+	;---------------------------------------;
+	WBUS<--W[2]+K[2],			; calculate entry addr + 2,
+	LOAD.V&PC				; load to PC and VIBA
+
+	;---------------------------------------;
+	MEM(VAP)<--G[AP], LONG,			; write AP to memory, VAP <-- VAP + 4
+	CASE2[OPCODE3-0].AT.[CALLG.SET.AP]	; case on opcode<0> to update AP
+
+;= ALIGNLIST 1*10*	(CALLG.SET.AP,	CALLS.SET.AP)
+;  Opcodes = FA, FB --> opcode<3:0> = 101?
+
+CALLG.SET.AP:
+	;---------------------------------------; CALLG:
+	G[AP]<--W[0], GOTO[CALL.WRITE.FP]	; set AP from specifier
+
+CALLS.SET.AP:
+	;---------------------------------------; CALLS:
+	G[AP]<--W[1]				; set AP from saved SP
+
+CALL.WRITE.FP:
+	;---------------------------------------;
+	MEM(VAP)<--G[FP], LONG			; write FP to memory
+
+;***	STACK FRAME NOW COMPLETE IN MEMORY ***
+
+	;---------------------------------------;
+	T[PSL]<--T[PSL].ANDNOT.K[0FF],		; clear out old psw
+	CASE4[SC3-0].AT.[CALL.DV.IV.00]		; case on SC<3:2> = mask<15:14>
+
+;	Stack frame complete, gpr's updated except for FP and SP.
+;	Finish update of PSL, update FP and SP.
+
+;	At this point,
+;		W6	=	new top of stack
+;		SC	=	mask shfr 12 (dv.iv.mbz)
+
+;= ALIGNLIST 00***	(CALL.DV.IV.00,	CALL.DV.IV.01,	CALL.DV.IV.10,	CALL.DV.IV.11)
+;  Mask<13:12> = SC<1:0> = 00, by test at CALL.MBZ.00.
+
+CALL.DV.IV.01:
+	;---------------------------------------; SC<3:2> = 01:
+	T[PSL]<--T[PSL].OR.K[20],		; psw<7:0> is 0010 0000
+	GOTO[CALL.DV.IV.00]			; go update hardware psl
+
+CALL.DV.IV.10:
+	;---------------------------------------; SC<3:2> = 10:
+	T[PSL]<--T[PSL].OR.K[80],		; psw<7:0> is 1000 0000
+	GOTO[CALL.DV.IV.00]			; go update hardware psl
+
+CALL.DV.IV.11:
+	;---------------------------------------; SC<3:2> = 11:
+	T[PSL]<--T[PSL].OR.K[0A0],		; psw<7:0> is 1010 0000
+	GOTO[CALL.DV.IV.00]			; go update hardware psl
+
+CALL.DV.IV.00:
+	;---------------------------------------; SC<3:2> = 00:
+	SC<--P[PSL.CC..TP].ANDNOT.K[0F]		; isolate psl<tp,t> in SC
+
+	;---------------------------------------;
+	W[SC]<--W[SC].OR.T[PSL],		; or in new microcode psl
+	CALL[UPDATE.PSL.HWRE.FROM.SC..]		; update hardware psl from SC
+
+	;---------------------------------------;
+	G[FP]<--W[6],				; replace FP with new top of stack
+	EXECUTE.IID				; decode next instruction
+
+;	Quick probe of stack failed.  Either the new top of stack is really inaccessible,
+;	or the quick probe went too far.  Calculate the real number of longwords to be
+;	pushed and reprobe.  Any error here is fatal.
+
+;	At this point,
+;		W3	=	mask shfl 20, bits <19:0> are zero
+;		W4	=	mask
+;		VA	=	G[SP] + 68 (CALLG), + 72 (CALLS)
+;		alu cc's =	set from W3
+
+CALL.PROBE.ERROR:
+	;---------------------------------------;
+	VA<--VA+K[48.],				; set VA to include only standard stack frame
+	CALL[PUSH.PROBE.SHIFT..]		; call subroutine to count bits in W3
+
+	;---------------------------------------;
+	W[3]<--W[4].SHFL.[20.], SET.ALUCC,	; restore W3 and alu cc's
+	GOTO[CALL.PROBE.OK]			; return to main flows
+
+;	Subroutine to count bits (and decrement VA) for register push.
+
+;	Entry conditions:
+;		W3	=	mask of bits, left justified
+;		VA	=	initial value
+;		alu cc's =	set from W3
+;
+;	Exit conditions:
+;		VA	=	decremented by 4 for each 1 bit in W3
+;		W3, alu cc's =	trashed!!
+
+;= ALIGNLIST 00***	(PUSH.PROBE.SHIFT..,	PUSH.PROBE.DONE,	PUSH.PROBE.COUNT)
+;  ALU.NZVC set by SHIFT --> V = C = 0
+
+PUSH.PROBE.SHIFT..:
+	;---------------------------------------; N = 0, Z = 0:
+	W[3]<--W[3].SHFL.[1], SET.ALUCC,	; shift mask left, test for set bit (N) and
+	CASE4[ALU.NZVC].AT.[PUSH.PROBE.SHIFT..]	; mask done (Z), case on previous state of mask
+
+PUSH.PROBE.COUNT:
+	;---------------------------------------; N = 1, Z = 0:
+	VA<--VA-M[FOUR], 			; decrement running stack pointer
+	GOTO[PUSH.PROBE.SHIFT..]		; continue loop
+
+PUSH.PROBE.DONE:
+	;---------------------------------------; N = 0, Z = 1:
+	PROBE.WRITE.CURMODE,			; probe with accurate top of stack value
+	GOTO[CHECK.PROBE..]			; check for probe problem, return from there
+
+.nobin
+.TOC	"	RET"
+
+;	This instruction returns from a procedure called by CALLG or CALLS.
+;	The condition codes are set from the stack frame.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	RET		04	return from procedure			e	x /bb	x	RET
+;
+;	Entry conditions:
+;		Invoked directly from IID
+;		G[FP]	=	base of stack frame
+;		DL	=	data type of "operand" (byte)
+;
+;	Exit conditions:
+;		The procedure stack frame has been removed from the stack.
+;		SP points to the new top of stack.
+;		PSW<7:0>, PC, FP, AP are restored from the stack frame.
+;		R0...R11 are restored from the stack frame, if specified by the mask.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- saved psw<3>
+;		Z <-- saved psw<2>
+;		V <-- saved psw<1>
+;		C <-- saved psw<0>
+;
+;	Size/performance tradeoffs:
+;		The register pop loop can be made into inline code, saving one cycle
+;		per register, at the cost of an additional 28 words.
+;		The detailed probe loop can count registers at 2, 3, or 4 bits per cycle,
+;		at the cost of an additional 4, 8, or 16 words.
+;
+.bin
+
+;	RET operation:
+;
+;		pop the spa/s/mask/psw longword from the stack
+;		probe the stack for accessibility
+;		pop AP, FP, and PC
+;		pop R0...R11 as specified by the mask
+;		adjust the PSW traps and exit
+
+RET..:						; opcode = 04
+	;********** Hardware dispatch **********;
+	VA<--G[FP]+K[4]				; set VA pointing to spa/s/mask/psw word
+
+	;---------------------------------------;
+	W[1]<--MEM(VA), LONG			; read spa/s/mask/psw word to W1
+
+	;---------------------------------------;
+	SC<--W[1].AND.K[0FF]0, SET.ALUCC	; test psw<15:8> for non-zero (sneak zero to SC)
+
+	;---------------------------------------;
+	P[STATE3-0..ALUCC]<--ZEXT.W[1].SHFR.[25.],	; isolate spa's in STATE<2:0>
+	RN<--SC,				; copy zero in SC to RN for pop loop
+	IF[NOT.ALU.Z]_[CALL.RET.RSRV.OPER]	; if psw<15:8> not zero, reserved operand fault
+
+	;---------------------------------------;
+	W[6]<--W[1].SHFL.[4]			; left justify spa/s/mask in W6
+						; (STATE cannot be tested this cycle)
+
+	;---------------------------------------;
+	W[1]<--W[1].AND.K[0FF],			; isolate psw bits from spa/s/mask/psw
+	CASE2[STATE3-0].AT.[RET.SET.VA.G]	; case on s bit to determine worst case stack
+
+;= ALIGNLIST *110*	(RET.SET.VA.G,	RET.SET.VA.S)
+;  STATE<3> = 0 --> STATE<3:0> = 0???
+
+RET.SET.VA.G:
+	;---------------------------------------; state<0> = 0 --> S = 0:
+	VA<--G[FP]+K[67.],			; set up for quick probe of worst case stack frame
+	GOTO[RET.QUICK.PROBE]			; = 17 lw = 68 bytes, allowing for pop alignment
+
+RET.SET.VA.S:
+	;---------------------------------------; state<0> = 1 --> S = 1:
+	VA<--G[FP]+K[71.],			; set up for quick probe of worst case stack frame
+	GOTO[RET.QUICK.PROBE]			; = 18 lw = 72 bytes, allowing for pop alignment
+
+;	Mask read and validated.
+;	Probe new top of stack, pop standard registers.
+
+;	At this point,
+;		W1	=	new psw
+;		W6	=	mask/psw/0000
+;		RN	=	0
+;		VA	=	worst case top of stack
+;		STATE<2:0> =	spa's
+
+RET.QUICK.PROBE:
+	;---------------------------------------;
+	PROBE.READ.CURMODE			; quick probe for stack access
+
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[6].SHFR.[20.],		; right justify register mask in SC, with <31:12> zero
+	SET.ALUCC,				; test for zero
+	IF[VA.MEM.REF.NOT.OK]_[RET.PROBE.ERROR]	; if probe error, go count registers and reprobe
+
+RET.PROBE.OK:
+	;---------------------------------------;
+	VA<--G[FP]+K[8.]			; set VA pointing to saved AP
+
+	;---------------------------------------;
+	G[AP]<--MEM(VA), LONG			; pop AP off stack, VAP <-- VA + 4
+
+	;---------------------------------------;
+	G[FP]<--MEM(VAP), LONG			; pop FP off stack, VAP <-- VAP + 4
+
+	;---------------------------------------;
+	W[0]<--MEM(VAP), LONG, RN<--RN-1,	; pop PC, VAP <-- VAP + 4, RN = F
+	CASE2[ALU.NZVC].AT.[RET.SC.SHIFT]	; if mask zero, skip register pop loop
+
+;	Standard registers popped, register mask not zero.
+;	Pop remaining registers under mask control.
+
+;	At this point,
+;		W0	=	new PC
+;		W1	=	new psw
+;		SC	=	mask, right justified with leading zeroes
+;		RN	=	F
+;		VAP	=	running stack pointer
+;		STATE<2:0> =	spa's
+
+;= ALIGNLIST *0***	(RET.SC.SHIFT,	RET.UNALIGN.SP)
+;  ALU.NZVC set by ZEXT SHIFT RIGHT --> N = V = C = 0
+
+RET.SC.SHIFT:
+	;---------------------------------------; alu.z = 0:
+	W[SC]<--ZEXT.W[SC].SHFR.[2],		; shift mask right two places, test for zero
+	RN<--RN+1, SET.ALUCC,			; point to next register
+	CASE4[SC3-0].AT.[RET.SC.00]		; case on SC<1:0>
+
+;= ALIGNLIST 1100*	(RET.SC.00,	RET.SC.01,	RET.SC.10,	RET.SC.11)
+
+RET.SC.00:
+	;---------------------------------------; SC<1:0> = 00:
+	RN<--RN+1,				; advance RN
+	CASE2[ALU.NZVC].AT.[RET.SC.SHIFT]	; if SC not yet zero, continue testing
+
+RET.SC.01:
+	;---------------------------------------; SC<1:0> = 01:
+	G(RN)<--MEM(VAP), LONG, RN<--RN+1,	; pop register, VAP <-- VAP + 4, advance RN
+	CASE2[ALU.NZVC].AT.[RET.SC.SHIFT]	; if SC not yet zero, continue testing
+
+RET.SC.10:
+	;---------------------------------------; SC<1:0> = 10:
+	RN<--RN+1				; advance RN}i
+
+RET.SC.1X:
+	;---------------------------------------;
+	G(RN)<--MEM(VAP), LONG,			; pop register, VAP <-- VAP + 4
+	CASE2[ALU.NZVC].AT.[RET.SC.SHIFT]	; if SC not yet zero, continue testing
+
+RET.SC.11:
+	;---------------------------------------; SC<1:0> = 11:
+	G(RN)<--MEM(VAP), LONG, RN<--RN+1,	; pop register, VAP <-- VAP + 4, advance RN
+	GOTO[RET.SC.1X]				; go process next register
+
+;	All registers popped.
+;	Disalign SP from SPA.
+
+;	At this point,
+;		W0	=	new PC
+;		W1	=	new psw
+;		VAP	=	running stack pointer
+;		STATE<2:0> =	spa's
+
+RET.UNALIGN.SP:
+	;---------------------------------------; alu.z = 1:
+	WBUS<--P[PSL.CC..TP].AND.K[40]000,	; isolate psl<tp>
+	SET.ALUCC,				; set alu.z if psl<tp> = 0
+	CASE4[STATE3-0].AT.[RET.SPA.00]		; case on spa bits in state<2:1>
+
+;= ALIGNLIST *001*	(RET.SPA.00,	RET.SPA.01,	RET.SPA.10,	RET.SPA.11)
+;  STATE<3> = 0 --> STATE<3:0> = 0???
+
+RET.SPA.00:
+	;---------------------------------------; state<2:1> = 00:
+	VA&, W[4]<--T[VAP],			; copy running stack pointer to W4, VA
+	CASE2[STATE3-0].AT.[RET.G.PC]		; case on CALLG vs CALLS
+
+RET.SPA.01:
+	;---------------------------------------; state<2:1> = 01:
+	VA&, W[4]<--T[VAP]+1,			; copy running stack pointer, + 1, to W4, VA
+	CASE2[STATE3-0].AT.[RET.G.PC]		; case on CALLG vs CALLS
+
+RET.SPA.10:
+	;---------------------------------------; state<2:1> = 10:
+	VAP&, WBUS<--T[VAP]+M[TWO],		; update running stack pointer + 2
+	GOTO[RET.SPA.00]			; go update W4, VA
+
+RET.SPA.11:
+	;---------------------------------------; state<2:1> = 11:
+	VAP&, WBUS<--T[VAP]+M[TWO],		; update running stack pointer + 2
+	GOTO[RET.SPA.01]			; go update W4, VA and update running stack pointer + 1
+
+;	SP disaligned.
+;	For CALLS, pop argument list.
+
+;	At this point,
+;		W0	=	new PC
+;		W1	=	new psw
+;		W4 = VA	=	disaligned new SP
+;		alu.z	=	set from psl<tp>
+;		STATE<2:0> =	spa's
+
+;= ALIGNLIST *110*	(RET.G.PC,	RET.S.NARGS)
+;  STATE<3> = 0 --> STATE<3:0> = 0???
+
+RET.S.NARGS:
+	;---------------------------------------; state<0> = 1 --> S = 1:
+	W[4]<--MEM(VA), LEN(DL)			; read # args, force <31:8> to zero
+						; VAP <-- VA + 4
+						; prevailing data length is BYTE!!!
+
+	;---------------------------------------;
+	W[4]<--W[4].SHFL.[2]			; convert # args to bytes
+
+	;---------------------------------------;
+	W[4]<--W[4]+T[VAP]			; add number of args to popped SP
+
+RET.G.PC:
+	;---------------------------------------; state<0> = 0 --> S = 0:
+	WBUS<--W[0],				; Wbus <-- new PC
+	LOAD.V&PC.GOTO[RET.SET.SP]		; load new PC into PC and VIBA
+
+;	Stack frame restored.
+;	Store final value of SP.
+;	Fix up PSL and exit.
+
+;	At this point,
+;		W1	=	new psw
+;		W4	=	new SP
+;		alu.z	=	set from psl<tp>
+
+RET.SET.SP:
+	;---------------------------------------;
+	T[PSL]<--T[PSL].ANDNOT.K[0FF]		; clear bits <7:0> of current PSL
+
+	;---------------------------------------;
+	SC&, T[PSL]<--T[PSL].OR.W[1],		; merge new PSL with current, copy to SC
+	CASE2[ALU.NZVC].AT.[RET.SET.TP]		; case on old psl<tp> non-zero vs zero
+
+;= ALIGNLIST *0***	(RET.SET.TP,	RET.ZERO.TP)
+;  ALU.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+RET.SET.TP:
+	;---------------------------------------; alu.z = 0:
+	W[SC]<--W[SC].OR.K[40]000		; or TP into new PSL
+
+RET.ZERO.TP:
+	;---------------------------------------; alu.z = 1:
+	T[PSL]<--T[PSL].ANDNOT.K[1F],		; microcode copy MUST have <4:0> = 0
+	CALL[UPDATE.PSL.HWRE.FROM.SC..]		; broadcast new PSL to hardware
+
+	;---------------------------------------;
+	G[SP]<--W[4],				; set new stack pointer
+	EXECUTE.IID				; decode next instruction
+
+;	Quick probe of stack failed.  Either the top of the new stack is inaccessible,
+;	or the quick probe went too far.  Calculate the real number of longwords to be
+;	popped and reprobe.  Any error here is fatal.
+
+;	At this point,
+;		W6	=	left justified register mask
+;		SC	=	register mask, right justified with leading zeroes
+;		VA	=	G[FP] + 67 (CALLG), + 71 (CALLS)
+;		alu cc's =	set from SC
+
+RET.PROBE.ERROR:
+	;---------------------------------------;
+	W[6]<--W[6].AND.1K[0F0]00, SET.ALUCC	; mask down to 12 bits, set alu cc's for initial case
+
+	;---------------------------------------;
+	VA<--VA-K[48.],				; compensate for guess of 12 registers pushed
+	CALL[POP.PROBE.SHIFT..]			; call subroutine to count bits in W6
+
+	;---------------------------------------;
+	WBUS<--W[SC], SET.ALUCC,		; restore alu.z to reflect mask in SC
+	GOTO[RET.PROBE.OK]			; rejoin main flows
+
+;	Subroutine to count bits (and increment VA) for register pop.
+
+;	Entry conditions:
+;		W6	=	mask of bits, left justified
+;		VA	=	initial value
+;		alu cc's =	set from W6
+;
+;	Exit conditions:
+;		VA	=	incremented by 4 for each 1 bit in W6
+;		W6, alu cc's =	trashed!!
+
+;= ALIGNLIST 00***	(POP.PROBE.SHIFT..,	POP.PROBE.DONE,		POP.PROBE.COUNT)
+;  ALU.NZVC set by AND or SHIFT --> V = C = 0
+
+POP.PROBE.SHIFT..:
+	;---------------------------------------; N = 0, Z = 0:
+	W[6]<--W[6].SHFL.[1], SET.ALUCC,	; shift mask left, test for set bit (N) and
+	CASE4[ALU.NZVC].AT.[POP.PROBE.SHIFT..]	; mask done (Z), case on previous state of mask
+
+POP.PROBE.COUNT:
+	;---------------------------------------; N = 1, Z = 0:
+	VA<--VA+M[FOUR], 			; increment running stack pointer,
+	GOTO[POP.PROBE.SHIFT..]			; go test next bit
+
+POP.PROBE.DONE:
+	;---------------------------------------; N = 0, Z = 1:
+	PROBE.READ.CURMODE,			; reprobe at accurate top of stack
+	GOTO[CHECK.PROBE..]			; go check for probe problem, return from there
+
+;= END CALRET

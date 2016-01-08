@@ -1,0 +1,789 @@
+.TOC	"VFIELD.MIC -- Variable Length Bit Field Instructions"
+.TOC	"Revision 8.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 08	14-Feb-84	[RMS]	Editorial changes for pass 2
+;	22-Sep-83	[RMS]	Editorial changes
+;	14-Sep-83	[RMS]	Added subroutine to compress INSV
+; 07	26-Aug-83	[RMS]	Removed SC branches
+;	19-Aug-83	[RMS]	Editorial changes from code review
+; 06	10-Aug-83	[RMS]	Revised for SC delayed branches
+; 05	31-May-83	[RMS]	Removed third at/dl field
+;	14-Apr-83	[RMS]	Saved word in FFC
+;	23-Mar-83	[RMS]	Fixed bug in testing for pos > 31 (JW)
+;	17-Mar-83	[RMS]	Revised for new mreq, dl functions
+; 04	13-Mar-83	[RMS]	Major code compression
+;	27-Dec-82	[RMS]	Removed SC restriction on W-bus writes
+;	9-Dec-82	[RMS]	Removed extraneous ..e linkages
+;	28-Nov-82	[RMS]	Editorial changes
+; 03	24-Nov-82	[RMS]	Revised allocation limits and constraints
+;	12-Oct-82	[RMS]	Revised allocation limits
+;	8-Oct-82	[RMS]	Removed extraneous label
+;	20-Sep-82	[RMS]	Revised definition of PR[E]
+; 02	14-Sep-82	[RMS]	Revised allocation limits
+;	6-Sep-82	[RMS]	Editorial changes
+;	31-Aug-82	[RMS]	Revised for G(RN+1) restriction
+;				Editorial changes to case statements
+;	26-Aug-82	[RMS]	Revised for W5 restriction
+;	25-Aug-82	[RMS]	Revised for today's spec changes
+;	19-Aug-82	[RMS]	Revised for SC& test restriction
+;	18-Aug-82	[RMS]	Corrected assembly errors
+;	17-Aug-82	[RMS]	Revised for new nomenclature
+;				Revised for SC& test restriction
+; 01	16-Aug-82	[RMS]	Initial edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN VFIELD
+.nobin
+
+;	This module implements the variable length bit field class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	EC	 CMPV pos.rl, size.rb, base.vb, {field.rv}, src.rl		* * 0 *		rsv
+;
+;	ED	 CMPZV pos.rl, size.rb, base.vb, {field.rv}, src.rl		* * 0 *		rsv
+;
+;	EE	 EXTV pos.rl, size.rb, base.vb, {field.rv}, dst.wl		* * 0 -		rsv
+;
+;	EF	 EXTZV pos.rl, size.rb, base.vb, {field.rv}, dst.wl		* * 0 -		rsv
+;
+;	F0	 INSV src.rl, pos.rl, size.rb, base.vb, {field.wv}		- - - -		rsv
+;
+;	EB	 FFC startpos.rl, size.rb, base.vb, {field.rv}, findpos.wl	0 * 0 0		rsv
+;	EA	 FFS startpos.rl, size.rb, base.vb, {field.rv}, findpos.wl	0 * 0 0		rsv
+;
+.bin
+
+.nobin
+.TOC	"	FFS, FFC, CMPV, CMPZV, EXTV, EXTZV"
+
+;	These instructions find the first bit in, compare an operand to, or
+;	extract, a variable length bit field.
+;	The condition codes are set according to the result.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	FFS		EA	dst.wl <-- first one in			fse	rr/lb 	aaaa	FFS
+;					field(pos.rl, size.rb, base.vb)
+;	FFC		EB	dst.wl <-- first zero in		fse	rr/lb 	aaaa	FFS
+;					field(pos.rl, size.rb, base.vb)
+;
+;	CMPV		EC	sext{field(pos.rl, size.rb, base.vb)} -	fse	rr/lb 	jizj	CMPV
+;					src2.rl
+;	CMPZV		ED	zext{field(pos.rl, size.rb, base.vb)} -	fse	rr/lb 	jizj	CMPV
+;					src2.rl
+;
+;	EXTV		EE	dst.wl <--				fse	rr/lb 	iiip	CMPV
+;					sext{field(pos.rl, size.rb, base.vb)}
+;	EXTZV		EF	dst.wl <--				fse	rr/lb 	iiip	CMPV
+;					zext{field(pos.rl, size.rb, base.vb)}
+;
+;	Entry conditions:
+;		W0	=	first (position) operand
+;		W2	=	second (size) operand
+;		DL	=	data type of second operand (byte)
+;
+;	Exit conditions (FFS, FFC):
+;		The ALU condition codes are set.
+;		W0 contains the result.
+;		The next microstate is WDEST.
+;		(CMPV, CMPZV):
+;		The PSL condition codes are set.
+;		The next microstate is IID.
+;		(EXTV, EXTZV):
+;		W0 contains the result.
+;		The next microstate is WDEST.
+;
+;	Condition codes:
+;		(FFS, FFC)		(CMPV, CMPZV)		(EXTV, EXTZV)
+;		N <-- 0			N <-- field LSS src2	N <-- dst LSS 0
+;		Z <-- {bit not found}	Z <-- field EQL src2	Z <-- dst EQL 0
+;		V <-- 0			V <-- 0			V <-- 0
+;		C <-- 0			C <-- field LSSU src2	C <-- C
+;
+;	Size/performance tradeoffs:
+;		The final search loop of FFS/FFC may be optimized by searching multiple
+;		bits at a time after closing in on the proper byte.  For example, searching
+;		two bits at a time costs two extra words, three bits, six extra words, etc.
+;
+.bin
+
+;	FFS, FFC operation:
+;
+;		dst.wl <-- position of first one (zero) bit in field(pos.rl, size.rb, base.vb)
+
+FFS..:						; opcode = EA
+;FFC:						; opcode = EB
+	;********** Hardware dispatch **********;
+	W[3]<--W[0],				; make extra copy of position,
+	GOTO[FIELD.TO.W0]			; join common code
+
+;	CMPV, CMPZV operation:
+;
+;		?ext{field(pos.rl, size.rb, base.vb)} - src2.rl
+
+CMPV..:						; opcode = EC
+;CMPZV:						; opcode = ED
+
+;	EXTV, EXTZV operation:
+;
+;		dst.wl <-- ?ext{field(pos.rl, size.rb, base.vb)}
+
+;EXTV:						; opcode = EE
+;EXTZV:						; opcode = EF
+
+;	All the field instructions (except INSV) use common code to
+;	extract field(pos.rl, size.rb, base.vb) to W0.
+
+FIELD.TO.W0:
+	;---------------------------------------;
+	W[4]<--W[2]-1, SET.ALUCC		; calc size-1, set alu cc's
+
+	;---------------------------------------;
+	WBUS<--ZEXT.W[4].SHFR.[5], SET.ALUCC,	; test if size-1 < 32, set alu cc's
+	IF[ALU.N]_[FIELD.0]			; branch out if size-1 < 0
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.VB],			; set up .vb for GSD third specifier
+	IF[NOT.ALU.Z]_[FIELD.RSRV.OPER]		; branch out if size-1 >= 32
+
+	;---------------------------------------;
+	W[2]<--W[0], SET.ALUCC,			; save position, test sign, set alu cc's
+	CALL.CASE.SPEC[GSD..]			; parse base operand to W0, VA
+
+	;---------------------------------------;
+	W(6)&, WBUS<--SEXT.W[2].SHFR.[3],	; convert position to signed byte offset,
+	IF[RMODE]_[FIELD.RMODE]			; branch out if reg mode 
+
+;	Field in memory.
+
+;	At this point,
+;		W2	=	position
+;		W4	=	size - 1 (0..31)
+;		W6	=	sext(position)/8
+;		VA	=	address of operand, not register mode
+
+FIELD.MEM.1.32:
+	;---------------------------------------;
+	SC&, VA<--VA+W[6],			; add byte offset to base address to get
+						; base byte address of field
+	CALL[FIELD.CALC.VA.POS]			; calculate LONGWORD address and bit offset
+						; from LONGWORD address
+
+;	After subroutine FIELD.CALC.VA.POS,
+;		W2	=	position (mod 32) of bit field relative to base LONGWORD
+;		W4	=	size - 1 (0..31)
+;		VA	=	address of base LONGWORD
+;		SC	=	W2 + W4	=	position + size - 1	=	end bit of field
+;
+;	If SC > 31, the field occupies two successive longwords
+
+	;---------------------------------------;
+	W[0]<--MEM(VA), LONG,			; read first longword of field
+	CASE2[SC7-4].AT.[FIELD.COMMON]		; case on SC > 31 (SC<5> set)
+
+;= ALIGNLIST **01*	(FIELD.COMMON,	FIELD.READ.2)
+;  Position < 32, size - 1 < 32 --> pos + size - 1 < 64 --> SC<7:4> = 00??
+
+FIELD.READ.2:
+	;---------------------------------------; SC<5> = 1:
+	VA<--VA+K[4]				; field in two longwords, on to next
+
+	;---------------------------------------;
+	W[1]<--MEM(VA), LONG,			; read second longword,
+	GOTO[FIELD.COMMON]			; join common code
+
+;	Field in register(s).
+
+;	At this point,
+;		W2	=	position (must be 0..31)
+;		W4	=	size - 1 (0..31)
+;		RN	=	register number
+
+;	Note that the register fetch done in GSD is useless, because
+;	the specifier length was BYTE.
+
+FIELD.RMODE:
+	;---------------------------------------;
+	WBUS<--ZEXT.W[2].SHFR.[5], SET.ALUCC	; test field position for value > 31
+
+	;---------------------------------------;
+	W[0]<--G(RN), RN<--RN+1,		; get first register for extract, incr reg ptr
+	IF[NOT.ALU.Z]_[FIELD.RSRV.OPER]		; if position > 31, reserved operand fault
+
+	;---------------------------------------;
+	W[1]<--G(RN), RN<--RN-1,		; get second register, just in case, restore reg ptr
+	GOTO[FIELD.COMMON]			; if position legitimate, join common code
+
+;	Field size 0 or (33..255).
+
+;	At this point,
+;		base operand not yet parsed
+;		ATDL not set
+;		W3	=	saved position (FFx only)
+
+FIELD.RSRV.OPER:
+	;---------------------------------------;
+	GOTO[RSRV.OPER.FLT..]			; size > 32, reserved operand fault
+
+FIELD.0:
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.VB],			; set up .vb for GSD third specifier
+	CALL[COPY.W0.TO.W1.GSD..]		; parse (and throw away) base operand
+
+FIELD.CASE.ZERO:				; phony label for alignlist
+	;---------------------------------------;
+	W[0]<--0, SET.ALUCC,			; force zero result, set alu cc's,
+	DL<--LONG,				; force dl to long for EXTxV and FFx
+	CASE4[OPCODE3-0].AT.[FIELD.CASE.ZERO]	; case on FF vs CMP vs EXT
+
+;= ALIGNLIST 1001*	(FIELD.CASE.ZERO,	FF.ZERO.EXIT,
+;=			CMPV.ZERO.EXIT,		EXTV.ZERO.EXIT)
+
+FF.ZERO.EXIT:
+	;---------------------------------------; FFx:
+	W[0]<--W[3],				; result is orig pos, alu cc's are 0100,
+	JMP.CASE.SPEC[WDEST..]			; go write result to memory
+
+;CMPV.ZERO.EXIT:				; CMPxV: see CMPV.EXIT
+
+EXTV.ZERO.EXIT:
+	;---------------------------------------; EXTxV:
+	JMP.CASE.SPEC[WDEST..]			; result is 0, go write to memory
+
+;	Ready to extract.
+
+;	At this point,
+;		W0 (or W1'W0) =	field surround
+;		W2 	=	position (mod 32) relative to base LONGWORD
+;		W4	=	size - 1 (1..32)
+;		VA	=	address of base LONGWORD (if not a register)
+
+FIELD.COMMON:
+	;---------------------------------------; SC<5> = 0, SC<5> = 1:
+	W[SC]<--W[2], DL<--LONG			; position to SC for shift, dl = long
+
+	;---------------------------------------;
+	W[0]<--W[1]!!W[0].SHFR.(SC)		; right justify field in W0
+
+	;---------------------------------------;
+	SC<--K[31.]-W[4]			; set up 31-(size-1) = 32-size for shift
+
+;	Instruction breakout:  at this point,
+;		W0	=	right justified field (with high order garbage)
+;		W3	=	saved position (FFx only)
+;		W4	=	size - 1 (0..31)
+;		SC	=	32 - size
+
+FIELD.CASE.OPCODE:				; phony label for alignlist
+	;---------------------------------------;
+	W[0]<--W[0].SHFL.(SC), SET.ALUCC,	; left justify field in W0, set cc's,
+	CASE8[OPCODE3-0].AT.[FIELD.CASE.OPCODE]	; case on opcode<2:0>
+
+;= ALIGNLIST 1000*	(FIELD.CASE.OPCODE,	,
+;=			FIELD.FFS,	FIELD.FFC,
+;=			FIELD.CMPV,	FIELD.CMPZV,
+;=			FIELD.EXTV,	FIELD.EXTZV)
+
+;	CMPV, CMPZV completion.
+
+;	At this point,
+;		W0	=	left justified field
+;		SC	=	32 - size (0..31)
+;		ATDL	=	?? + long
+;		alu cc's =	set from W0
+;
+;	To complete CMPV, CMPZV:
+;		sign/zero extend field,
+;		fetch src2.rl operand,
+;		compare, set condition codes, and exit.
+
+FIELD.CMPV:
+	;---------------------------------------; CMPV:
+	W[0]<--SEXT.W[0].SHFR.(SC),		; right justify and sign extend field,
+	GOTO[CMPV.EXIT]				; go finish compare
+
+FIELD.CMPZV:
+	;---------------------------------------; CMPZV:
+	W[0]<--ZEXT.W[0].SHFR.(SC),		; right justify and zero extend field,
+	GOTO[CMPV.EXIT]				; go finish compare
+
+CMPV.ZERO.EXIT:					; enter here for zero size, W0 = 0
+CMPV.EXIT:
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.RL],			; set up .rl for GSD fourth specifier
+	CALL[COPY.W0.TO.W1.GSD..]		; save extracted field, parse src2
+
+	;---------------------------------------;
+	WBUS<--W[1]-W[0], SET.PSLCC, LEN(DL),	; do compare, set psl cc's,
+	EXECUTE.IID				; decode next instruction
+
+;	EXTV, EXTZV completion.
+
+;	At this point,
+;		W0	=	left justified field
+;		SC	=	32 - size (0..31)
+;		DL	=	longword
+;		alu cc's =	set from W0
+;
+;	To complete EXTV, EXTZV:
+;		sign/zero extend field,
+;		go to WDEST to write field to dst.wl.
+
+FIELD.EXTV:
+	;---------------------------------------; EXTV:
+	W[0]<--SEXT.W[0].SHFR.(SC),		; right justify and sign extend field,
+	JMP.CASE.SPEC[WDEST..]			; go write result and set psl cc's
+
+FIELD.EXTZV:
+	;---------------------------------------; EXTZV:
+	W[0]<--ZEXT.W[0].SHFR.(SC),		; right justify and zero extend field,
+	JMP.CASE.SPEC[WDEST..]			; go write result and set psl cc's
+
+;	FFS, FFC completion.
+
+;	At this point,
+;		W0	=	left justified field
+;		W3	=	saved position
+;		W4	=	size - 1 (0..31)
+;		SC	=	32 - size (0..31), 0 if size = 32
+;		DL	=	longword
+;
+;	To complete FFS, FFC:
+;		if FFC, invert field so can use FFS algorithm,
+;		zero extend field,
+;		if field is zero, calculate answer and go to WDEST,
+;		otherwise, find first one bit in field, go to WDEST.
+
+FIELD.FFC:
+	;---------------------------------------; FFC:
+	W[0]<--NOT.W[0]				; complement 1's and 0's
+
+FIELD.FFS:
+	;---------------------------------------; FFS:
+	W[SC]<--ZEXT.W[0].SHFR.(SC),		; right justify and zero extend field,
+	SET.ALUCC				; set alu cc's and join common code
+
+;	FFx zero test:
+
+;	At this point,
+;		W3	=	saved position
+;		W4	=	size - 1 (0..31)
+;		SC	=	field to search for first one
+;		alu.z	=	set if field is zero
+;
+;	The upcoming bit search can only fail if (FFS) field = 00..00 (FFC) field = 11..11.
+;	In FFC, the field is complemented BEFORE right shifting.  Garbage to the right of
+;	the field is shifted off, and zeroes are shifting in, causing the zero test to work.
+
+	;---------------------------------------;
+	W[0]<--W[3],				; position to W0 for WDEST
+	IF[NOT.ALU.Z]_[FF.COUNT.BY.8]		; if field not zero, go find first set bit
+
+	;---------------------------------------;
+	W[0]<--W[0]+W[4]+1,			; position is initial position + size
+						; (+ 1 to compensate for size - 1)
+						; alu cc's are 0100 (alu.z only)
+	JMP.CASE.SPEC[WDEST..]			; go write result to memory, set psl cc's
+
+;	FFx search.
+
+;	At this point,
+;		W0	=	base position
+;		SC	=	field to search, known to contain a 1
+;
+;	First search a byte at a time, then one bit at a time, to find the set bit.
+;	There are lots of alternatives at this point, the following is convenient.
+
+FF.COUNT.BY.8:
+	;---------------------------------------;
+	WBUS<--W[SC].AND.K[0FF], SET.ALUCC	; test low byte for zero, set alu cc's
+
+	;---------------------------------------;
+	W[0]<--W[0]+K[8.],			; assume eight bits will be shifted off
+	IF[NOT.ALU.Z]_[FF.COUNT.BY.1]		; if byte non-zero, go do detailed search
+
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[SC].SHFR.[8.],		; shift off zero byte
+	GOTO[FF.COUNT.BY.8]			; go test next byte
+
+;	Non-zero byte found.
+
+;	At this point,
+;		W0	=	position, too high by 8
+;		SC<7:0>	=	non-zero byte
+;		alu cc's =	0000 (set by AND with mask<31> = 0 and non-zero result)
+
+FF.COUNT.BY.1:
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[SC].SHFR.[1],		; get next bit for testing
+	CASE2[SC3-0].AT.[FF.SC0.0]		; test previous SC<0>
+
+;= ALIGNLIST 1110*	(FF.SC0.0,	FF.SC0.1)
+
+FF.SC0.0:
+	;---------------------------------------; SC<0> = 0:
+	W[0]<--W[0]+1, GOTO[FF.COUNT.BY.1]	; tested bit was zero, incr pos, loop
+
+FF.SC0.1:
+	;---------------------------------------; SC<0> = 1:
+	W[0]<--W[0]-K[8.],			; compensate count for pre-addition
+	GOTO[JMP.CASE.SPEC.WDEST..]		; go write to memory, set psl cc's
+
+.nobin
+.TOC	"	INSV"
+
+;	This instruction inserts a source operand into a variable length bit field.
+;	The condition codes are not changed.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	INSV		F0	field(pos.rl, size.rb, base.vb)		fse	rr/ll	x	INSV
+;					<-- src.rl
+;
+;	Entry conditions:
+;		W0	=	first (source) operand
+;		W2	=	second (position) operand
+;		DL	=	data type of second operand (longword)
+;
+;	Exit conditions:
+;		The source has been inserted into the specified bit field.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		Many alternative structures are available.
+;
+.bin
+
+;	INSV operation:
+;
+;		field(pos.rl, size.rb, base.vb) <-- src.rl
+
+INSV..:						; opcode = F0
+	;********** Hardware dispatch **********;
+	P[ATDL]<--K[ATDL.RB],			; set up .rb to parse size
+	CALL[COPY.W0.TO.W3.GSD..]		; save source in W3, parse size to W0
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.VB]			; set up AT/DL to parse base
+
+	;---------------------------------------;
+	W[4]<--W[0]-1, SET.ALUCC,		; calc size-1, test, set alu cc's
+	CALL.CASE.SPEC[GSD..]			; parse base operand to W0, VA
+
+	;---------------------------------------;
+	WBUS<--ZEXT.W[4].SHFR.[5], SET.ALUCC,	; test for size-1 < 32
+	IF[ALU.N]_[INSV.0].ELSE.[INSV.1.255]	; branch out if size-1 <0
+
+;	Field size 0.
+
+;	All specifiers parsed, just exit.
+
+INSV.0:
+	;---------------------------------------;
+	EXECUTE.IID				; decode next instruction
+
+;	Field size (1..255).
+
+;	At this point,
+;		W2	=	position
+;		W3	=	source
+;		W4	=	size - 1 (0..254)
+;		VA	=	address of base operand
+;		alu.z	=	set if size (1..32)
+
+INSV.1.255:
+	;---------------------------------------;
+	WBUS<--W[2], SET.ALUCC,			; test sign of position, set alu cc's
+	IF[NOT.ALU.Z]_[FIELD.RSRV.OPER]		; branch out if size-1 >= 32
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.RQ],			; set up data length of quadword
+						; (longwords can be handled by mreqs)
+	IF[RMODE]_[INSV.RMODE]			; branch out if register mode
+
+	;---------------------------------------;
+	W(6)&, WBUS<--SEXT.W[2].SHFR.[3]	; convert position to signed branch offset
+
+	;---------------------------------------;
+	SC&, VA<--VA+W[6],			; add byte offset to base address to get
+						; base byte address of field
+	CALL[FIELD.CALC.VA.POS]			; calculate LONGWORD address and bit offset
+						; from LONGWORD address
+
+;	After subroutine FIELD.CALC.VA.POS,
+;		W2	=	position (mod 32) of bit field relative to base LONGWORD
+;		W3	=	source
+;		W4	=	size - 1 (0..31)
+;		VA	=	address of base LONGWORD
+;		SC	=	W2 + W4	=	position + size - 1	=	end bit of field
+;
+;	If SC > 31, the field occupies two successive longwords.
+
+	;---------------------------------------;
+	W[SC]<--W[2],				; put position into SC,
+	CASE2[SC7-4].AT.[INSV.READ.1]		; now case on previous SC > 31 (SC<5> = 1)
+
+;= ALIGNLIST **01*	(INSV.READ.1,	INSV.READ.2)
+;  Pos < 32, size - 1 < 32 --> pos + size - 1 < 64 --> SC<7:4> = 00??
+
+;	Field in one longword.
+
+;	At this point,
+;		W2 = SC	=	position (0..31)
+;		W3	=	source
+;		W4	=	size - 1 (0..31)
+;		VA	=	base LONGWORD address of field
+;		DL	=	quadword!!
+
+INSV.READ.1:
+	;---------------------------------------; SC<5> = 0:
+	W[0]<--MEM(VA), LONG			; read lw containing field 
+
+;	Insert field in one longword:
+
+;	At this point,
+;		W0	=	target containing old field
+;		W2 = SC	=	position (0..31)
+;		W3	=	source
+;		W4	=	size - 1 (0..31)
+
+;	Note that size + pos - 1 < 32 (by case statement), size > 0 (by earlier test).
+
+INSV.COMMON.1:
+	;---------------------------------------; --W3--  --W0--
+	W[0]<--W[0].ROTR.(SC), DL<--LONG,	; xxxxnn  aabbcc --> xxxxnn  ccaabb
+	CALL[INSV.INSERT.FIELD]			; xxxxnn  ccaabb --> xxxxnn  ccaann
+						; SC now = position
+
+	;---------------------------------------; --W3--  --W0--
+	W[0]<--W[0].ROTL.(SC),			; xxxxnn  ccaann --> xxxxnn  aanncc (pos > 0)
+						; nnnnnn  nnnnnn --> nnnnnn  nnnnnn (pos = 0)
+	IF[RMODE]_[WRITE.RMODE..]		; branch out if register mode and write
+						; (qw length forces write of entire gen reg)
+
+	;---------------------------------------;
+	MEM(VA)<--W[0], LONG,			; write result to memory
+	EXECUTE.IID				; decode next instruction
+
+;	Field in two longwords.
+
+;	At this point,
+;		W2 = SC	=	position (0..31)
+;		W3	=	source
+;		W4	=	size - 1 (0..31)
+;		VA	=	base LONGWORD address of field
+;		DL	=	quadword
+
+INSV.READ.2:
+	;---------------------------------------; SC<5> = 1:
+	W[0]<--MEM(VA), LEN(DL),		; read first lw to W0, check access
+	CALL[READ.MEM(VAP).TO.W1..]		; read rest of qw to W1
+
+;	Insert field in two longwords:
+
+;	At this point,
+;		W1'W0	=	target containing old field
+;		W2 = SC	=	position (0..31)
+;		W3	=	source
+;		W4	=	size - 1 (0..31)
+
+INSV.COMMON.2:
+	;---------------------------------------; --W3--  --W1--  --W0--  --W6--
+	W[6]<--W[0]!!W[6].SHFR.(SC)		; xxnnnn  aaaabb  bbcccc!!yyyyyy --> xxnnnn  aaaabb  bbcccc  cccccyy
+
+	;---------------------------------------; --W3--  --W1--  --W0--  --W6--
+	W[0]<--W[1]!!W[0].SHFR.(SC)		; xxnnnn  aaaabb!!bbcccc  ccccyy --> xxnnnn  aaaabb  aabbbb  ccccyy
+
+	;---------------------------------------; --W3--  --W1--  --W0--  --W6--
+	W[1]<--ZEXT.W[1].SHFR.(SC),		; xxnnnn  aaaabb  aabbbb  ccccyy --> xxnnnn  0000aa  aabbbb  ccccyy
+	CALL[INSV.INSERT.FIELD]			; xxnnnn  0000aa  aabbbb  ccccyy --> xxnnnn  0000aa  aannnn  ccccyy
+
+	;---------------------------------------; --W3--  --W1--  --W0--  --W6--
+	W[1]<--W[1]!!W[0].SHFL.(SC),		; xxnnnn  0000aa!!aannnn  ccccyy --> xxnnnn  aaaann  aannnn  ccccyy
+	RN<--RN+1				; incr register number in case reg mode
+
+	;---------------------------------------; --W3--  --W1--  --W0--  --W6--
+	W[0]<--W[0]!!W[6].SHFL.(SC),		; xxnnnn  aaaann  aannnn!!ccccyy --> xxnnnn  aaaann  nncccc  ccccyy
+	IF[RMODE]_[INSV.RMODE.2]		; branch out if register mode
+
+WRITE.MEM(VA).QW.FROM.W1.W0..:
+	;---------------------------------------;
+	MEM(VA)<--W[0], LEN(DL)			; write first lw of result to memory
+
+WRITE.MEM.QW..:
+	;---------------------------------------;
+	MEM(VAP)<--W[1], LONG,			; write second lw of result to memory
+	EXECUTE.IID				; decode next instruction
+
+INSV.RMODE.2:
+	;---------------------------------------;
+	G(RN)<--W[1], RN<--RN-1,		; write second low to memory
+	GOTO[WRITE.RMODE..]			; go write first lw to memory, decode
+
+;	Register mode start.
+
+;	At this point,
+;		W2	=	position (must be 0..31)
+;		W3	=	source
+;		W4	=	size - 1 (0..31)
+;		RN	=	register number 
+
+INSV.RMODE:
+	;---------------------------------------;
+	WBUS<--ZEXT.W[2].SHFR.[5], SET.ALUCC	; test field position for value > 31
+
+	;---------------------------------------;
+	SC&, WBUS<--W[2]+W[4],			; calculate end bit position
+	IF[NOT.ALU.Z]_[FIELD.RSRV.OPER]		; if position > 31, reserved operand fault
+
+	;---------------------------------------;
+	W[0]<--G(RN), RN<--RN+1			; get first register containing field, point to second
+
+	;---------------------------------------;
+	W[1]<--G(RN), RN<--RN-1			; get second register containing field, point back to first
+
+	;---------------------------------------;
+	W[SC]<--W[2],				; position is initial shift value,
+	CASE2[SC7-4].AT.[INSV.COMMON.1]		; go to common code, proper tree
+
+;= ALIGNLIST **01*	(INSV.COMMON.1,		INSV.COMMON.2)
+;  Position < 32, size - 1 < 32 --> pos + size - 1 < 64 --> SC<7:4> = 00??
+
+;	Subroutine READ.MEM(VA).QW.TO.W1.W0
+
+;	Entry conditions:
+;		VA	=	address of memory operand
+;		DL	=	quadword
+;
+;	Exit conditions:
+;		W1'W0	=	memory operand at VA
+
+READ.MEM(VA).QW.TO.W1.W0..:
+	;---------------------------------------;
+	W[0]<--MEM(VA), LEN(DL)			; read first lw to W0
+
+READ.MEM(VAP).TO.W1..:
+	;---------------------------------------;
+	W[1]<--MEM(VAP), LONG,			; read second lw to W1
+	RETURN					; return to caller
+
+;	Subroutine to perform guts of insert field operation.
+
+;	Entry conditions:
+;		W0	=	right justified old field (aabbbb)
+;		W2	=	position
+;		W3	=	right justified field (xxnnnn)
+;		W4	=	size
+;
+;	Exit conditions:
+;		W0	=	inserted new field (aannnn)
+;		SC	=	position
+
+INSV.INSERT.FIELD:
+	;---------------------------------------;
+	W[SC]<--W[4]+1				; use size as shift value
+
+	;---------------------------------------; --W3--  --W0--  (size < 32)
+	W[0]<--W[3]!!W[0].SHFR.(SC),		; xxnnnn!!aabbbb  --> xxnnnn  nnnnaa
+	CASE2[SC7-4].AT.[INSV.INSERT.SHFTOK]	; case on size = 32
+
+;= ALIGNLIST **01*	(INSV.INSERT.SHFTOK,	INSV.INSERT.SHFT32)
+;  SC <= 32 --> SC<7:6> = 00 --> SC<7:4> = 00??
+
+INSV.INSERT.SHFTOK:
+	;---------------------------------------; SC<5> = 0 (size < 32):
+						; --W3--  --W0--
+	W[0]<--W[0].ROTL.(SC),			; xxnnnn  nnnnaa  --> xxnnnn  aannnn
+	GOTO[INSV.INSERT.SHFTEND]		; if size = 32, then transfer is ok
+
+INSV.INSERT.SHFT32:
+	;---------------------------------------; SC<5> = 1 (size = 32):
+						; --W3--  --W0--
+	W[0]<--W[3]				; nnnnnn  aabbbb  --> nnnnnn  nnnnnn
+
+INSV.INSERT.SHFTEND:
+	;---------------------------------------;
+	W[SC]<--W[2], RETURN			; position is shift value, return
+
+;	Subroutine FIELD.CALC.VA.POS
+
+;	Entry conditions:
+;		W2	=	position
+;		W4	=	size - 1 (0..31)
+;		SC, VA	=	base byte address of field
+;
+;	Exit conditions:
+;		W2	=	position (mod 32) relative to base LONGWORD address of field
+;		VA	=	base LONGWORD address of field
+;		SC	=	W2 + W4	=	position + size - 1
+
+FIELD.CALC.VA.POS:
+	;---------------------------------------;
+	W[2]<--W[2].AND.K[7],			; calculate pos (mod 8) rel to base byte addr
+	CASE4[SC3-0].AT.[FIELD.ADJUST.00]	; now case on SC<1:0> = VA<1:0>
+
+;= ALIGNLIST 1100*	(FIELD.ADJUST.00,	FIELD.ADJUST.01,
+;=			 FIELD.ADJUST.10,	FIELD.ADJUST.11)
+
+FIELD.ADJUST.01:
+	;---------------------------------------; SC<1:0> = 01:
+	W[2]<--W[2]+K[8.],			; field begins in byte 1, add 8 bits to pos mod 8
+	GOTO[FIELD.ADJUST.VA]			; go zero out VA<1:0>
+
+FIELD.ADJUST.10:
+	;---------------------------------------; SC<1:0> = 10:
+	W[2]<--W[2]+K[16.],			; field begins in byte 2, add 16 bits to pos mod 8
+	GOTO[FIELD.ADJUST.VA]			; go zero out VA<1:0>
+
+FIELD.ADJUST.11:
+	;---------------------------------------; SC<1:0> = 11:
+	W[2]<--W[2]+K[24.],			; field begins in byte 3, add 24 bits to pos mod 8
+	GOTO[FIELD.ADJUST.VA]			; go zero out VA<1:0>
+
+FIELD.ADJUST.VA:
+	;---------------------------------------;
+	VA<--VA.ANDNOT.K[3]			; force base addr to LONGWORD alignment
+
+FIELD.ADJUST.00:
+	;---------------------------------------; SC<1:0> = 00:
+	SC&, WBUS<--W[2]+W[4],			; calculate end bit of field
+	RETURN					; return
+
+;= END VFIELD

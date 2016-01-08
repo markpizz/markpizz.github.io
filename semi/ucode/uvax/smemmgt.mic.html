@@ -1,0 +1,512 @@
+.TOC 	"SMEMMGT.MIC -- Subset VAX Memory Management Microtrap Routines"
+.TOC	"Revision 1.0"
+
+;	Erica Dorenkamp, Keith Henry, Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984, 1985 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 01	23-Oct-85	[RMS]	Resurrected from full MicroVAX flows
+
+.bin
+;= BEGIN SMEMMGT
+.nobin
+
+;	This module handles the memory management microtraps.
+;
+;	There are four memory management microtraps:
+;
+;	1) TB miss.  Taken by probes and virtual memory requests.  The PTE entry
+;	   corresponding to the virtual address (VA) is not in the translation buffer.
+;
+;	2) Cross page.  Taken by virtual memory requests.  The data item specified by
+;	   the VA and the effective data length spans a page boundary.
+;
+;	3) ACV/TNV.  Taken by virtual memory requests.  The PTE corresponding to the
+;	   virtual address (VA) is not valid or has engendered a privilege violation.
+;
+;	4) M = 0.  Taken by write virtual memory requests.  The PTE corresponding
+;	   to the virtual address (VA) has the modify (M) bit equal to zero.
+;
+;	Cross page microtraps have the highest priority, then TB miss microtraps, then ACV/TNV
+;	microtraps, then M = 0 microtraps.
+;
+;	The memory management microtraps have the following resources available:
+;
+;		W[5]
+;		T[MMGT]
+;		VAP
+;		two levels of microsubroutine stack
+;
+
+;	The memory management hardware is organized as follows:
+;
+;	1) Translation buffer.  The TB consists of 'n' entries and acts as a fully
+;	   associative cache.  Because of the fully associative organization, the
+;	   normal VAX division into system and process space entries is NOT necessary.
+;	   When a memory reference with TB hit occurs, the entry referenced becomes
+;	   the most recently used entry.  When a memory reference with TB miss occurs,
+;	   the least-recently used entry is selected for replacement.  Its tag is
+;	   overwritten with the new virtual address, and its valid bit is CLEARED.
+;	   [Note that the allocated entry remains the least-recently used until it
+;	   is referenced as part of a TB hit!]  When a memory reference with TB hit
+;	   and PTE.V = 0 or M = 0 occurs, the entry is declared invalid (i.e., its
+;	   valid bit is cleared).
+;
+;	2) Memory management registers.  The memory management base registers
+;	   (P0BR, P1BR, SBR) are kept in the T register file in the main data path.
+;	   The memory management length registers (P0LR, P1LR, SLR) and the memory
+;	   management enable register (MAPEN) are kept in the memory interface and
+;	   are accessible by MXPR microinstructions.
+;
+;	3) Memory management status.  The status of the most recent memory reference
+;	   is recorded in two status registers, MBOX.STATUS and MMGT.STATUS.
+;
+;		MBOX.STATUS<1:0> =	00 if P0 space reference
+;					01 if P1 space reference
+;					10 if system space reference
+;					11 if length error
+;
+;		MMGT.STATUS<3>	=	0 for ACV, 1 for TNV + TB miss + reference ok
+;		MMGT.STATUS<2>	=	0 for read, 1 for write or modify intent
+;		MMGT.STATUS<1>	=	0 for ACV + TNV + TB miss, 1 for reference ok
+;		MMGT.STATUS<0>	=	0 for ACV + TNV, 1 for TB miss + reference ok
+;
+;	   Note that MMGT.STATUS<2> is FROZEN if MMGT.TD is set.
+;
+;	   Here are all legitimate values for MMGT.STATUS<3:0> (X = read/write):
+;
+;		MMGT.STATUS<3:0> =	0X00 for process ACV (hardware)
+;					0X01 for process length violation (microcode)
+;					0X10 for ppte ACV (microcode)
+;					0X11 for ppte length violation (microcode)
+;					1X00 for process TNV (hardware)
+;					1X01 for TB miss (hardware)
+;					1X10 for ppte TNV (microcode)
+;					1X11 for reference okay (hardware)
+;
+;	   The status registers can be accessed by two case branches, DL.MBOX.STATUS
+;	   and MMGT.STATUS, and written as T[MMGT.STATUS], as follows:
+;
+;		BCS = DL.MBOX.STATUS	-->	MBOX.STATUS<1:0> drives uTEST<1:0>
+;		BCS = MMGT.STATUS	-->	MMGT.STATUS<3:0> drives uTEST<3:0>
+;		write T[MMGT.STATUS]	-->	MMGT.STATUS<3,1:0> written from AW_Bus<26:24>
+;						(to share spur lines with partial PSL logic)
+;
+;	4) Other hardware facilities:
+;
+;		REEXECUTE	=	when set, suppresses CPB microtraps for next MREQ.  Cleared
+;					by any MREQ, by IID, or by SPECIAL microinstruction.
+;
+;		REPROBE		=	when set, suppresses next MREQ execution.  MMGT.STATUS is not updated.
+;					An ACV/TNV condition is declared (ie, data MREQ causes microtrap,
+;					PROBE continues execution).  Cleared by any MREQ, by IID, or
+;					by SPECIAL microinstruction.
+;
+.bin
+
+.nobin
+.TOC	"	TB Miss Microtrap"
+
+;	The TB Miss microtrap routine is invoked when a virtual memory request
+;	or probe fails because the required PTE is not in the translation buffer.
+;
+;	The TB Miss microtrap routine is responsible for fetching the PTE to
+;	the translation buffer corresponding to the virtual address (VA).
+;
+;	Entry conditions:
+;		VA	=	virtual address being referenced when the miss occurred
+;		MBOX.STATUS =	P0/P1/system/length violation indication
+;		MMGT.STATUS =	1'read/write'01 (bit<2> frozen)
+;		[LRU]	=	pointer to translation buffer entry which will be filled
+;				with PTE for this VA (tag already filled in, valid bit cleared)
+;		MMGT.TD	=	set, disabling prefetching and further memory management traps
+;		STATE<5> =	0
+;
+;	Exit conditions:
+;		TB[LRU]	=	contains PTE for this VA (if no error), cleared (if error)
+;		VA	=	unchanged
+;		VAP, W[5], T[MMGT] =	trashed!!
+;
+;	Algorithm:
+;		calculate the PTE address
+;		check for length violation
+;		read the PTE into the TB
+;		exit and redo the reference
+;
+;	Note:	In the event of an error, the TB entry allocated at TB miss is
+;		cleaned out.  MMGT.STATUS is written with the correct error status.
+;		The REPROBE flag is set, and the original MREQ is retried.  The
+;		REPROBE flag forces an ACV/TNV flag with the current value of
+;		MMGT.STATUS preserved, ie, data requests cause a microtrap, probes
+;		continue execution.  There are no "fake PTEs".
+;
+.bin
+
+;	TB Miss microtraps:
+
+MM.TBM..:
+	;********** Hardware dispatch **********;
+	W[5]<--VA				; get VA for PTE addr calculation
+
+	;---------------------------------------;
+	W[5]<--ZEXT.W[5].SHFR.[7],		; align VA for PTE addr calculation
+	CASE4[MBOX.STATUS].AT.[MM.TBM.P0.SPACE]	; case on P0/P1/sys/len viol
+
+;= ALIGNLIST 1100*	(MM.TBM.P0.SPACE,	MM.TBM.P1.SPACE,
+;=			 MM.TBM.SYS.SPACE,	MM.TBM.LENVIOL)
+
+MM.TBM.P0.SPACE:
+	;---------------------------------------; mbox.status<1:0> = 00 (P0 space):
+	VAP&, W[5]<--W[5]+T[P0BR],		; PTE addr = (VA<29:9> + P0BR<29:2>)'XX
+						; VA<31:30> = 00, can be ignored
+						; VA<8:7> = XX, are ignored by read.xpte
+	GOTO[MM.TBM.PTE]			; go read in PTE and retry
+
+MM.TBM.P1.SPACE:
+	;---------------------------------------; mbox.status<1:0> = 01 (P1 space):
+	VAP&, W[5]<--W[5]+T[P1BR],		; PTE addr = (VA<29:9> + P1BR<29:2>)'XX
+						; VA<31:30> = 01, P1BR is PRECOMPENSATED
+						; VA<8:7> = XX, are ignored by read.xpte
+	GOTO[MM.TBM.PTE]			; go read in PTE and retry
+
+MM.TBM.SYS.SPACE:
+	;---------------------------------------; mbox.status<1:0> = 10 (system space):
+	VAP&, W[5]<--W[5]+T[SBR],		; PTE addr = (VA<29:9> + SBR<29:2>)'XX
+						; VA<31:30> = 10, SBR is PRECOMPENSATED
+						; VA<8:7> = XX, are ignored by read.xpte
+	GOTO[MM.TBM.PTE]			; go read in PTE and retry
+
+MM.TBM.PTE:
+	;---------------------------------------;
+	WBUS<--MEM(VAP).SPTE, LONG,		; read system PTE from memory into TB[LRU]
+	ENABLE.MM.TRAPS, RETURN[-1]		; return and retry reference
+
+;	TB Miss microtrap, continued
+;	Error handling.
+
+MM.TBM.LENVIOL:
+	;---------------------------------------; mbox.status<1:0> = 11 (length violation):
+	W[5]<--K[MM.PROLENVIOL]000,		; set final status (0X01) for len viol
+	GOTO[MM.ERROR.EXIT]			; go to common error exit
+
+;	Common error exit.
+
+;	At this point,
+;		VA	=	faulting address
+;		W[5]<26:24> =	final error code for MMGT.STATUS<3,1:0>
+;		[LRU]	=	pointer to PPTE's allocated TB entry
+
+MM.ERROR.EXIT:
+	;---------------------------------------;
+	ZAP.MTB(LRU).SET.REPROBE&STATE5<--0	; wipe the PPTE's allocated TB entry
+						; set "force ACV/TNV" flag for retry
+						; clear tb miss/m = 0 flag
+
+	;---------------------------------------;
+	T[MMGT.STATUS]<--W[5],			; set final mmgt status
+	ENABLE.MM.TRAPS,			; re-arm the microtrap mechanism
+	RETURN[-1]				; return and retry original mreq
+
+.nobin
+.TOC	"	M = 0 Microtrap"
+
+;	The M = 0 microtrap routine is invoked when a virtual write memory request
+;	or probe fails because the required PTE has the modify bit equal to zero.
+;
+;	The M = 0 microtrap routine is responsible for setting the M bit in both
+;	the translation buffer copy and the memory copy of the PTE.
+;
+;	Entry conditions:
+;		VA	=	virtual address being referenced when the M = 0 trap occurred
+;		MBOX.STATUS =	P0/P1/System/length violation indication
+;		MMGT.STATUS =	1'read/write'11 (bit<2> frozen)
+;		TB[PTE]	=	TB entry with M = 0, now invalidated!!
+;		[LRU]	=	pointer to LRU tb entry
+;		MMGT.TD	=	set, disabling prefetching and further memory management traps
+;		STATE<5> =	0
+;
+;	Exit conditions:
+;		TB[LRU]	=	PTE with M bit set
+;		M[pteaddr] =	PTE with M bit set
+;		VA	=	unchanged
+;		VAP, W[5], T[MMGT] =	trashed!!
+;
+;	Algorithm:
+;		calculate the PTE address
+;		check for length violation
+;		read the PTE, set the M bit, rewrite to memory
+;		read the modified PTE into the TB
+;		exit and redo the reference
+.bin
+
+;	M = 0 microtrap:
+
+MM.M0..:
+	;********** Hardware dispatch **********;
+	W[5]<--VA				; get VA for PTE addr calculation
+
+	;---------------------------------------;
+	PROBE.READ.CURMODE			; probe at address of M = 0 reference
+						; causes TB miss since original entry invalidated
+						; tag written, entry allocated at TB[LRU]
+
+	;---------------------------------------;
+	W[5]<--W[5].AND.11K[0FE]0		; clear VA<8:0> to assure aligned address
+
+	;---------------------------------------;
+	W[5]<--ZEXT.W[5].SHFR.[7],		; align VA for PTE addr calculation
+	CASE4[MBOX.STATUS].AT.[MM.M0.P0.SPACE]	; case on P0/P1/sys/len viol
+
+;= ALIGNLIST 1100*	(MM.M0.P0.SPACE,	MM.M0.P1.SPACE,
+;=			 MM.M0.SYS.SPACE,	MM.M0.LENVIOL)
+
+MM.M0.P0.SPACE:
+	;---------------------------------------; mbox.status<1:0> = 00 (P0 space):
+	VAP&, W[5]<--W[5]+T[P0BR],		; PTE addr = (VA<29:9> + P0BR<29:2>)'XX
+						; VA<31:30> = 00, can be ignored
+						; VA<8:7> = XX, are ignored by read.xpte
+	GOTO[MM.M0.PTE]				; go read in PTE and retry
+
+MM.M0.P1.SPACE:
+	;---------------------------------------; mbox.status<1:0> = 01 (P1 space):
+	VAP&, W[5]<--W[5]+T[P1BR],		; PTE addr = (VA<29:9> + P1BR<29:2>)'XX
+						; VA<31:30> = 01, P1BR is PRECOMPENSATED
+						; VA<8:7> = XX, are ignored by read.xpte
+	GOTO[MM.M0.PTE]				; go read in PTE and retry
+
+MM.M0.SYS.SPACE:
+	;---------------------------------------; mbox.status<1:0> = 10 (system space):
+	VAP&, W[5]<--W[5]+T[SBR],		; PTE addr = (VA<29:9> + SBR<29:2>)'XX
+						; VA<31:30> = 10, SBR is PRECOMPENSATED
+						; VA<8:7> = XX, are ignored by read.xpte
+	GOTO[MM.M0.PTE]				; go read in PTE and retry
+
+;	M = 0 microtrap, continued.
+
+;	At this point,
+;		VA	=	faulting address
+;		VAP	=	address of PTE, bits<1:0> = 00
+;		[LRU]	=	pointer to PTE's allocated TB entry
+
+MM.M0.PTE:
+	;---------------------------------------;
+	T[MMGT]<--MEM(VAP).PHYS, LONG		; get PTE to be modified ([LRU] unchanged)
+
+	;---------------------------------------;
+	T[MMGT]<--T[MMGT].OR.K[4]000		; set M = 0 bit in PTE
+
+	;---------------------------------------;
+	VAP&, WBUS<--T[VAP]-M[FOUR]		; decrement VAP by four
+
+	;---------------------------------------;
+	MEM(VAP).PHYS<--T[MMGT], LONG		; write PTE back to mem ([LRU] unchanged)
+
+	;---------------------------------------;
+	STATE5<--0				; clear M = 0 flag, wait for VAP to settle
+
+	;---------------------------------------;
+	VAP&, WBUS<--T[VAP]-M[FOUR],		; decrement VAP by four
+	GOTO[MM.TBM.PTE]			; go read modified PTE into TB[LRU]
+
+;	Length violation.
+
+MM.M0.LENVIOL:
+	;---------------------------------------; mbox.status<1:0> = 11 (length violation):
+	W[5]<--K[MM.PROLENVIOL]000,		; set final status (0X01) for len viol
+	GOTO[MM.ERROR.EXIT]			; go to common error exit
+
+.nobin
+.TOC	"	Crossing Page Boundary Microtrap"
+
+;	The cross page microtrap routine is invoked when a virtual memory request
+;	fails because the required data spans a page boundary.
+;
+;	The cross page microtrap routine makes sure that both pages required for the
+;	reference are accessible and then retries the memory request.
+;
+;	Probes do not takes this microtrap.
+;
+;	Entry conditions:
+;		VA	=	virtual address being referenced when the cross page condition
+;				was detected
+;		MMGT.TD	=	clear, permitting TB miss and M = 0 microtraps to occur
+;
+;	Exit conditions:
+;		VA	=	unchanged
+;		VAP, W[5], T[MMGT]	=	trashed!!
+;
+;	Algorithm:
+;		(read) probe both pages
+;		(write) read and check both pages (to force resolution of m = 0)
+;		if both OK     - return with re-execute bit set, VA restored
+;		if both not OK - point VA at faulting page, join ACV/TNV dispatch
+;
+;	Note:	The PROBEs may generate TB Miss microtraps;  the MREQS, TB Miss and M = 0 microtraps.
+;
+.bin
+
+;	Cross page microtrap:
+
+MM.CPB..:
+	;********** Hardware dispatch **********;
+	VA<--VA+K[17.],				; set up VA to probe second page
+						; (try to improve probability of alignment)
+	CASE2[MMGT.STATUS].AT.[MM.CPB.READ]	; case on read vs write
+
+;= ALIGNLIST 1011*	(MM.CPB.READ,	MM.CPB.WRITE)
+
+MM.CPB.READ:
+	;---------------------------------------; mmgt.status<2> = 0:
+	PROBE.READ.CURMODE			; probe second page for read accessibility
+
+	;---------------------------------------;
+	VA<--VA-K[17.],				; restore VA to probe first page
+	IF[VA.MEM.REF.NOT.OK]_[MM.CPB.FLT]	; test result of second page probe
+
+	;---------------------------------------;
+	PROBE.READ.CURMODE, REEXECUTE		; second page ok, probe first page
+
+	;---------------------------------------;
+	IF.MEM.REF.OK.THEN.RETURN[-1]		; test result of first page probe
+						; return and retry if ok
+
+	;---------------------------------------;
+	CLEAR.REEXECUTE,			; probe fault, clear reexecute
+	GOTO[MM.ACV.TNV..]			; pretend there was an ACV or TNV microtrap
+
+MM.CPB.FLT:
+	;---------------------------------------;
+	VA<--VA+K[17.],				; probe fault on second page, restore VA to faulting address
+	GOTO[MM.ACV.TNV..]			; pretend there was an ACV or TNV microtrap
+
+MM.CPB.WRITE:
+	;---------------------------------------; mmgt.status<2> = 1:
+	WBUS<--MEM(VA).WCHECK, LEN(DL)		; read and check second page for accessibility
+						; cannot get xpage due to VA increment
+
+	;---------------------------------------;
+	VA<--VA-K[34.]				; point VA to first page away from boundary
+
+	;---------------------------------------;
+	WBUS<--MEM(VA).WCHECK, LEN(DL),		; read and check second page for accessibility
+	REEXECUTE				; cannot get xpage due to VA decrement
+
+	;---------------------------------------;
+	VA<--VA+K[17.], RETURN[-1]		; restore VA, return to caller
+
+.nobin
+.TOC	"	ACV/TNV Microtrap"
+
+;	The ACV/TNV microtrap routine is invoked when a virtual memory request
+;	fails because PTE specifies a length violation, ACV violation, or TNV violation.
+;
+;	The ACV/TNV microtrap routine establishes the fault type and then enters the
+;	appropriate exception routine.
+;
+;	Probes do not takes this microtrap.
+;
+;	Because TB entries with PTE.V = 0 are automatically eliminated by hardware
+;	during ANY memory request, including probes, probes MAY transfer control
+;	directly to this routine if an access error occurred.
+;
+;	Entry conditions:
+;		VA	=	virtual address being referenced when ACV/TNV was detected
+;		MMGT.STATUS =	memory management case data
+;		MMGT.TD	=	set, disabling further memory management traps
+;
+;	Exit conditions:
+;		VA	=	unchanged
+;		T[MMGT]	=	exception information
+;		IB.PREFETCH =	disabled
+;
+;	Algorithm:
+;		set up error code in T[MMGT]
+;		transfer to IE.ACV or IE.TNV
+;
+.bin
+
+;	Subroutine CHECK.PROBE.. is called to check if a probe succeeded.
+;	If successful, the subroutine returns immediately.
+;	If unsuccessful, it falls through into the ACV/TNV microtrap code.
+
+CHECK.PROBE..:
+	;---------------------------------------;
+	IF.MEM.REF.OK.THEN.RETURN[0]		; if mem ref ok, return, else
+						; fall through to ACV/TNV exception
+
+;	ACV/TNV microtrap:
+
+MM.ACV.TNV..:
+	;********** Hardware dispatch **********;
+	DISABLE.IB.PREFETCH,			; disable prefetching
+	CASE8[MMGT.STATUS].AT.[MM.ACV.TNV.0]	; case on MMGT.STATUS to set parameter
+
+;= ALIGNLIST 1000*	(MM.ACV.TNV.0,	MM.ACV.TNV.1,	MM.ACV.TNV.2,	MM.ACV.TNV.3,
+;=			 MM.ACV.TNV.4,	MM.ACV.TNV.5,	MM.ACV.TNV.6,	MM.ACV.TNV.7)
+
+MM.ACV.TNV.0:
+	;---------------------------------------; mmgt.status<2:0> = 000:
+	T[MMGT]<--K[0],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.1:
+	;---------------------------------------; mmgt.status<2:0> = 001:
+	T[MMGT]<--K[1],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.2:
+	;---------------------------------------; mmgt.status<2:0> = 010:
+	T[MMGT]<--K[2],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.3:
+	;---------------------------------------; mmgt.status<2:0> = 011:
+	T[MMGT]<--K[3],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.4:
+	;---------------------------------------; mmgt.status<2:0> = 100:
+	T[MMGT]<--K[4],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.5:
+	;---------------------------------------; mmgt.status<2:0> = 101:
+	T[MMGT]<--K[5],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.6:
+	;---------------------------------------; mmgt.status<2:0> = 110:
+	T[MMGT]<--K[6],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+MM.ACV.TNV.7:
+	;---------------------------------------; mmgt.status<2:0> = 111:
+	T[MMGT]<--K[7],				; set memory management parameter
+	CASE2[MMGT.STATUS].AT.[IE.ACV..]	; case on ACV vs TNV
+
+;= ALIGNLIST 0111*	(IE.ACV..,	IE.TNV..)
+
+;= END SMEMMGT

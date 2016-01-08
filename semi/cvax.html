@@ -1,0 +1,280 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>CVAX</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  CVAX (1987)
+</H1>
+<P>
+CVAX (there was never a code name) was DEC's first CMOS VAX microprocessor,
+and the first microprocessor in the industry with built-in instruction and
+data cache. Dan Casaletto was the project manager; Paul Rubinfeld was the
+project lead for the CPU, Gil Wolrich for the FPA; Bob Supnik did the initial
+architecture and most of the microcode.
+<P>
+CVAX was intended to advance the MicroVAX family by providing 2.5X the
+performance of MicroVAX at lower power. It incorporated a number of
+microarchitectural advances, including an autonomous, state-machine driven
+instruction parser; on-chip first level cache; explicit support for an off-chip,
+second level cache; and a "half-folded" (register writes overlapped with
+register reads) pipeline. The companion floating point unit, CFPA, likewise
+advanced on the MicroVAX FPU by incorporating wider shifters and a better
+multiplier.
+<P>
+Starting with CVAX, DEC's microprocessors used a small custom clock driver.
+This driver alleviated the need to handle TTL level clocks on chip; instead,
+the chips could be designed around full-swing (0V to 5V) CMOS clocks. CVAX
+also included a full family of peripheral support chips, including the CVAX
+System Support Chip (CSSC), the CVAX Memory Controller (CMCTL), and the CVAX
+Qbus Interface Chip (CQBIC). The CVAX pin bus became a defacto standard in
+the chip group and was used as the interface for the Second Generation Ethernet
+Chip (SGEC) and the Single Host Adapter Chip (SHAC).
+<P>
+Both CVAX and CFPA were implemented in DEC's 2u double-metal CMOS process
+(CMOS1) and ran, depending on bin points, at 10Mhz-14Mhz.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/cvax_p.jpg">CVAX CPU</A></TD>
+    <TD>DC341</TD>
+    <TD>384x378</TD>
+    <TD>180,000 sites</TD>
+    <TD>The CVAX CPU is a second generation VLSI VAX microprocessor. Compared
+      to its predecessor, it offers 2.5X to 3.5X more performance at lower power.
+      Key features include:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      Macro-instruction prefetch
+	    <LI>
+	      Micro-instruction pipeline
+	    <LI>
+	      1KB on chip instruction/data cache (configurable as instruction only)
+	    <LI>
+	      28 entry fully associative TLB
+	  </UL>
+	<LI>
+	  Subset VAX architecture
+	  <UL>
+	    <LI>
+	      Sixteen 32b general purpose registers
+	    <LI>
+	      181 instructions
+	    <LI>
+	      21 addressing modes
+	    <LI>
+	      6 data types
+	  </UL>
+	<LI>
+	  VAX memory management
+	  <UL>
+	    <LI>
+	      4GB virtual address space
+	    <LI>
+	      1GB physical address space
+	    <LI>
+	      Demand paging
+	    <LI>
+	      Memory protection
+	    <LI>
+	      Four privilege modes
+	  </UL>
+	<LI>
+	  Vectored multi-level interrupts (15 software, 7 hardware)
+	<LI>
+	  Improved external interface with parity protection
+	<LI>
+	  Low power
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 2.5W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/cvax_f.jpg">CFPA</A></TD>
+    <TD>DC513</TD>
+    <TD>339x272</TD>
+    <TD>34,000</TD>
+    <TD>The CFPA is a high performance, single chip floating point processor
+      for the CVAX CPU. Compared to its predecessor, it offers 2.5X to 3.5X more
+      performance at lower power. Its key features are:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      16b per cycle multiply retirement
+	    <LI>
+	      Wider range alignment/normalization hardware
+	    <LI>
+	      Optimized algorithms for add/subtract, multiply, divide
+	  </UL>
+	<LI>
+	  f_, d_, and g_floating point format support
+	<LI>
+	  Full VAX floating point instruction set, including ACBf, EMODf, POLYf
+	<LI>
+	  Optimized external interface
+	  <UL>
+	    <LI>
+	      Dedicated CPU to FPA control bus
+	    <LI>
+	      Overlapped control and data transfers
+	    <LI>
+	      Parallel reception of memory operands
+	  </UL>
+	<LI>
+	  Low power
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 2.5W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/cvax_clk.jpg">CVAX Clock</A></TD>
+    <TD>DC509</TD>
+    <TD>102x104</TD>
+    <TD>350</TD>
+    <TD>The CVAX clock chip provides timing control for the CVAX CPU, the CFPA,
+      related support chips, and module level logic. Its features include:
+      <UL>
+	<LI>
+	  Precision CMOS-level clock outputs for the CVAX CPU, CFPA, and up to two
+	  support chips
+	<LI>
+	  Precision MOS-level clock outputs for four additional CMOS or TTL loads
+	<LI>
+	  Microcycle synchronization signal
+	<LI>
+	  RESET, ERRor, and ReaDY synchronization logic
+	<LI>
+	  Low power
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 1W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+CVAX shipped at the end of 1987, in the MicroVAX 3600 systems series, and
+early in 1988 in the new VAX 6200 mid-range multiprocessor series. CVAX proved
+even more successful than MicroVAX, with $2B in systems shipped in the first
+twelve months. In 1988, the workstation group shipped the VAXstation 3100
+and a corresponding small server, which were also successful.
+<P>
+The CVAX chip set was optically shrunk to DEC's 1.5u double-metal CMOS process
+(CMOS2). The shrink was done by the original design team. The CVAX-60 (as
+it was known) taped out in August, 1987, before the original chip had been
+released for volume production. The CFPA-60 taped out in November, 1987.
+CMCTL was also shrunk, to increase its operating frequency; the other CVAX
+supports chips did not have to be changed. Operating frequency was 16.67Mhz;
+power was unchanged.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD>CVAX-60 CPU</TD>
+    <TD>DC580</TD>
+    <TD>308x303</TD>
+    <TD>180,000</TD>
+    <TD>Optical shrink of the CVAX CPU chip - no functional changes</TD>
+  </TR>
+  <TR>
+    <TD>CFPA-60</TD>
+    <TD>DC581</TD>
+    <TD>302x253</TD>
+    <TD>60,000</TD>
+    <TD>Optical shrink of the CFPA chip - no functional changes</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+CVAX-60 and CFPA-60 shipped as upgrades to all CVAX-based low end systems,
+starting in late 1988.  They were also shipped as an upgrade to
+the VAX 6000 when yield issues delayed the introduction of Rigel.
+<P>
+In 1990, CVAX, CFPA, the clock chip, and an 8KB second level cache were combined
+onto a single die to create System-On-A-Chip (<A HREF="pics/soc.jpg">SOC</A>)
+in DEC's 1.0u triple-metal process (CMOS3). SOC ran at 25Mhz. SOC shipped
+in low-end systems and workstations.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+CVAX began as a microcoder's meditation on MicroVAX. In December, 1982, after
+six months of struggling with the microarchitecture inherited from V-11,
+I started a design notebook on ways to improve the efficiency and density
+of the microcode. I also worked on the basic pipeline, coming up with the
+idea of a "half-folded" pipeline as a waystation between VAX-11/780-style
+machines and the forthcoming VAX 8800.
+<P>
+As I worked on the microcode, I had realized that the key issue for the
+microcode was not to make it smaller -- future chips would have more room
+for more transistors -- but to make it simpler and faster. The microarchitecture
+was also influenced by the VAX 8800 and the use of state machines to drive
+instruction decoding. By the end of 1983 I had a reasonably complete sketch
+of the microword and microcode as a basis for comparison. V-11 and MicroVAX
+needed more than 500 PLA terms to decode its the nine different formats in
+its 39b microword. CVAX, in contrast, needed only 150 terms to decode the
+five different formats in its 41b microword. CVAX was also faster on critical
+sequences such as CALLx, field instructions, and instructions with more than
+two specifiers.
+<P>
+CVAX was launched as an Advanced Development project early in 1984 and was
+gradually staffed with resources from J-11 as that project wound down. In
+October 1984, I became manager of the Microprocessor Group and took CVAX
+with me. Serious implementation work began in the fall of 1984. CVAX taped
+out in July, 1986, and CFPA in September, 1986.
+<P>
+While CVAX was in development, the MicroVAX architectural "subset" continued
+to evolve. To get VAX COBOL to drop its dependence on the decimal
+instruction set (and thus allow MicroVAXen to work efficiently in commercial
+environments), I agreed to add six more instructions to the subset (CMPC3,
+CMPC5, LOCC, SKPC, SCANC, SPANC). This required a late rework of the CVAX
+microcode and introduced a latent bug that delayed shipment by two months.
+<P>
+CVAX included a large number of on-die drawings and logos (MicroVAX had only
+the designers' initials). One
+<A HREF="http://micro.magnet.fsu.edu/creatures/pages/dream.html">drawing</A>
+showed a poker hand consisting of a straight flush, with an Ace of Spades
+up the sleave, and the motto "$ The dream is always the same..." This
+was a reference to the popular movie "Risky Business", only in this case
+the dream was to boot VMS (get to the $ prompt) on a pass 1 part. (The
+Ace up the sleeve was Rigel, the next design.) Another section had a big
+star and bigger arrow, saying "This is the last one", namely, the last transistor
+to be laid out. Finally, the scribe lane contained the
+<A HREF="http://micro.magnet.fsu.edu/creatures/pages/russians.html">Cyrillic
+motto</A> "VAX: When you care enough to steal the very best". In 1983,
+an Unnamed Intelligence Agency had given me the wording, saying that they
+got it off a purloined VAX-11/780 that was running a Soviet SS20 missile
+complex. Knowing that some CVAX's would end up in the USSR, the team wanted
+the Russians to know that we were thinking of them.
+<P>
+CVAX was presented at the 1987 International Solid State Circuits Conference.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

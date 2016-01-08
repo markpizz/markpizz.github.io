@@ -1,0 +1,912 @@
+.TITLE	"Instruction Decode Tables"
+.TOC	"Revision 1.1"
+
+;	Bob Supnik
+
+; Assembly directives
+
+.icode					; use I memory
+.hexadecimal				; numbers are hex by default
+.rtol					; bit numbering is right to left
+.allmemfields				; include everything in .ULD file
+.sequential				; allocation is sequential
+.width/50				; length of decode tables including simulation fields
+; .width/41				; Length of real decode tables
+
+.nobin
+.nocref
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    1 22-Feb-90 RMS	Removed PROBEVMx.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 06-Apr-89 RMS	Revised for actual entry points.
+;    2 12-Mar-89 RMS	Revised for new microbranch latencies.
+;    1 19-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 03-Nov-88 RMS	First edit for Raven.
+.TOC	"	Decode Table Formats"
+
+; The decode tables are a set of lookup tables indexed by the opcode of
+; each instruction in the VAX instruction set.  Indicies in the range 000-0FF
+; (hex) correspond to the equivalent VAX instructions.  Indicies in the
+; range 100-1FF (hex) correspond to the VAX FD opcode instructions.
+;
+; Each table entry contains information necessary to decode the instruction.
+; Each entry has the following format:
+;
+;	 40 39 38 37 36 35 34 33
+;	+--+--+--+--+--+--+--+--+
+;	|     XCT OFFSET     |FL|
+;	+--+--+--+--+--+--+--+--+
+;
+;		 32 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;		|  AT 6  | DL 6|  AT 5  | DL 5|  AT 4  | DL 4|  AT 3  | DL 3|  AT 2  | DL 2|  AT 1  | DL 1|SPEC CNT|
+;		+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+;
+;
+; In addition, other bits have been added to support the simulator.
+;
+;
+;******************************************************************************
+;*                            W A R N I N G                                   *
+;*                                                                            *
+;* Any .wx or .mx specifier appearing in an instruction must be the last      *
+;* explicit specifier for that instruction (excluding branch displacements).  *
+;* Because .wx and .mx specifiers leave the computed address in VA and        *
+;* nowhere else, they must be the last specifier to guarantee that the        *
+;* address is not destroyed by a specifier or memory management flow between  *
+;* the specifier flow which calculates the address, and the execution flow    *
+;* which uses the address.                                                    *
+;*
+;* Also, there must not be more than one .vx specifier in any instruction.    *
+;* The value of the Rmode bit for any .vx specifiers in an instruction is     *
+;* passed from the specifier flows to the instruction flows via state<2>.     *
+;* Therefore, an instruction may have exactly one (or none) .vx specifiers.   *
+;******************************************************************************
+.TOC	"	Field Definitions"
+
+; SPEC_COUNT		Count of the number of specifiers for this instruction.
+;			This count includes the implicit branch displacement
+;			specifiers.
+
+SPEC_COUNT/=<2:0>,.DEFAULT=<SPEC_COUNT/BAD_DEFAULT>
+
+
+; AT1/DL1 - These fields are the access type and data length for the first
+;	    specifier.
+
+DL1/=<4:3>,.DEFAULT=<DL1/BAD_DEFAULT>
+
+	NONE		= 0		; No specifier in this place
+
+	RB		= 0		; DL/BYTE
+	MB		= 0		; DL/BYTE
+	WB		= 0		; DL/BYTE
+	AB		= 0		; DL/BYTE
+	VB		= 0		; DL/BYTE
+
+	RW		= 1		; DL/WORD
+	MW		= 1		; DL/WORD
+	WW		= 1		; DL/WORD
+	AW		= 1		; DL/WORD
+	VW		= 1		; DL/WORD
+
+	RL		= 2		; DL/LONG
+	ML		= 2		; DL/LONG
+	WL		= 2		; DL/LONG
+	AL		= 2		; DL/LONG
+	VL		= 2		; DL/LONG
+
+	RQ		= 3		; DL/QUAD
+	MQ		= 3		; DL/QUAD
+	WQ		= 3		; DL/QUAD
+	AQ		= 3		; DL/QUAD
+	VQ		= 3		; DL/QUAD
+
+; Branch and jump specifiers
+
+	BB		= 0		; DL/BYTE (Branch with byte displacement)
+	BW		= 1		; DL/WORD (Branch with word displacement)
+
+AT1/=<7:5>,.DEFAULT=<AT1/BAD_DEFAULT>
+
+	NONE		= 0		; No specifier in this place
+
+	RB		= 0		; AT/READ
+	WB		= 1		; AT/WRITE
+	MB		= 2		; AT/MODIFY
+	AB		= 5		; AT/ADDR
+	VB		= 6		; AT/VFIELD
+
+	RW		= 0		; AT/READ
+	WW		= 1		; AT/WRITE
+	MW		= 2		; AT/MODIFY
+	AW		= 5		; AT/ADDR
+	VW		= 6		; AT/VFIELD
+
+	RL		= 0		; AT/READ
+	WL		= 1		; AT/WRITE
+	ML		= 2		; AT/MODIFY
+	AL		= 5		; AT/ADDR
+	VL		= 6		; AT/VFIELD
+
+	RQ		= 0		; AT/READ
+	WQ		= 1		; AT/WRITE
+	MQ		= 2		; AT/MODIFY
+	AQ		= 5		; AT/ADDR
+	VQ		= 6		; AT/VFIELD
+
+; Branch and jump specifiers
+
+	BB		= 7		; AT/BRANCH (Branch with byte displacement)
+	BW		= 7		; AT/BRANCH (Branch with word displacement)
+	
+; AT2/DL2		These fields are the access type and data length for the second
+;			specifier, same value fields as for AT1/DL1.
+
+DL2/=<9:8>,.DEFAULT=<DL2/BAD_DEFAULT>
+AT2/=<12:10>,.DEFAULT=<AT2/BAD_DEFAULT>
+
+
+; AT3/DL3		These fields are the access type and data length for the third
+;			specifier, same value fields as for AT1/DL1.
+
+DL3/=<14:13>,.DEFAULT=<DL3/BAD_DEFAULT>
+AT3/=<17:15>,.DEFAULT=<AT3/BAD_DEFAULT>
+
+
+; AT4/DL4		These fields are the access type and data length for the fourth
+;			specifier, same value fields as for AT1/DL1.
+
+DL4/=<19:18>,.DEFAULT=<DL4/BAD_DEFAULT>
+AT4/=<22:20>,.DEFAULT=<AT4/BAD_DEFAULT>
+
+
+; AT5/DL5		These fields are the access type and data length for the fifth
+;			specifier, same value fields as for AT1/DL1.
+
+DL5/=<24:23>,.DEFAULT=<DL5/BAD_DEFAULT>
+AT5/=<27:25>,.DEFAULT=<AT5/BAD_DEFAULT>
+
+
+; AT6/DL6		These fields are the access type and data length for the sixth
+;			specifier, same value fields as for AT1/DL1.
+
+DL6/=<29:28>,.DEFAULT=<DL6/BAD_DEFAULT>
+AT6/=<32:30>,.DEFAULT=<AT6/BAD_DEFAULT>
+
+
+; FLOATING_INSTN	This opcode is a floating point instruction processed by
+;			the FPU.
+
+FLOATING_INSTN/=<33>,.DEFAULT=<FLOATING_INSTN/NO>
+
+	NO		= 0		; not a floating point instruction
+	YES		= 1		; floating point instruction
+
+; EXECUTION_OFFSET	7-bit offset of the first micro instruction in the processing
+;			routine for each macro instruction.  These addresses have
+;			been permanently assigned by the allocator.
+
+EXECUTION_OFFSET/=<40:34>,.DEFAULT=<EXECUTION_OFFSET/0>		; no default for now
+
+;	   name		offset		address
+;	----------	------		-------
+;	tbs.
+
+; The following six bit fields specify whether a specifier exits in each of the
+; six specifier positions.  These bits are used to count the number of specifiers
+; for the LFSR_SPEC_COUNT and SPEC_COUNT fields.
+
+SP1/=<44>,.DEFAULT=<SP1/BAD_DEFAULT>
+
+	NONE		= 0		; specifier is not present in this position
+
+	RB		= 1		; specifier present in this position
+	MB		= 1		; specifier present in this position
+	WB		= 1		; specifier present in this position
+	AB		= 1		; specifier present in this position
+	VB		= 1		; specifier present in this position
+
+	RW		= 1		; specifier present in this position
+	MW		= 1		; specifier present in this position
+	WW		= 1		; specifier present in this position
+	AW		= 1		; specifier present in this position
+	VW		= 1		; specifier present in this position
+
+	RL		= 1		; specifier present in this position
+	ML		= 1		; specifier present in this position
+	WL		= 1		; specifier present in this position
+	AL		= 1		; specifier present in this position
+	VL		= 1		; specifier present in this position
+
+	RQ		= 1		; specifier present in this position
+	MQ		= 1		; specifier present in this position
+	WQ		= 1		; specifier present in this position
+	AQ		= 1		; specifier present in this position
+	VQ		= 1		; specifier present in this position
+
+	BB		= 1		; specifier present in this position
+	BW		= 1		; specifier present in this position
+
+SP2/=<45>,.DEFAULT=<SP1/PRESENT>	; same field values as for SP1
+
+SP3/=<46>,.DEFAULT=<SP1/PRESENT>	; same field values as for SP1
+
+SP4/=<47>,.DEFAULT=<SP1/PRESENT>	; same field values as for SP1
+
+SP5/=<48>,.DEFAULT=<SP1/PRESENT>	; same field values as for SP1
+
+SP6/=<49>,.DEFAULT=<SP1/PRESENT>	; same field values as for SP1
+
+.TOC	"	Macro Definitions"
+
+; Expresion to count the number of specifiers.
+
+.SET/SPEC.COUNT=<.SELECT[	<.EQL[<SP1/>,<SP1/NONE>]>,	<SPEC_COUNT/0>,
+				<.EQL[<SP2/>,<SP1/NONE>]>,	<SPEC_COUNT/1>,
+				<.EQL[<SP3/>,<SP1/NONE>]>,	<SPEC_COUNT/2>,
+				<.EQL[<SP4/>,<SP1/NONE>]>,	<SPEC_COUNT/3>,
+				<.EQL[<SP5/>,<SP1/NONE>]>,	<SPEC_COUNT/4>,
+				<.EQL[<SP6/>,<SP1/NONE>]>,	<SPEC_COUNT/5>,
+				<1>,				<SPEC_COUNT/6>	]>
+
+;      +------------------- Opcode mnemonic
+;      |  +---------------- First specifier
+;      |  |  +------------- Second specifier
+;      |  |  |  +---------- Third specifier
+;      |  |  |  |  +------- Fourth specifier  
+;      |  |  |  |  |  +---- Fifth specifier
+;      |  |  |  |  |  |  +- Sixth specifier       
+;      |  |  |  |  |  |  |
+;      v  v  v  v  v  v  v
+
+INSTR [] [] [] [] [] [] [] DISPATCH TO []	"AT1/<AT1/@2>,DL1/<DL1/@2>,SP1/<SP1/@2>,
+						 AT2/<AT1/@3>,DL2/<DL1/@3>,SP2/<SP1/@3>,
+						 AT3/<AT1/@4>,DL3/<DL1/@4>,SP3/<SP1/@4>,
+						 AT4/<AT1/@5>,DL4/<DL1/@5>,SP4/<SP1/@5>,
+						 AT5/<AT1/@6>,DL5/<DL1/@6>,SP5/<SP1/@6>,
+						 AT6/<AT1/@7>,DL6/<DL1/@7>,SP6/<SP1/@7>,
+						 SPEC_COUNT/<SPEC.COUNT>,
+						 EXECUTION_OFFSET/0"
+
+
+RESERVED OPCODE			"INSTR [RSVDOP] [none] [none] [none] [none] [none] [none] DISPATCH TO [RSVDOP]"
+
+UNIMPLEMENTED OPCODE []		"INSTR [@1] [none] [none] [none] [none] [none] [none] DISPATCH TO [RSVDOP]"
+
+FP				"FLOATING_INSTN/YES"
+
+.cref
+.bin
+.TOC	"	Instruction Decode Tables"
+
+;						=-=-=-=-=-=
+;						| 00 - 1F |
+;						=-=-=-=-=-=
+
+000: INSTR [HALT] [none] [none] [none] [none] [none] [none] DISPATCH TO [HALT]
+001: INSTR [NOP] [none] [none] [none] [none] [none] [none] DISPATCH TO [NOP]
+002: INSTR [REI] [none] [none] [none] [none] [none] [none] DISPATCH TO [REI]
+003: INSTR [BPT] [none] [none] [none] [none] [none] [none] DISPATCH TO [BPT]
+004: INSTR [RET] [none] [none] [none] [none] [none] [none] DISPATCH TO [RET]
+005: INSTR [RSB] [none] [none] [none] [none] [none] [none] DISPATCH TO [RSB]
+006: INSTR [LDPCTX] [none] [none] [none] [none] [none] [none] DISPATCH TO [LDPCTX]
+007: INSTR [SVPCTX] [none] [none] [none] [none] [none] [none] DISPATCH TO [SVPCTX]
+008: INSTR [CVTPS] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+009: INSTR [CVTSP] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+00A: INSTR [INDEX] [rl] [rl] [rl] [rl] [rl] [wl] DISPATCH TO [INDEX], FP
+00B: INSTR [CRC] [ab] [rl] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+00C: INSTR [PROBER] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [PROBEX]
+00D: INSTR [PROBEW] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [PROBEX]
+00E: INSTR [INSQUE] [ab] [ab] [none] [none] [none] [none] DISPATCH TO [INSQUE]
+00F: INSTR [REMQUE] [ab] [wl] [none] [none] [none] [none] DISPATCH TO [REMQUE]
+
+010: INSTR [BSBB] [bb] [none] [none] [none] [none] [None] DISPATCH TO [BSBX]
+011: INSTR [BRB] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BRX]
+012: INSTR [BNEQ] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+013: INSTR [BEQL] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+014: INSTR [BGTR] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+015: INSTR [BLEQ] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+016: INSTR [JSB] [ab] [none] [none] [none] [none] [none] DISPATCH TO [JSB]
+017: INSTR [JMP] [ab] [none] [none] [none] [none] [none] DISPATCH TO [JMP]
+018: INSTR [BGEQ] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+019: INSTR [BLSS] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+01A: INSTR [BGTRU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+01B: INSTR [BLEQU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+01C: INSTR [BVC] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+01D: INSTR [BVS] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+01E: INSTR [BGEQU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+01F: INSTR [BLSSU] [bb] [none] [none] [none] [none] [none] DISPATCH TO [BXX]
+
+;						=-=-=-=-=-=
+;						| 20 - 3F |
+;						=-=-=-=-=-=
+
+020: INSTR [ADDP4] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+021: INSTR [ADDP6] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE]
+022: INSTR [SUBP4] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+023: INSTR [SUBP6] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE]
+024: INSTR [CVTPT] [rw] [ab] [ab] [rw] [ab] [none] DISPATCH TO [EMULATE]
+025: INSTR [MULP] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE]
+026: INSTR [CVTTP] [rw] [ab] [ab] [rw] [ab] [none] DISPATCH TO [EMULATE]
+027: INSTR [DIVP] [rw] [ab] [rw] [ab] [rw] [ab] DISPATCH TO [EMULATE]
+028: INSTR [MOVC3] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [MOVC3]
+029: INSTR [CMPC3] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [CMPC3]
+02A: INSTR [SCANC] [rw] [ab] [ab] [rb] [none] [none] DISPATCH TO [SCANC]
+02B: INSTR [SPANC] [rw] [ab] [ab] [rb] [none] [none] DISPATCH TO [SPANC]
+02C: INSTR [MOVC5] [rw] [ab] [rb] [rw] [ab] [none] DISPATCH TO [MOVC5]
+02D: INSTR [CMPC5] [rw] [ab] [rb] [rw] [ab] [none] DISPATCH TO [CMPC5]
+02E: INSTR [MOVTC] [rw] [ab] [rb] [ab] [rw] [ab] DISPATCH TO [EMULATE]
+02F: INSTR [MOVTUC] [rw] [ab] [rb] [ab] [rw] [ab] DISPATCH TO [EMULATE]
+
+030: INSTR [BSBW] [bw] [none] [none] [none] [none] [None] DISPATCH TO [BSBX]
+031: INSTR [BRW] [bw] [none] [none] [none] [none] [none] DISPATCH TO [BRX]
+032: INSTR [CVTWL] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [CVTWL]
+033: INSTR [CVTWB] [rw] [mb] [none] [none] [none] [none] DISPATCH TO [CVTWB]	; ** rmw dst
+034: INSTR [MOVP] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [EMULATE]
+035: INSTR [CMPP3] [rw] [ab] [ab] [none] [none] [none] DISPATCH TO [EMULATE]
+036: INSTR [CVTPL] [rw] [ab] [wl] [none] [none] [none] DISPATCH TO [EMULATE]
+037: INSTR [CMPP4] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+038: INSTR [EDITPC] [rw] [ab] [ab] [ab] [none] [none] DISPATCH TO [EMULATE]
+039: INSTR [MATCHC] [rw] [ab] [rw] [ab] [none] [none] DISPATCH TO [EMULATE]
+03A: INSTR [LOCC] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [LOCC]
+03B: INSTR [SKPC] [rb] [rw] [ab] [none] [none] [none] DISPATCH TO [SKPC]
+03C: INSTR [MOVZWL] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [MOVZWL]
+03D: INSTR [ACBW] [rw] [rw] [mw] [bw] [none] [none] DISPATCH TO [ACBI]
+03E: INSTR [MOVAW] [aw] [wl] [none] [none] [none] [none] DISPATCH TO [MOVL]
+03F: INSTR [PUSHAW] [aw] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX]
+
+;						=-=-=-=-=-=
+;						| 40 - 5F |
+;						=-=-=-=-=-=
+
+040: INSTR [ADDF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FP], FP
+041: INSTR [ADDF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FP], FP
+042: INSTR [SUBF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FP], FP
+043: INSTR [SUBF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FP], FP
+044: INSTR [MULF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FP], FP
+045: INSTR [MULF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FP], FP
+046: INSTR [DIVF2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [FP], FP
+047: INSTR [DIVF3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [FP], FP
+048: INSTR [CVTFB] [rl] [mb] [none] [none] [none] [none] DISPATCH TO [FP], FP	; ** rmw dst
+049: INSTR [CVTFW] [rl] [mw] [none] [none] [none] [none] DISPATCH TO [FP], FP	; ** rmw dst
+04A: INSTR [CVTFL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+04B: INSTR [CVTRFL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+04C: INSTR [CVTBF] [rb] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+04D: INSTR [CVTWF] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+04E: INSTR [CVTLF] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+04F: UNIMPLEMENTED OPCODE [ACBF]
+
+050: INSTR [MOVF] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MOVF], FP
+051: INSTR [CMPF] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [CMPF], FP
+052: INSTR [MNEGF] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+053: INSTR [TSTF] [rl] [none] [none] [none] [none] [none] DISPATCH TO [CMPF], FP
+054: UNIMPLEMENTED OPCODE [EMODF]
+055: UNIMPLEMENTED OPCODE [POLYF]
+056: INSTR [CVTFD] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+057: RESERVED OPCODE
+058: INSTR [ADAWI] [rw] [ww] [none] [none] [none] [none] DISPATCH TO [ADAWI]
+059: RESERVED OPCODE
+05A: RESERVED OPCODE
+05B: RESERVED OPCODE
+05C: INSTR [INSQHI] [ab] [aq] [none] [none] [none] [none] DISPATCH TO [INSQXI]
+05D: INSTR [INSQTI] [ab] [aq] [none] [none] [none] [none] DISPATCH TO [INSQXI]
+05E: INSTR [REMQHI] [aq] [wl] [none] [none] [none] [none] DISPATCH TO [REMQXI]
+05F: INSTR [REMQTI] [aq] [wl] [none] [none] [none] [none] DISPATCH TO [REMQXI]
+
+;						=-=-=-=-=-=
+;						| 60 - 7F |
+;						=-=-=-=-=-=
+
+060: INSTR [ADDD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+061: INSTR [ADDD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+062: INSTR [SUBD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+063: INSTR [SUBD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+064: INSTR [MULD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+065: INSTR [MULD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+066: INSTR [DIVD2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+067: INSTR [DIVD3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+068: INSTR [CVTDB] [rq] [mb] [none] [none] [none] [none] DISPATCH TO [FP], FP	; ** rmw dst
+069: INSTR [CVTDW] [rq] [mw] [none] [none] [none] [none] DISPATCH TO [FP], FP	; ** rmw dst
+06A: INSTR [CVTDL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+06B: INSTR [CVTRDL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+06C: INSTR [CVTBD] [rb] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+06D: INSTR [CVTWD] [rw] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+06E: INSTR [CVTLD] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+06F: UNIMPLEMENTED OPCODE [ACBD]
+
+070: INSTR [MOVD] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [MOVDG], FP
+071: INSTR [CMPD] [rq] [rq] [none] [none] [none] [none] DISPATCH TO [CMPF], FP
+072: INSTR [MNEGD] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+073: INSTR [TSTD] [rq] [none] [none] [none] [none] [none] DISPATCH TO [CMPF], FP
+074: UNIMPLEMENTED OPCODE [EMODD]
+075: UNIMPLEMENTED OPCODE [POLYD]
+076: INSTR [CVTDF] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+077: RESERVED OPCODE
+078: INSTR [ASHL] [rb] [rl] [wl] [none] [none] [none] DISPATCH TO [ASHL]
+079: INSTR [ASHQ] [rb] [rq] [wq] [none] [none] [none] DISPATCH TO [ASHQ]
+07A: INSTR [EMUL] [rl] [rl] [rl] [wq] [none] [none] DISPATCH TO [EMUL], FP
+07B: INSTR [EDIV] [rl] [rq] [vl] [wl] [none] [none] DISPATCH TO [EDIV], FP
+07C: INSTR [CLRQ] [wq] [none] [none] [none] [none] [none] DISPATCH TO [CLRQ]
+07D: INSTR [MOVQ] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [MOVQ]
+07E: INSTR [MOVAQ] [aq] [wl] [none] [none] [none] [none] DISPATCH TO [MOVL]
+07F: INSTR [PUSHAQ] [aq] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX]
+
+;						=-=-=-=-=-=
+;						| 80 - 9F |
+;						=-=-=-=-=-=
+
+080: INSTR [ADDB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [ADDBW2]
+081: INSTR [ADDB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [ADDBW3]	; ** rmw dst
+082: INSTR [SUBB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [SUBBW2]
+083: INSTR [SUBB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [SUBBW3]	; ** rmw dst
+084: INSTR [MULB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [MULBW2], FP
+085: INSTR [MULB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [MULBW3], FP	; ** rmw dst
+086: INSTR [DIVB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [DIVBW2], FP
+087: INSTR [DIVB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [DIVBW3], FP	; ** rmw dst
+088: INSTR [BISB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [BISBW2]
+089: INSTR [BISB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [BISBW3]	; ** rmw dst
+08A: INSTR [BICB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [BICBW2]
+08B: INSTR [BICB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [BICBW3]	; ** rmw dst
+08C: INSTR [XORB2] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [XORBW2]
+08D: INSTR [XORB3] [rb] [rb] [mb] [none] [none] [none] DISPATCH TO [XORBW3]	; ** rmw dst
+08E: INSTR [MNEGB] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [MNEGBW]	; ** rmw dst
+08F: INSTR [CASEB] [rb] [rb] [rb] [none] [none] [none] DISPATCH TO [CASEX]
+
+090: INSTR [MOVB] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [MOVBW]	; ** rmw dst
+091: INSTR [CMPB] [rb] [rb] [none] [none] [none] [none] DISPATCH TO [CMPI]
+092: INSTR [MCOMB] [rb] [mb] [none] [none] [none] [none] DISPATCH TO [MCOMBW]	; ** rmw dst
+093: INSTR [BITB] [rb] [rb] [none] [none] [none] [none] DISPATCH TO [BITX]
+094: INSTR [CLRB] [mb] [none] [none] [none] [none] [none] DISPATCH TO [CLRBW]	; ** rmw dst
+095: INSTR [TSTB] [rb] [none] [none] [none] [none] [none] DISPATCH TO [TSTX]
+096: INSTR [INCB] [mb] [none] [none] [none] [none] [none] DISPATCH TO [INCBW]
+097: INSTR [DECB] [mb] [none] [none] [none] [none] [none] DISPATCH TO [DECBW]
+098: INSTR [CVTBL] [rb] [wl] [none] [none] [none] [none] DISPATCH TO [CVTBL]
+099: INSTR [CVTBW] [rb] [mw] [none] [none] [none] [none] DISPATCH TO [CVTBW]	; ** rmw dst
+09A: INSTR [MOVZBL] [rb] [wl] [none] [none] [none] [none] DISPATCH TO [MOVZBL]
+09B: INSTR [MOVZBW] [rb] [mw] [none] [none] [none] [none] DISPATCH TO [MOVZBW]	; ** rmw dst
+09C: INSTR [ROTL] [rb] [rl] [wl] [none] [none] [none] DISPATCH TO [ROTL]
+09D: INSTR [ACBB] [rb] [rb] [mb] [bw] [none] [none] DISPATCH TO [ACBI]
+09E: INSTR [MOVAB] [ab] [wl] [none] [none] [none] [none] DISPATCH TO [MOVL]
+09F: INSTR [PUSHAB] [ab] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX]
+
+;						=-=-=-=-=-=
+;						| A0 - BF |
+;						=-=-=-=-=-=
+
+0A0: INSTR [ADDW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [ADDBW2]
+0A1: INSTR [ADDW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [ADDBW3]	; ** rmw dst
+0A2: INSTR [SUBW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [SUBBW2]
+0A3: INSTR [SUBW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [SUBBW3]	; ** rmw dst
+0A4: INSTR [MULW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [MULBW2], FP
+0A5: INSTR [MULW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [MULBW3], FP	; ** rmw dst
+0A6: INSTR [DIVW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [DIVBW2], FP
+0A7: INSTR [DIVW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [DIVBW3], FP	; ** rmw dst
+0A8: INSTR [BISW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [BISBW2]
+0A9: INSTR [BISW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [BISBW3]	; ** rmw dst
+0AA: INSTR [BICW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [BICBW2]
+0AB: INSTR [BICW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [BICBW3]	; ** rmw dst
+0AC: INSTR [XORW2] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [XORBW2]
+0AD: INSTR [XORW3] [rw] [rw] [mw] [none] [none] [none] DISPATCH TO [XORBW3]	; ** rmw dst
+0AE: INSTR [MNEGW] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [MNEGBW]	; ** rmw dst
+0AF: INSTR [CASEW] [rw] [rw] [rw] [none] [none] [none] DISPATCH TO [CASEX]
+
+0B0: INSTR [MOVW] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [MOVBW]	; ** rmw dst
+0B1: INSTR [CMPW] [rw] [rw] [none] [none] [none] [none] DISPATCH TO [CMPI]
+0B2: INSTR [MCOMW] [rw] [mw] [none] [none] [none] [none] DISPATCH TO [MCOMBW]	; ** rmw dst
+0B3: INSTR [BITW] [rw] [rw] [none] [none] [none] [none] DISPATCH TO [BITX]
+0B4: INSTR [CLRW] [mw] [none] [none] [none] [none] [none] DISPATCH TO [CLRBW]	; ** rmw dst
+0B5: INSTR [TSTW] [rw] [none] [none] [none] [none] [none] DISPATCH TO [TSTX]
+0B6: INSTR [INCW] [mw] [none] [none] [none] [none] [none] DISPATCH TO [INCBW]
+0B7: INSTR [DECW] [mw] [none] [none] [none] [none] [none] DISPATCH TO [DECBW]
+0B8: INSTR [BISPSW] [rw] [none] [none] [none] [none] [none] DISPATCH TO [BISPSW]
+0B9: INSTR [BICPSW] [rw] [none] [none] [none] [none] [none] DISPATCH TO [BICPSW]
+0BA: INSTR [POPR] [rw] [none] [none] [none] [none] [none] DISPATCH TO [POPR]
+0BB: INSTR [PUSHR] [rw] [none] [none] [none] [none] [none] DISPATCH TO [PUSHR]
+0BC: INSTR [CHMK] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHMK]
+0BD: INSTR [CHME] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHME]
+0BE: INSTR [CHMS] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHMS]
+0BF: INSTR [CHMU] [rw] [none] [none] [none] [none] [none] DISPATCH TO [CHMU]
+
+;						=-=-=-=-=-=
+;						| C0 - DF |
+;						=-=-=-=-=-=
+
+0C0: INSTR [ADDL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [ADDL2]
+0C1: INSTR [ADDL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [ADDL3]
+0C2: INSTR [SUBL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [SUBL2]
+0C3: INSTR [SUBL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [SUBL3]
+0C4: INSTR [MULL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [MULL2], FP
+0C5: INSTR [MULL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [MULL3], FP
+0C6: INSTR [DIVL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [DIVL2], FP
+0C7: INSTR [DIVL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [DIVL3], FP
+0C8: INSTR [BISL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [BISL2]
+0C9: INSTR [BISL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [BISL3]
+0CA: INSTR [BICL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [BICL2]
+0CB: INSTR [BICL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [BICL3]
+0CC: INSTR [XORL2] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [XORL2]
+0CD: INSTR [XORL3] [rl] [rl] [wl] [none] [none] [none] DISPATCH TO [XORL3]
+0CE: INSTR [MNEGL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MNEGL]
+0CF: INSTR [CASEL] [rl] [rl] [rl] [none] [none] [none] DISPATCH TO [CASEX]
+
+0D0: INSTR [MOVL] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MOVL]
+0D1: INSTR [CMPL] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [CMPI]
+0D2: INSTR [MCOML] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MCOML]
+0D3: INSTR [BITL] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [BITX]
+0D4: INSTR [CLRL] [wl] [none] [none] [none] [none] [none] DISPATCH TO [CLRL]
+0D5: INSTR [TSTL] [rl] [none] [none] [none] [none] [none] DISPATCH TO [TSTX]
+0D6: INSTR [INCL] [ml] [none] [none] [none] [none] [none] DISPATCH TO [INCL]
+0D7: INSTR [DECL] [ml] [none] [none] [none] [none] [none] DISPATCH TO [DECL]
+0D8: INSTR [ADWC] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [ADWC]
+0D9: INSTR [SBWC] [rl] [ml] [none] [none] [none] [none] DISPATCH TO [SBWC]
+0DA: INSTR [MTPR] [rl] [rl] [none] [none] [none] [none] DISPATCH TO [MTPR]
+0DB: INSTR [MFPR] [rl] [wl] [none] [none] [none] [none] DISPATCH TO [MFPR]
+0DC: INSTR [MOVPSL] [wl] [none] [none] [none] [none] [none] DISPATCH TO [MOVPSL]
+0DD: INSTR [PUSHL] [rl] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX]
+0DE: INSTR [MOVAL] [al] [wl] [none] [none] [none] [none] DISPATCH TO [MOVL]
+0DF: INSTR [PUSHAL] [al] [none] [none] [none] [none] [none] DISPATCH TO [PUSHX]
+
+;						=-=-=-=-=-=
+;						| E0 - FF |
+;						=-=-=-=-=-=
+
+0E0: INSTR [BBS] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E1: INSTR [BBC] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E2: INSTR [BBSS] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E3: INSTR [BBCS] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E4: INSTR [BBSC] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E5: INSTR [BBCC] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E6: INSTR [BBSSI] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E7: INSTR [BBCCI] [rl] [wb] [bb] [none] [none] [none] DISPATCH TO [BBX]
+0E8: INSTR [BLBS] [rl] [bb] [none] [none] [none] [none] DISPATCH TO [BLBX]
+0E9: INSTR [BLBC] [rl] [bb] [none] [none] [none] [none] DISPATCH TO [BLBX]
+0EA: INSTR [FFS] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [FFS]
+0EB: INSTR [FFC] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [FFC]
+0EC: INSTR [CMPV] [rl] [rb] [vb] [rl] [none] [none] DISPATCH TO [CMPV]
+0ED: INSTR [CMPZV] [rl] [rb] [vb] [rl] [none] [none] DISPATCH TO [CMPZV]
+0EE: INSTR [EXTV] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [EXTV]
+0EF: INSTR [EXTZV] [rl] [rb] [vb] [wl] [none] [none] DISPATCH TO [EXTZV]
+
+0F0: INSTR [INSV] [rl] [rl] [rb] [wb] [none] [none] DISPATCH TO [INSV]
+0F1: INSTR [ACBL] [rl] [rl] [ml] [bw] [none] [none] DISPATCH TO [ACBI]
+0F2: INSTR [AOBLSS] [rl] [ml] [bb] [none] [none] [none] DISPATCH TO [AOBLXX]
+0F3: INSTR [AOBLEQ] [rl] [ml] [bb] [none] [none] [none] DISPATCH TO [AOBLXX]
+0F4: INSTR [SOBGEQ] [ml] [bb] [none] [none] [none] [none] DISPATCH TO [SOBGXX]
+0F5: INSTR [SOBGTR] [ml] [bb] [none] [none] [none] [none] DISPATCH TO [SOBGXX]
+0F6: INSTR [CVTLB] [rl] [mb] [none] [none] [none] [none] DISPATCH TO [CVTLB]	; ** rmw dst
+0F7: INSTR [CVTLW] [rl] [mw] [none] [none] [none] [none] DISPATCH TO [CVTLW]	; ** rmw dst
+0F8: INSTR [ASHP] [rb] [rw] [ab] [rb] [rw] [ab] DISPATCH TO [EMULATE]
+0F9: INSTR [CVTLP] [rl] [rw] [ab] [none] [none] [none] DISPATCH TO [EMULATE]
+0FA: INSTR [CALLG] [ab] [ab] [none] [none] [none] [none] DISPATCH TO [CALLG]
+0FB: INSTR [CALLS] [rl] [ab] [none] [none] [none] [none] DISPATCH TO [CALLS]
+0FC: INSTR [XFC] [none] [none] [none] [none] [none] [none] DISPATCH TO [XFC]
+0FD: UNIMPLEMENTED OPCODE [ESCD]
+0FE: UNIMPLEMENTED OPCODE [ESCE]
+0FF: UNIMPLEMENTED OPCODE [ESCF]
+
+;						=-=-=-=-=-=-=-=
+;						| FD00 - FD1F |
+;						=-=-=-=-=-=-=-=
+
+100: RESERVED OPCODE
+101: RESERVED OPCODE
+102: UNIMPLEMENTED OPCODE [WAIT]
+103: RESERVED OPCODE
+104: RESERVED OPCODE
+105: RESERVED OPCODE
+106: RESERVED OPCODE
+107: RESERVED OPCODE
+108: RESERVED OPCODE
+109: RESERVED OPCODE
+10A: RESERVED OPCODE
+10B: RESERVED OPCODE
+10C: RESERVED OPCODE
+10D: RESERVED OPCODE
+10E: RESERVED OPCODE
+10F: RESERVED OPCODE
+
+110: RESERVED OPCODE
+111: RESERVED OPCODE
+112: RESERVED OPCODE
+113: RESERVED OPCODE
+114: RESERVED OPCODE
+115: RESERVED OPCODE
+116: RESERVED OPCODE
+117: RESERVED OPCODE
+118: RESERVED OPCODE
+119: RESERVED OPCODE
+11A: RESERVED OPCODE
+11B: RESERVED OPCODE
+11C: RESERVED OPCODE
+11D: RESERVED OPCODE
+11E: RESERVED OPCODE
+11F: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FD20 - FD3F |
+;						=-=-=-=-=-=-=-=
+
+120: RESERVED OPCODE
+121: RESERVED OPCODE
+122: RESERVED OPCODE
+123: RESERVED OPCODE
+124: RESERVED OPCODE
+125: RESERVED OPCODE
+126: RESERVED OPCODE
+127: RESERVED OPCODE
+128: RESERVED OPCODE
+129: RESERVED OPCODE
+12A: RESERVED OPCODE
+12B: RESERVED OPCODE
+12C: RESERVED OPCODE
+12D: RESERVED OPCODE
+12E: RESERVED OPCODE
+12F: RESERVED OPCODE
+
+130: RESERVED OPCODE
+131: INSTR [MFVP] [rw] [wl] [none] [none] [none] [none] DISPATCH TO [VEC.MFVP]
+132: UNIMPLEMENTED OPCODE [CVTDH]
+133: INSTR [CVTGF] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+134: INSTR [VLDL] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.LDX]
+135: INSTR [VGATHL] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.GATHX]
+136: INSTR [VLDQ] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.LDX]
+137: INSTR [VGATHQ] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.GATHX]
+138: RESERVED OPCODE
+139: RESERVED OPCODE
+13A: RESERVED OPCODE
+13B: RESERVED OPCODE
+13C: RESERVED OPCODE
+13D: RESERVED OPCODE
+13E: RESERVED OPCODE
+13F: RESERVED OPCODE
+;						=-=-=-=-=-=-=-=
+;						| FD40 - FD5F |
+;						=-=-=-=-=-=-=-=
+
+140: INSTR [ADDG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+141: INSTR [ADDG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+142: INSTR [SUBG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+143: INSTR [SUBG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+144: INSTR [MULG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+145: INSTR [MULG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+146: INSTR [DIVG2] [rq] [mq] [none] [none] [none] [none] DISPATCH TO [FP.QM], FP
+147: INSTR [DIVG3] [rq] [rq] [wq] [none] [none] [none] DISPATCH TO [FP], FP
+148: INSTR [CVTGB] [rq] [mb] [none] [none] [none] [none] DISPATCH TO [FP], FP	; ** rmw dst
+149: INSTR [CVTGW] [rq] [mw] [none] [none] [none] [none] DISPATCH TO [FP], FP	; ** rmw dst
+14A: INSTR [CVTGL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+14B: INSTR [CVTRGL] [rq] [wl] [none] [none] [none] [none] DISPATCH TO [FP], FP
+14C: INSTR [CVTBG] [rb] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+14D: INSTR [CVTWG] [rw] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+14E: INSTR [CVTLG] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+14F: UNIMPLEMENTED OPCODE [ACBG]
+
+150: INSTR [MOVG] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [MOVDG], FP
+151: INSTR [CMPG] [rq] [rq] [none] [none] [none] [none] DISPATCH TO [CMPF], FP
+152: INSTR [MNEGG] [rq] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+153: INSTR [TSTG] [rq] [none] [none] [none] [none] [none] DISPATCH TO [CMPF], FP
+154: UNIMPLEMENTED OPCODE [EMODG]
+155: UNIMPLEMENTED OPCODE [POLYG]
+156: UNIMPLEMENTED OPCODE [CVTGH]
+157: RESERVED OPCODE
+158: RESERVED OPCODE
+159: RESERVED OPCODE
+15A: RESERVED OPCODE
+15B: RESERVED OPCODE
+15C: RESERVED OPCODE
+15D: RESERVED OPCODE
+15E: RESERVED OPCODE
+15F: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FD60 - FD7F |
+;						=-=-=-=-=-=-=-=
+
+160: UNIMPLEMENTED OPCODE [ADDH2]
+161: UNIMPLEMENTED OPCODE [ADDH3]
+162: UNIMPLEMENTED OPCODE [SUBH2]
+163: UNIMPLEMENTED OPCODE [SUBH3]
+164: UNIMPLEMENTED OPCODE [MULH2]
+165: UNIMPLEMENTED OPCODE [MULH3]
+166: UNIMPLEMENTED OPCODE [DIVH2]
+167: UNIMPLEMENTED OPCODE [DIVH3]
+168: UNIMPLEMENTED OPCODE [CVTHB]
+169: UNIMPLEMENTED OPCODE [CVTHW]
+16A: UNIMPLEMENTED OPCODE [CVTHL]
+16B: UNIMPLEMENTED OPCODE [CVTRHL]
+16C: UNIMPLEMENTED OPCODE [CVTBH]
+16D: UNIMPLEMENTED OPCODE [CVTWH]
+16E: UNIMPLEMENTED OPCODE [CVTLH]
+16F: UNIMPLEMENTED OPCODE [ACBH]
+
+170: UNIMPLEMENTED OPCODE [MOVH]
+171: UNIMPLEMENTED OPCODE [CMPH]
+172: UNIMPLEMENTED OPCODE [MNEGH]
+173: UNIMPLEMENTED OPCODE [TSTH]
+174: UNIMPLEMENTED OPCODE [EMODH]
+175: UNIMPLEMENTED OPCODE [POLYH]
+176: UNIMPLEMENTED OPCODE [CVTHG]
+177: RESERVED OPCODE
+178: RESERVED OPCODE
+179: RESERVED OPCODE
+17A: RESERVED OPCODE
+17B: RESERVED OPCODE
+17C: UNIMPLEMENTED OPCODE [CLRO]
+17D: UNIMPLEMENTED OPCODE [MOVO]
+17E: UNIMPLEMENTED OPCODE [MOVAO]
+17F: UNIMPLEMENTED OPCODE [PUSHAO]
+
+;						=-=-=-=-=-=-=-=
+;						| FD80 - FD9F |
+;						=-=-=-=-=-=-=-=
+
+180: INSTR [VVADDL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+181: INSTR [VSADDL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+182: INSTR [VVADDG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+183: INSTR [VSADDG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+184: INSTR [VVADDF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+185: INSTR [VSADDF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+186: INSTR [VVADDD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+187: INSTR [VSADDD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+188: INSTR [VVSUBL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+189: INSTR [VSSUBL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+18A: INSTR [VVSUBG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+18B: INSTR [VSSUBG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+18C: INSTR [VVSUBF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+18D: INSTR [VSSUBF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+18E: INSTR [VVSUBD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+18F: INSTR [VSSUBD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+
+190: RESERVED OPCODE
+191: RESERVED OPCODE
+192: RESERVED OPCODE
+193: RESERVED OPCODE
+194: RESERVED OPCODE
+195: RESERVED OPCODE
+196: RESERVED OPCODE
+197: RESERVED OPCODE
+198: UNIMPLEMENTED OPCODE [CVTFH]
+199: INSTR [CVTFG] [rl] [wq] [none] [none] [none] [none] DISPATCH TO [FP], FP
+19A: UNIMPLEMENTED OPCODE [PROBEVMR]
+19B: UNIMPLEMENTED OPCODE [PROBEVMW]
+19C: INSTR [VSTL] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.STX]
+19D: INSTR [VSCATL] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.SCATX]
+19E: INSTR [VSTQ] [rw] [ab] [rl] [none] [none] [none] DISPATCH TO [VEC.STX]
+19F: INSTR [VSCATQ] [rw] [ab] [none] [none] [none] [none] DISPATCH TO [VEC.SCATX]
+
+;						=-=-=-=-=-=-=-=
+;						| FDA0 - FDBF |
+;						=-=-=-=-=-=-=-=
+
+1A0: INSTR [VVMULL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1A1: INSTR [VSMULL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1A2: INSTR [VVMULG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1A3: INSTR [VSMULG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+1A4: INSTR [VVMULF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1A5: INSTR [VSMULF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1A6: INSTR [VVMULD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1A7: INSTR [VSMULD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+1A8: INSTR [VSYNC] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1A9: INSTR [MTVP] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1AA: INSTR [VVDIVG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1AB: INSTR [VSDIVG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+1AC: INSTR [VVDIVF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1AD: INSTR [VSDIVF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1AE: INSTR [VVDIVD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1AF: INSTR [VSDIVD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+
+1B0: RESERVED OPCODE
+1B1: RESERVED OPCODE
+1B2: RESERVED OPCODE
+1B3: RESERVED OPCODE
+1B4: RESERVED OPCODE
+1B5: RESERVED OPCODE
+1B6: RESERVED OPCODE
+1B7: RESERVED OPCODE
+1B8: RESERVED OPCODE
+1B9: RESERVED OPCODE
+1BA: RESERVED OPCODE
+1BB: RESERVED OPCODE
+1BC: RESERVED OPCODE
+1BD: RESERVED OPCODE
+1BE: RESERVED OPCODE
+1BF: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FDC0 - FDDF |
+;						=-=-=-=-=-=-=-=
+
+1C0: INSTR [VVCMPL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1C1: INSTR [VSCMPL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1C2: INSTR [VVCMPG] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1C3: INSTR [VSCMPG] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+1C4: INSTR [VVCMPF] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1C5: INSTR [VSCMPF] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1C6: INSTR [VVCMPD] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1C7: INSTR [VSCMPD] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+1C8: INSTR [VVBISL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1C9: INSTR [VSBISL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1CA: RESERVED OPCODE
+1CB: RESERVED OPCODE
+1CC: INSTR [VVBICL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1CD: INSTR [VSBICL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1CE: RESERVED OPCODE
+1CF: RESERVED OPCODE
+
+1D0: RESERVED OPCODE
+1D1: RESERVED OPCODE
+1D2: RESERVED OPCODE
+1D3: RESERVED OPCODE
+1D4: RESERVED OPCODE
+1D5: RESERVED OPCODE
+1D6: RESERVED OPCODE
+1D7: RESERVED OPCODE
+1D8: RESERVED OPCODE
+1D9: RESERVED OPCODE
+1DA: RESERVED OPCODE
+1DB: RESERVED OPCODE
+1DC: RESERVED OPCODE
+1DD: RESERVED OPCODE
+1DE: RESERVED OPCODE
+1DF: RESERVED OPCODE
+
+;						=-=-=-=-=-=-=-=
+;						| FDE0 - FDFF |
+;						=-=-=-=-=-=-=-=
+
+1E0: INSTR [VVSRLL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1E1: INSTR [VSSRLL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1E2: RESERVED OPCODE
+1E3: RESERVED OPCODE
+1E4: INSTR [VVSLLL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1E5: INSTR [VSSLLL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1E6: RESERVED OPCODE
+1E7: RESERVED OPCODE
+1E8: INSTR [VVXORL] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1E9: INSTR [VSXORL] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1EA: RESERVED OPCODE
+1EB: RESERVED OPCODE
+1EC: INSTR [VVCVT] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1ED: INSTR [IOTA] [rw] [rl] [none] [none] [none] [none] DISPATCH TO [VEC.VS.L]
+1EE: INSTR [VVMERGE] [rw] [none] [none] [none] [none] [none] DISPATCH TO [VEC.VV]
+1EF: INSTR [VSMERGE] [rw] [rq] [none] [none] [none] [none] DISPATCH TO [VEC.VS.Q]
+
+1F0: RESERVED OPCODE
+1F1: RESERVED OPCODE
+1F2: RESERVED OPCODE
+1F3: RESERVED OPCODE
+1F4: RESERVED OPCODE
+1F5: RESERVED OPCODE
+1F6: UNIMPLEMENTED OPCODE [CVTHF]
+1F7: UNIMPLEMENTED OPCODE [CVTHD]
+1F8: RESERVED OPCODE
+1F9: RESERVED OPCODE
+1FA: RESERVED OPCODE
+1FB: RESERVED OPCODE
+1FC: RESERVED OPCODE
+1FD: RESERVED OPCODE
+1FE: RESERVED OPCODE
+1FF: RESERVED OPCODE

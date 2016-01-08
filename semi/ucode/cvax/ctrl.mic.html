@@ -1,0 +1,1104 @@
+.TOC	"CTRL.MIC -- Control Instructions"
+.TOC	"Revision 4.1"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 04	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	31-Mar-86	[RMS]	Editorial changes
+;	28-Mar-86	[RMS]	Documented enable prefetch restriction (ECO 6MAR28DWA.1)
+;	24-Feb-86	[RMS]	Editorial changes
+;	29-Dec-85	[RMS]	Documented BRANCH.TRAP restriction (ECO 5DEC27DWA.1), revised register usage
+;	29-Oct-85	[RMS]	Fixed bug in BBxy (HCORE)
+; 03	9-Oct-85	[RMS]	Revised loop branches to gain cycle
+;	23-Sep-85	[RMS]	Fixed bug in andnot alignlist
+;	19-Sep-85	[RMS]	Removed PASS.A/B.ZEXT.DL functions (ECO 5SEP19FF.1)
+;	2-Sep-85	[RMS]	Revised subroutine usage
+; 02	29-Jul-85	[RMS]	Clarified stall requirements
+;	26-Jun-85	[RMS]	Revised for fixed shift macros
+; 01	19-Mar-85	[RMS]	Revised for second pass model
+; 00	25-Dec-82	[RMS]	First edit for CVAX
+
+.bin
+
+;= BEGIN CTRL
+
+.nobin
+;	This module implements the control class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	9D	 ACBB limit.rb, add.rb, index.mb, displ.bw			* * * -		iov
+;	F1	 ACBL limit.rl, add.rl, index.ml, displ.bw			* * * -		iov
+;	3D	 ACBW limit.rw, add.rw, index.mw, displ.bw			* * * -		iov
+;
+;	F3	 AOBLEQ limit.rl, index.ml, displ.bb				* * * -		iov
+;	F2	 AOBLSS limit.rl, index.ml, displ.bb				* * * -		iov
+;
+;	1E	 BCC{=BGEQU} displ.bb						- - - -
+;	1F	 BCS{=BLSSU} displ.bb						- - - -
+;	13	 BEQL{=BEQLU} displ.bb						- - - -
+;	18	 BGEQ displ.bb							- - - -
+;	14	 BGTR displ.bb							- - - -
+;	1A	 BGTRU displ.bb							- - - -
+;	15	 BLEQ displ.bb							- - - -
+;	1B	 BLEQU displ.bb							- - - -
+;	19	 BLSS displ.bb							- - - -
+;	12	 BNEQ{=BNEQU} displ.bb						- - - -
+;	1C	 BVC displ.bb							- - - -
+;	1D	 BVS displ.bb							- - - -
+;
+;	E1	 BBC pos.rl, base.vb, displ.bb, {field.rv}			- - - -		rsv
+;	E0	 BBS pos.rl, base.vb, displ.bb, {field.rv}			- - - -		rsv
+;
+;	E5	 BBCC pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E3	 BBCS pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E4	 BBSC pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E2	 BBSS pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;
+;	E7	 BBCCI pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E6	 BBSSI pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;
+;	E9	 BLBC src.rl, displ.bb						- - - -
+;	E8	 BLBS src.rl, displ.bb						- - - -
+;
+;	11	 BRB displ.bb							- - - -
+;	31	 BRW displ.bw							- - - -
+;
+;	10	 BSBB displ.bb, {-(SP).wl}					- - - -
+;	30	 BSBW displ.bw, {-(SP).wl}					- - - -
+;
+;	8F	 CASEB selector.rb, base.rb, limit.rb, displ.bw-list		* * 0 *
+;	CF	 CASEL selector.rl, base.rl, limit.rl, displ.bw-list		* * 0 *
+;	AF	 CASEW selector.rw, base.rw, limit.rw, displ.bw-list		* * 0 *
+;
+;	17	 JMP dst.ab							- - - -
+;
+;	16	 JSB dst.ab, {-(SP).wl}						- - - -
+;
+;	05	 RSB {(SP)+.rl}							- - - -
+;
+;	F4	 SOBGEQ index.ml, displ.bb					* * * -		iov
+;	F5	 SOBGTR index.ml, displ.bb					* * * -		iov
+;
+.bin
+
+.nobin
+.TOC	"	BRx, BCC, JMP"
+
+;	The branch instructions perform unconditional or conditional branches.
+;	The JMP instruction performs an unconditional jump.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BRB		11	PC <-- PC + sext(displ.bb)		0	x/x	--	BRX		--
+;	BRW		31	PC <-- PC + sext(displ.bw)		0	x/x	--	BRX		--
+;
+;	BNEQ, BNEQU	12	if Z eql 0, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.~z
+;	BEQL, BEQLU	13	if Z eql 1, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.z
+;	BGTR		14	if {N or Z} eql 0,			0	x/x	--	BRCOND		psl.~(n+z)
+;					PC <-- PC + sext(displ.bb)
+;	BLEQ		15	if {N or Z} eql 1,			0	x/x	--	BRCOND		psl.(n+z)
+;					PC <-- PC + sext(displ.bb)
+;	BGEQ		18	if N eql 0, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.~n
+;	BLSS		19	if N eql 1, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.n
+;	BGTRU		1A	if {C or Z} eql 0,			0	x/x	--	BRCOND		psl.~(c+z)
+;					PC <-- PC + sext(displ.bb)
+;	BLEQU		1B	if {C or Z} eql 1,			0	x/x	--	BRCOND		psl.(c+z)
+;					PC <-- PC + sext(displ.bb)
+;	BVC		1C	if V eql 0, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.~v
+;	BVS		1D	if V eql 1, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.v
+;	BGEQU, BCC	1E	if C eql 0, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.~c
+;	BLSSU, BCS	1F	if C eql 1, PC <-- PC + sext(displ.bb)	0	x/x	--	BRCOND		psl.c
+;
+;	JMP		17	PC <-- src.ab				1	a/b	--	JMP		--
+;
+;	Entry conditions from initial decode (branches):
+;		ID.BUFF	=	displacement
+;
+;		from specifier flows (JMP):
+;		W0	=	first (address) operand
+;		DL	=	data type of first operand (byte)
+;
+;	Exit conditions:
+;		The PC and VIBA have been updated (if branch taken).
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	Branch operation:
+;
+;		if branch condition satisfied then PC <-- PC + sext(displ.bx)
+
+BRCOND:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bb)
+						; >>PC read, prev cycle was DEC.NEXT
+	IF.BCOND.LOAD.V&PC.TRAP,		; if BCOND, load PC, VIBA, flush IB, trap
+						; >>BRANCH.TRAP, prev cycle was DEC.NEXT
+	DEC.NEXT				; otherwise decode next instruction
+
+BRX:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bx)
+						; >>PC read, prev cycle was DEC.NEXT
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+;	JMP operation:
+;
+;		PC <-- src.ab
+
+JMP:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0],				; Wbus <-- src.ab
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+.nobin
+.TOC	"	BSBB, BSBW, JSB"
+
+;	These instructions call local subroutines.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BSBB		10	-(SP) <-- PC, PC <-- PC + sext(displ.bb) 0	x/x	--	BSBX		--
+;	BSBW		30	-(SP) <-- PC, PC <-- PC + sext(displ.bw) 0	x/x	--	BSBX		--
+;
+;	JSB		16	-(SP) <-- PC, PC <-- src.ab		1	a/b	--	JSB		--
+;
+;	Entry conditions from initial decode (BSBx):
+;		ID.BUFF	=	displacement
+;
+;		from specifier flows (JSB):
+;		W0	=	first (address) operand
+;		DL	=	data type of first operand (byte)
+;
+;	Exit conditions:
+;		The PC has been pushed on the stack.
+;		The PC and VIBA have been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BSBB, BSBW operation:
+;
+;		-(SP) <-- PC, PC <-- PC + sext(displ.bx)
+
+;	JSB operation:
+;
+;		-(SP) <-- PC, PC <-- src.ab
+
+BSBX:
+	;********** Hardware dispatch **********;
+	VA&, [WBUS]<--[SP]-K[4],		; copy decremented SP to VA
+	CALL[WRITE.PC]				; write PC to stack
+
+	;---------------------------------------;
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bx)
+						; >>PC read, not written in prev cycle
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[BSB.JSB.EXIT]			; go decrement SP and stall
+
+JSB:
+	;********** Hardware dispatch **********;
+	VA&, [WBUS]<--[SP]-K[4],		; copy decremented SP to VA
+	CALL[WRITE.PC]				; write PC to stack
+
+	;---------------------------------------;
+	[WBUS]<--[W0],				; Wbus <-- src.ab
+	LOAD.V&PC				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+
+BSB.JSB.EXIT:
+	;---------------------------------------;
+	[SP]<--[SP]-K[4],			; now update SP
+	GOTO[NOP]				; decode during next cycle
+
+.nobin
+.TOC	"	RSB"
+
+;	This instruction returns control from a subroutine called by BSBB, BSBW, or JSB.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	RSB		05	PC <-- (SP)+				0	x/x	--	RSB		--
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The PC has been popped from the stack.
+;		The PC and VIBA have been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	RSB operation:
+;
+;		PC <-- (SP)+
+
+RSB:
+	;********** Hardware dispatch **********;
+	[VA]<--[SP],				; copy SP to VA
+	DL<--LONG,				; set dl = long
+	CALL[READ.VA.W3]			; read top word from stack
+
+	;---------------------------------------;
+	[WBUS]<--[W3],				; Wbus <-- new PC
+	LOAD.V&PC				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+
+	;---------------------------------------;
+	[SP]<--[SP]+K[4],			; now update SP
+	GOTO[NOP]				; decode during next cycle
+
+;	One line subroutine to read MEM(VA) to W3.
+
+READ.VA.W3:
+	;---------------------------------------;
+	[W3]<--MEM(VA), LEN(DL), RETURN		; read memory, return to caller
+
+.nobin
+.TOC	"	CASEx"
+
+;	These instructions implement multiway case branching on an input selector.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	CASEB		8F	(see below)				3	rrr/bbb	jizj	CASEX		--
+;	CASEW		AF	(see below)				3	rrr/www	jizj	CASEX		--
+;	CASEL		CF	(see below)				3	rrr/lll	jizj	CASEX		--
+;
+;	The case operation is as follows:
+;		tmp <-- selector.rx - base.rx
+;		PC <-- PC + if (tmp LEQU limit.rx) then {sext(displ.bw[tmp])} else {2 + 2*zext(limit.rx))}
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (selector) operand
+;		W2	=	second (base) operand
+;		W4	=	third (limit) operand, unless register mode
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The PC and VIBA have been updated.
+;
+;	Condition codes:
+;		N <-- selector - base LSS limit
+;		Z <-- selector - base EQL limit
+;		V <-- 0					[Integer overflow trap cannot occur.]
+;		C <-- selector - base LSSU limit
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	CASEx operation:
+;
+;		tmp <-- selector.rx - base.rx
+;		PC <-- PC + if (tmp LEQU limit.rx) then {sext(displ.bw[tmp])}
+;						   else {2 + 2*zext(limit.rx))}
+
+;	casex x,x,r --
+
+CASEX.RMODE:
+	;********** Hardware dispatch **********;
+	[W4]<--[GRN], LEN(DL)			; get limit operand, zero extend
+
+;	casex x,x,m --
+
+CASEX:
+	;********** Hardware dispatch **********;
+	[W2]<--[W0]-[W2], LEN(DL)		; compute selector - base, zero extend
+
+	;---------------------------------------;
+	[WBUS]<--[W2]-[W4],			; compare (selector - base) : limit
+	SET.ALUCC&PSLCC, LEN(DL), MAP.JIZJ	; set alu and psl cc's, psl map is jizj
+
+	;---------------------------------------;
+	[W1]<--[W2].SHFL.[1],			; compute (selector - base) * 2
+	DL<--WORD,				; set dl = word to read offset
+	CASE4[ALU.NZC].AT.[CASE.READ.BRANCH.OFF.1]	; case on (selector - base) : LIMIT
+
+;= ALIGNLIST 100*	(CASE.READ.BRANCH.OFF.1,	CASE.SET.PC.TO.LIMIT,
+;=						,	CASE.READ.BRANCH.OFF.2)
+
+CASE.SET.PC.TO.LIMIT:
+	;---------------------------------------; alu.z = 0, alu.c = 1:
+	[W4]<--[W4]+[W4]+1			; compute (limit * 2) + 1
+
+	;---------------------------------------;
+	[WBUS]<--[PC]+[W4]+1,			; Wbus <-- PC + (limit * 2) + 2 
+						; >>PC read, not written in prev cycle
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+;	CASEx, continued.
+;	Case branch in range, read offset, do branch.
+
+;	At this point,
+;		W1	=	zext(selector - base) * 2
+
+CASE.READ.BRANCH.OFF.1:
+	;---------------------------------------; alu.z = 0, alu.c = 0:
+	VA&, [WBUS]<--[PC]+[W1],		; compute PC + (selector - base) * 2
+						; >>PC read, not written in prev cycle
+	GOTO[CASE.READ.BRANCH.OFF.CONTINUE]	; join common sequence
+
+CASE.READ.BRANCH.OFF.2:
+	;---------------------------------------; alu.z = 1, alu.c = 1:
+	VA&, [WBUS]<--[PC]+[W1]			; compute PC + (selector - base) * 2
+						; >>PC read, not written in prev cycle
+
+CASE.READ.BRANCH.OFF.CONTINUE:
+	;---------------------------------------;
+	[W3]<--MEM(VA), LEN(DL)			; read new PC offset
+
+	;---------------------------------------;
+	[W3]<--[W3].SHFL.[16.],			; left justify offset
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	[W3]<--SEXT.[W3].SHFR.[16.]		; sign extend word offset to longword
+
+	;---------------------------------------;
+	[WBUS]<--[PC]+[W3],			; WBus <-- PC + sext(offset)
+						; >>PC read, not written in prev cycle
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+.nobin
+.TOC	"	SOBGTR, SOBGEQ"
+
+;	These instructions decrement an index and test it against zero.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	SOBGEQ		F4	index.ml <-- index.ml - 1		1	m/l	iiip	SOBX		psl.~n
+;					if (index geq 0) then PC <-- PC + sext(displ.bb)
+;	SOBGTR		F5	index.ml <-- index.ml - 1		1	m/l	iiip	SOBX		psl.~(n+z)
+;					if (index gtr 0) then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (index) operand
+;		VA	=	address of first (index) operand, unless register mode
+;		RN	=	register number of first specifier
+;		DL	=	FORCED SPECIALLY TO BYTE by I Box
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- overflow		[Integer overflow trap enabled by final iiii map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		The hardware requires two cycles between a non-utrap LOAD.V&PC and DEC.NEXT.
+;		On the branch taken path, this costs nothing, because extra cycles are needed
+;		to refill the pipeline;  on the branch not taken path, this costs a microcycle.
+;
+;	Note:	SOBGEQ, SOBGTR clobber the PSL condition codes before the accessability of
+;		the displacement operand is proven.
+;
+.bin
+
+;	SOBGEQ, SOBGTR operation:
+;
+;		index.ml <-- index.ml - 1
+;		if (index geq, gtr 0) then PC <-- PC + sext(displ.bb)
+
+SOBX:
+	;********** Hardware dispatch **********;
+	[W4]<--[W0]-1,				; perform sob operation
+	SET.PSLCC, LONG,			; set psl cc's, default map is iiip
+	STATE3-0<--0,				; clear STATE<3:0> to signify dl = long
+	CASE4[ID.LOAD].AT.[LOOP.BR.DISP.OK]	; get branch displacement, case on result
+
+;= ALIGNLIST 100*	(LOOP.BR.DISP.OK,	LOOP.BR.DISP.STALL,
+;=					,	LOOP.BR.DISP.HALTED)
+
+LOOP.BR.DISP.OK:
+	;---------------------------------------; ib ok:
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bb)
+						; >>PC read, not written in prev cycle
+	IF.BCOND.LOAD.V&PC,			; if BCOND met, load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	CASE4[STATE2-0].AT.[LOOP.BR.LONG]	; case on long vs byte vs word data length
+
+LOOP.BR.DISP.STALL:
+	;---------------------------------------; ib stall:
+	CASE4[ID.LOAD].AT.[LOOP.BR.DISP.OK]	; get branch displacement, case on result
+
+LOOP.BR.DISP.HALTED:
+	;---------------------------------------; ib halted:
+	[TXPAGE]<--B.[VA],			; save VA in temporary
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[LOOP.BR.DISP.OK]	; get branch displacement, case on result
+
+;	Common back end for loop branches.
+
+;	At this point,
+;		W4	=	result
+;		VA	=	address of result, if not register mode
+;		RN	=	register number of result specifier
+;		psl cc's =	set from result
+;		STATE<2:0> =	0<long vs byte vs word>
+
+;	The microcode deliberately wastes a cycle, allowing a prefetch to
+;	occur.  This enables the I Box pipeline to start operating.  Then
+;	the result is written to the destination memory location or register.
+
+;= ALIGNLIST *00*	(LOOP.BR.LONG,	LOOP.BR.BYTE,	LOOP.BR.WORD)
+;  STATE<2> = 0 --> STATE<2:0> = 0??
+
+LOOP.BR.LONG:
+	;---------------------------------------; STATE<1:0> = 00:
+	[W0]<--[W4],				; move result to standard register
+	DL<--LONG,				; set dl = long
+	CASE2[INT.RM].AT.[LOOP.BR.WRITE.MEM]	; case on memory vs register
+
+LOOP.BR.BYTE:
+	;---------------------------------------; STATE<1:0> = 01:
+	[W0]<--[W4],				; move result to standard register
+	DL<--BYTE,				; set dl = byte
+	CASE2[INT.RM].AT.[LOOP.BR.WRITE.MEM]	; case on memory vs register
+
+LOOP.BR.WORD:
+	;---------------------------------------; STATE<1:0> = 10:
+	[W0]<--[W4],				; move result to standard register
+	DL<--WORD,				; set dl = word
+	CASE2[INT.RM].AT.[LOOP.BR.WRITE.MEM]	; case on memory vs register
+
+;= ALIGNLIST 110*	(LOOP.BR.WRITE.MEM,	LOOP.BR.WRITE.RMODE)
+
+LOOP.BR.WRITE.RMODE:
+	;---------------------------------------; rmode:
+	[GRN]<--B.[W0], LEN(DL),		; write result to register
+	MAP.IIII,				; set map to iiii to enable int ovflow trap
+	DEC.NEXT				; decode next instruction
+
+LOOP.BR.WRITE.MEM:
+	;---------------------------------------; memory:
+	MEM(VA)<--[W0], LEN(DL),		; write result to memory
+	MAP.IIII,				; set map to iiii to enable int ovflow trap
+	DEC.NEXT				; decode next instruction
+
+.nobin
+.TOC	"	AOBLSS, AOBGEQ"
+
+;	These instructions increment an index and test it against a limit.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	AOBLSS		F2	index.ml <-- index.ml + 1		2	rm/ll	iiip	AOBX		alu.lss
+;					if (index lss limit) then PC <-- PC + sext(displ.bb)
+;	AOBLEQ		F3	index.ml <-- index.ml + 1		2	rm/ll	iiip	AOBX		alu.leq
+;					if (index leq limit) then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (limit) operand
+;		W2	=	second (index) operand, unless register mode
+;		VA	=	address of second (index) operand, unless register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (long)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- overflow		[Integer overflow trap enabled by final iiii map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		The hardware requires two cycles between a non-utrap LOAD.V&PC and DEC.NEXT.
+;		On the branch taken path, this costs nothing, because extra cycles are needed
+;		to refill the pipeline;  on the branch not taken path, this costs a microcycle.
+;
+;	Note:	AOBLSS, AOBLEQ clobber the PSL condition codes before the accessability of
+;		the displacement operand is proven.
+;
+.bin
+
+;	AOBLSS, AOBLEQ operation:
+;
+;		index.ml <-- index.ml + 1
+;		if (index lss, leq limit) then PC <-- PC + sext(displ.bb)
+
+;	aobx x,r --
+
+AOBX.RMODE:
+	;********** Hardware dispatch **********;
+	[W4]<--[GRN]+1,				; compute index + 1
+	SET.PSLCC, LONG,			; set psl cc's, default map is iiip
+	DL<--BYTE,				; set dl = byte for branch displacement
+	GOTO[AOB.COMMON]			; join common code
+
+;	aobx x,m --
+
+AOBX:
+	;********** Hardware dispatch **********;
+	[W4]<--[W2]+1,				; compute index + 1
+	SET.PSLCC, LONG,			; set psl cc's, default map is iiip
+	DL<--BYTE,				; set dl = byte for branch displacement
+	GOTO[AOB.COMMON]			; join common code
+
+AOB.COMMON:
+	;---------------------------------------;
+	[WBUS]<--[W4]-[W0],			; compare index + 1: limit
+	SET.ALUCC, LONG,			; set alu cc's
+	STATE3-0<--0,				; clear STATE<3:0> to signify dl = long
+	CASE4[ID.LOAD].AT.[LOOP.BR.DISP.OK]	; get branch displacement, case on result
+
+.nobin
+.TOC	"	ACBx"
+
+;	These instructions add a value to an index and test the result against a limit.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	ACBB		9D	index.mb <-- index.mb + add.rb		3	rrm/bbb	iiip	ACBX		alu.leq
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;	ACBW		3D	index.mw <-- index.mw + add.rw		3	rrm/www	iiip	ACBX		alu.leq
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;	ACBL		F1	index.ml <-- index.ml + add.rl		3	rrm/lll	iiip	ACBX		alu.leq
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (limit) operand
+;		W2	=	second (add) operand
+;		W4	=	third (index) operand, unless register mode
+;		VA	=	address of third (index) operand, unless register mode
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- overflow		[Integer overflow trap enabled by final iiii map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		The hardware requires two cycles between a non-utrap LOAD.V&PC and DEC.NEXT.
+;		On the branch taken path, this costs nothing, because extra cycles are needed
+;		to refill the pipeline;  on the branch not taken path, this costs a microcycle.
+;
+;	Note:	ACBx clobber the PSL condition codes before the accessability of
+;		the displacement operand is proven.
+;
+.bin
+
+;	ACBx operation:
+;
+;		index.mx <-- index.mx + add.rx
+;			if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bb)
+;			if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bb)
+
+;	acbx x,x,r --
+
+ACBX.RMODE:
+	;********** Hardware dispatch **********;
+	[W4]<--[GRN], LEN(DL)			; get third operand, zero extend
+
+;	acbx x,x,m --
+
+ACBX:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W2],				; test add operand for positive or negative
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	STATE3-0<--0,				; clear flags
+	CASE4[FPA.DL].AT.[ACBB.ADD]		; case on instruction data length
+
+;= ALIGNLIST 100*	(ACBB.ADD,	ACBW.ADD,	ACBL.ADD)
+
+ACBB.ADD:
+	;---------------------------------------; dl = byte:
+	[W4]<--[W2]+[W4],			; perform add operation
+	SET.PSLCC, LEN(DL),			; set psl cc's, default map is iiip
+	STATE0<--1,				; flag byte length
+	CASE2[ALU.NZV].AT.[ACB.LEQ]		; case on add operand >= 0
+
+ACBW.ADD:
+	;---------------------------------------; dl = word:
+	[W4]<--[W2]+[W4],			; perform add operation
+	SET.PSLCC, LEN(DL),			; set psl cc's, default map is iiip
+	STATE1<--1,				; flag word length
+	CASE2[ALU.NZV].AT.[ACB.LEQ]		; case on add operand >= 0
+
+ACBL.ADD:
+	;---------------------------------------; dl = long:
+	[W4]<--[W2]+[W4],			; perform add operation
+	SET.PSLCC, LEN(DL),			; set psl cc's, default map is iiip
+	CASE2[ALU.NZV].AT.[ACB.LEQ]		; case on add operand >= 0
+
+;	ACBx, continued.
+;	Add done, perform compare.
+
+;	At this point,
+;		W0	=	limit
+;		W4	=	modified index
+;		STATE<2:0> =	0'long vs byte vs word
+;		psl cc's =	set from index add
+
+;= ALIGNLIST 01**	(ACB.LEQ,	ACB.GEQ)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+ACB.LEQ:
+	;---------------------------------------; alu.n = 0:
+	[WBUS]<--[W4]-[W0],			; compare index to limit (test will be leq)
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	DL<--WORD,				; set dl = word for branch displacement
+	GOTO[LOOP.BR.DISP.STALL]		; go case on data length to get displacement
+
+ACB.GEQ:
+	;---------------------------------------; alu.n = 1:
+	[WBUS]<--[W0]-[W4],			; compare limit to index (test will be leq)
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	DL<--WORD,				; set dl = word for branch displacement
+	GOTO[LOOP.BR.DISP.STALL]		; go case on data length to get displacement
+
+.nobin
+.TOC	"	BBx, BBxS, BBxC, BBxxI"
+
+;	These instructions test, or test and alter, a one bit field.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BBS		E0	if bit(pos.rl, base.vb) eql 1		2	ra/lb	--	BBX		alu.~z
+;					then PC <-- PC + sext(displ.bb)
+;	BBC		E1	if bit(pos.rl, base.vb) eql 0		2	ra/lb	--	BBX		alu.z
+;					then PC <-- PC + sext(displ.bb)
+;
+;	BBSS		E2	if bit(pos.rl, base.vb) eql 1		2	ra/lb	--	BBX		alu.~z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1
+;	BBCS		E3	if bit(pos.rl, base.vb) eql 0		2	ra/lb	--	BBX		alu.z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1
+;
+;	BBSC		E4	if bit(pos.rl, base.vb) eql 1		2	ra/lb	--	BBX		alu.~z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0
+;	BBCC		E5	if bit(pos.rl, base.vb) eql 0		2	ra/lb	--	BBX		alu.z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0
+;
+;	BBSSI		E6	if bit(pos.rl, base.vb) eql 1		2	ra/lb	--	BBX		alu.~z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1 INTERLOCKED
+;	BBCCI		E7	if bit(pos.rl, base.vb) eql 0		2	ra/lb	--	BBX		alu.z
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0 INTERLOCKED
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (position) operand
+;		W2 = VA	=	address of second (base) operand, unless register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (byte)
+;
+;	Exit conditions:
+;		The PC has been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		The memory flows can be shortened by one cycle, at the expense of 8 words, by
+;		generating the bit mask from an SC case branch.
+;
+.bin
+
+;	BBx operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+
+;	BBxS operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- 1
+
+;	BBxC operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- 0
+
+;	BBxxI operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- x INTERLOCKED
+
+;	bb x,m --
+
+BBX:
+	;********** Hardware dispatch **********;
+	SC&, [WBUS]<--[W0].ANDNOT.K[0F8], 	; copy bit position within byte to SC
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	[W0]<--SEXT.[W0].SHFR.[3],		; compute sign extended field offset
+	STATE3-0<--0,				; clear state flags
+	GOTO[BB.MEM.DISP.STALL]			; go get branch displacement
+
+;= ALIGNLIST 100*	(BB.MEM.DISP.OK,	BB.MEM.DISP.STALL,
+;=					,	BB.MEM.DISP.HALTED)
+
+BB.MEM.DISP.STALL:
+	;---------------------------------------; ib stall:
+	VA&, [WBUS]<--[W2]+[W0],		; add offset onto base address
+	CASE4[ID.LOAD].AT.[BB.MEM.DISP.OK]	; get branch displacement, case on result
+
+BB.MEM.DISP.HALTED:
+	;---------------------------------------; ib halted:
+	[TXPAGE]<--B.[VA],			; save VA in temporary
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[BB.MEM.DISP.OK]	; get branch displacement, case on result
+
+BB.MEM.DISP.OK:
+	;---------------------------------------; ib ok:
+	[W2]<--[K1].SHFL.(SC),			; create mask to test bit within field
+	CASE4[OPCODE2-0].AT.[BB.MEM.READ.BBX]	; case on nomod/set/clear/interlock
+
+;	BB memory, continued.
+;	Finish instruction, BBx and BBxxI.
+
+;	At this point,
+;		W2	=	mask to test bit within byte
+;		VA	=	address of byte to test
+;		DL	=	byte
+;		ID.BUFF	=	ib displacement
+
+;= ALIGNLIST 001*	(BB.MEM.READ.BBX,	BB.MEM.READ.BBXS,
+;=			 BB.MEM.READ.BBXC,	BB.MEM.READ.BBXXI)
+
+BB.MEM.READ.BBX:
+	;---------------------------------------; BBx:
+	[W0]<--MEM(VA), LEN(DL),		; read byte containing bit from memory
+	GOTO[BB.MEM.TEST]			; go test result and update PC
+
+BB.MEM.READ.BBXXI:
+	;---------------------------------------; BBxxI:
+	[W0]<--MEM(VA).LOCK, LEN(DL),		; read byte and interlock bus
+	DISABLE.IB.PREFETCH,			; disable prefetching while bus locked
+	CASE2[OPCODE2-0].AT.[BB.MEM.BBSSI]	; case on BBSSI vs BBCCI
+
+;= ALIGNLIST 110*	(BB.MEM.BBSSI,	BB.MEM.BBCCI)
+
+BB.MEM.BBSSI:
+	;---------------------------------------; BBSSI:
+	SC&, [WBUS]<--[W0].OR.[W2],		; set specified bit in byte
+	GOTO[BB.MEM.WRITE.BBXXI]		; go write modified byte
+
+BB.MEM.BBCCI:
+	;---------------------------------------; BBCCI:
+	SC&, [WBUS]<--[W0].ANDNOT.[W2],		; clear specified bit in byte
+	GOTO[BB.MEM.WRITE.BBXXI]		; go write modified byte
+
+BB.MEM.WRITE.BBXXI:
+	;---------------------------------------;
+	MEM(VA).UNLOCK<--[SC], LEN(DL),		; write modified byte to memory, unlock
+	ENABLE.IB.PREFETCH			; re-enable prefetching after bus unlock
+						; >>enable pf, no decode in next cycle
+
+BB.MEM.TEST:
+	;---------------------------------------;
+	[WBUS]<--[W0].AND.[W2],			; test specified bit in byte
+	SET.ALUCC, LONG,			; set alu cc's
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+;	BB memory, continued.
+;	Finish instruction, BBxS and BBxC.
+
+;	At this point,
+;		W2	=	mask to test bit within byte
+;		VA	=	address of byte to test
+;		DL	=	byte
+;		ID.BUFF	=	ib displacement
+
+BB.MEM.READ.BBXS:
+	;---------------------------------------; BBxS:
+	[W0]<--MEM(VA), LEN(DL),		; read byte containing bit from memory
+	GOTO[BB.MEM.MOD.TEST]			; go test bit
+
+BB.MEM.READ.BBXC:
+	;---------------------------------------; BBxC:
+	[W0]<--MEM(VA), LEN(DL),		; read byte containing bit from memory
+	GOTO[BB.MEM.MOD.TEST]			; go test bit
+
+BB.MEM.MOD.TEST:
+	;---------------------------------------;
+	[WBUS]<--[W0].AND.[W2],			; test specified bit in byte
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bb)
+						; >>PC read, not written in prev cycle
+	IF.BCOND.LOAD.V&PC,			; if BCOND met, load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	CASE2[OPCODE2-0].AT.[BB.MEM.BBXC]	; case on BBxC vs BBxS
+
+;= ALIGNLIST 101*	(BB.MEM.BBXC,	BB.MEM.BBXS)
+;  BBxC = E4,E5 --> opcode<1> = 0;  BBxS = E2,E3 --> opcode<1> = 1
+
+BB.MEM.BBXC:
+	;---------------------------------------; BBxC:
+	[W0]<--[W0].ANDNOT.[W2],		; clear specified bit in byte
+	GOTO[WRITE.MEM]				; go write modified byte
+
+BB.MEM.BBXS:
+	;---------------------------------------; BBxS:
+	[W0]<--[W0].OR.[W2],			; set specified bit in byte
+	GOTO[WRITE.MEM]				; go write modified byte
+
+;	BB register.
+
+;	At this point,
+;		W0	=	position operand
+;		RN	=	register number of second specifier
+
+;	bb x,r --
+
+BBX.RMODE:
+	;********** Hardware dispatch **********;
+	[SC]<--[W0],				; copy position to SC
+	GOTO[BB.RMODE.DISP.STALL]		; go get branch displacement
+
+;= ALIGNLIST 100*	(BB.RMODE.DISP.OK,	BB.RMODE.DISP.STALL,
+;=					,	BB.RMODE.DISP.HALTED)
+
+BB.RMODE.DISP.STALL:
+	;---------------------------------------; ib stall:
+	[WBUS]<--[W0].ANDNOT.K[1F],		; test position operand for >= 32
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE4[ID.LOAD].AT.[BB.RMODE.DISP.OK]	; get branch displacement, case on result
+
+BB.RMODE.DISP.HALTED:
+	;---------------------------------------; ib halted:
+	[TXPAGE]<--B.[VA],			; save VA in temporary
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[BB.RMODE.DISP.OK]	; get branch displacement, case on result
+
+BB.RMODE.DISP.OK:
+	;---------------------------------------;
+	[W2]<--[K1].SHFL.(SC),			; create mask to test bit in register
+	CASE2[ALU.NZV].AT.[BB.RMODE.RSRV.OPER]	; if position operand >= 32, fault
+
+;= ALIGNLIST 10**	(BB.RMODE.RSRV.OPER,	BB.RMODE.CONTINUE)
+;  ALU.NZVC set by ANDNOT --> V = C = 0
+
+BB.RMODE.RSRV.OPER:
+	;---------------------------------------; alu.z = 0:
+	GOTO[RSRV.OPER.FLT]			; position >= 32, reserved operand
+
+BB.RMODE.CONTINUE:
+	;---------------------------------------; alu.z = 1:
+	[WBUS]<--[GRN].AND.[W2],		; test specified bit in register
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE8[OPCODE2-0].AT.[BB.RMODE.BBS]	; case on instruction
+
+;	BB register, continued.
+
+;	At this point,
+;		W2	=	bit test mask
+;		alu cc's =	set from bit test
+;		ID.BUFF	=	ib displacement
+
+;= ALIGNLIST 000*	(BB.RMODE.BBS,		BB.RMODE.BBC,
+;=			 BB.RMODE.BBSS,		BB.RMODE.BBCS,
+;=			 BB.RMODE.BBSC,		BB.RMODE.BBCC,
+;=			 BB.RMODE.BBSSI,	BB.RMODE.BBCCI)
+
+BB.RMODE.BBS:
+BRCOND.EXIT:
+	;---------------------------------------; BBS:
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bb)
+						; >>PC read, not written in prev cycle
+	IF.BCOND.LOAD.V&PC.TRAP,		; if BCOND, load PC, VIBA, flush IB, trap
+						; >>BRANCH.TRAP, prev cycle was BASIC
+	DEC.NEXT				; otherwise decode next instruction
+
+BB.RMODE.BBC:
+	;---------------------------------------; BBC:
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bb)
+						; >>PC read, not written in prev cycle
+	IF.BCOND.LOAD.V&PC.TRAP,		; if BCOND, load PC, VIBA, flush IB, trap
+						; >>BRANCH.TRAP, prev cycle was BASIC
+	DEC.NEXT				; otherwise decode next instruction
+
+BB.RMODE.BBSS:
+	;---------------------------------------; BBSS:
+	[GRN]<--[GRN].OR.[W2],			; set bit in general register
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+BB.RMODE.BBCS:
+	;---------------------------------------; BBCS:
+	[GRN]<--[GRN].OR.[W2],			; set bit in general register
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+BB.RMODE.BBSC:
+	;---------------------------------------; BBSC:
+	[GRN]<--[GRN].ANDNOT.[W2],		; clear bit in general register
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+BB.RMODE.BBCC:
+	;---------------------------------------; BBCC:
+	[GRN]<--[GRN].ANDNOT.[W2],		; clear bit in general register
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+BB.RMODE.BBSSI:
+	;---------------------------------------; BBSSI:
+	[GRN]<--[GRN].OR.[W2],			; set bit in general register
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+BB.RMODE.BBCCI:
+	;---------------------------------------; BBCCI:
+	[GRN]<--[GRN].ANDNOT.[W2],		; clear bit in general register
+	GOTO[BRCOND.EXIT]			; go conditionally update PC and decode
+
+.nobin
+.TOC	"	BLBx"
+
+;	These instructions test the low order bit of the source operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BLBS		E8	if src.rl<0> eql 1			1	r/l	--	BLBX		alu.~z
+;					then PC <-- PC + sext(displ.bb)
+;	BLBC		E9	if src.rl<0> eql 0			1	r/l	--	BLBX		alu.z
+;					then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (source) operand
+;		DL	=	FORCED SPECIALLY TO BYTE BY I Box
+;
+;	Exit conditions:
+;		The PC has been updated.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BLBx operation:
+;
+;		if (src.rl<0> eql x) then PC <-- PC + sext(displ.bb)
+
+BLBX:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0].AND.K[1],			; test low order bit of operand
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE4[ID.LOAD].AT.[BLBX.DISP.OK]	; get branch displacement, case on result
+
+;= ALIGNLIST 100*	(BLBX.DISP.OK,	BLBX.DISP.STALL,
+;=				,	BLBX.DISP.HALTED)
+
+BLBX.DISP.OK:
+	;---------------------------------------; ib ok:
+	[WBUS]<--[PC]+[MID.BUFF],		; Wbus <-- PC + sext(displ.bb)
+						; >>PC read, not written in prev cycle
+	IF.BCOND.LOAD.V&PC.TRAP,		; if BCOND, load PC, VIBA, flush IB, trap
+						; >>BRANCH.TRAP, prev cycle was BASIC
+	DEC.NEXT				; otherwise decode next instruction
+
+BLBX.DISP.STALL:
+	;---------------------------------------; ib stall:
+	CASE4[ID.LOAD].AT.[BLBX.DISP.OK]	; get branch displacement, case on result
+
+BLBX.DISP.HALTED:
+	;---------------------------------------; ib halted:
+	[TXPAGE]<--B.[VA],			; save VA in temporary
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[BLBX.DISP.OK]	; get branch displacement, case on result
+
+;= END CTRL

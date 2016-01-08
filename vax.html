@@ -1,0 +1,247 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>VAX Simulator Configuration</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  VAX Simulator Configuration
+</H1>
+<P>
+The VAX was the most popular 32-bit minicomputer. Introduced by DEC in 1977,
+it remained in active production until 1999. The VAX family included many
+processor designs:
+<UL>
+  <LI>
+    1977: VAX-11/780 (TTL ); derivative design, VAX-11/785
+  <LI>
+    1980: VAX-11/750 (TTL gate arrays)
+  <LI>
+    1982: VAX-11/730 (TTL)
+  <LI>
+    1984: VAX 8600 (ECL gate arrays); derivative design, VAX 8650
+  <LI>
+    1984: MicroVAX I (4u NMOS data path chip + TTL control)
+  <LI>
+    1985: MicroVAX II (3u NMOS)
+  <LI>
+    1986: VAX 8800 (ECL gate arrays); derivative designs, VAX 8830, VAX 8850
+  <LI>
+    1987: CVAX (2u CMOS); derivative designs CVAX II (1.5u CMOS) and SOC (1u
+    CMOS)
+  <LI>
+    1989: Rigel (1.5u CMOS); derivative design Mariah (1u CMOS)
+  <LI>
+    1990: VAX 9000 (ECL gate arrays)
+  <LI>
+    1991: NVAX (.75u CMOS); derivative design NVAX+ (.75u CMOS) and NVAX+5 (.5u
+    CMOS)
+</UL>
+<P>
+While the relationship between processor designs and system models is obvious
+for TTL and ECL processors, the VAX microprocessors were used in many different
+types and models of systems.&nbsp;For example, CVAX was the basis for the
+MicroVAX 3500, the VAX and VAXstation 3100, and the VAX 6200. A complete
+chart of the VAX processors and their instruction sets and system implementations
+can be found <A HREF="docs/vax_proc.txt">here</A>.
+<P>
+SimH supports two different VAX models: the VAX-11/780 and the MicroVAX 3900.
+&nbsp;The options for the VAX-11/780 are:
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD><B>Option</B></TD>
+    <TD><B>Description</B></TD>
+    <TD><B>Capacity</B></TD>
+  </TR>
+  <TR>
+    <TD>CPU</TD>
+    <TD>VAX-11/780, no FPA, G&amp;H microcode</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Memory</TD>
+    <TD>2 x MS780-C controller, or</TD>
+    <TD>8MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>2 x MS780-E controller</TD>
+    <TD>16MB-128MB</TD>
+  </TR>
+  <TR>
+    <TD>Console</TD>
+    <TD>Full duplex asynchronous interface &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>Single-density floppy disk drive</TD>
+    <TD>256KB</TD>
+  </TR>
+  <TR>
+    <TD>Real time clock</TD>
+    <TD>VAX standard real-time and TOY clock</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Card reader</TD>
+    <TD>CR11/CD11</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Line printer</TD>
+    <TD>LP11 line printer</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Terminal multiplexor &nbsp;</TD>
+    <TD>DZ11 multiplexor</TD>
+    <TD>8-32 lines</TD>
+  </TR>
+  <TR>
+    <TD>Disk</TD>
+    <TD>RL11/RL01-RL02 cartridge disk</TD>
+    <TD>5-10MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RK611/RK06-RK07 cartridge disk</TD>
+    <TD>14-28MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>UDA50/RX50,RX33 floppy disks</TD>
+    <TD>.4-1.2MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>UDA50/RD51,RD52,RD53,RD54,RD31 disks</TD>
+    <TD>10.8-155.6MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>UDA50/RA60,RA71,RA72,RA73,RA81,RA82,RA90,RA92 disks</TD>
+    <TD>12KB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH780/RP04/5,RP06,RM02/3,RM80,RP07</TD>
+    <TD>67-516MB</TD>
+  </TR>
+  <TR>
+    <TD>Floppy disk</TD>
+    <TD>RX211/RX02 floppy disk</TD>
+    <TD>512KB</TD>
+  </TR>
+  <TR>
+    <TD>Magnetic tape</TD>
+    <TD>TS11 1600bpi 9 track magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>TUK50/TK50 TMSCP magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RH780/TM03/TE16,TU45,TU77 800/1600bpi 9 track magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Network</TD>
+    <TD>DEUNA/DELUA Ethernet controller</TD>
+    <TD></TD>
+  </TR>
+</TABLE>
+<P>
+The options for the MicroVAX 3900 are:<BR>
+<TABLE BORDER="2" CELLPADDING="2">
+  <TR>
+    <TD><B>Option</B></TD>
+    <TD><B>Description</B></TD>
+    <TD><B>Capacity</B></TD>
+  </TR>
+  <TR>
+    <TD>CPU and memory &nbsp; &nbsp;&nbsp;</TD>
+    <TD>MicroVAX 3900 (CVAX CPU)</TD>
+    <TD>16MB - 64MB</TD>
+  </TR>
+  <TR>
+    <TD>Console</TD>
+    <TD>Full duplex asynchronous interface &nbsp;&nbsp; &nbsp;&nbsp; &nbsp; &nbsp;</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Real time clock</TD>
+    <TD>VAX standard real-time and TOY clock</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Card reader</TD>
+    <TD>CR11/CD11 card reader</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Line printer</TD>
+    <TD>LPV11 line printer</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Terminal multiplexor</TD>
+    <TD>DZV11 multiplexor</TD>
+    <TD>4-16 lines</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>DHQ11 multiplexor</TD>
+    <TD>8-32 lines</TD>
+  </TR>
+  <TR>
+    <TD>Disk</TD>
+    <TD>RLV12/RL01-RL02 cartridge disk</TD>
+    <TD>5-10MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RQDX3/RX50,RX33 floppy disks</TD>
+    <TD>.4-1.2MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RQDX3/RD51,RD52,RD53,RD54,RD31 disks</TD>
+    <TD>10.8-155.6MB</TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>RQDX3/RA60,RA71,RA72,RA73,RA81,RA82,RA90,RA92 disks &nbsp;</TD>
+    <TD>200-1960MB</TD>
+  </TR>
+  <TR>
+    <TD>Floppy disk</TD>
+    <TD>RXV21/RX02 floppy disk</TD>
+    <TD>512KB</TD>
+  </TR>
+  <TR>
+    <TD>Magnetic tape</TD>
+    <TD>TSV05 1600bpi 9 track magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD></TD>
+    <TD>TQK50/TK50 TMSCP magnetic tape</TD>
+    <TD></TD>
+  </TR>
+  <TR>
+    <TD>Network</TD>
+    <TD>DELQA/DEQNA Ethernet controller</TD>
+    <TD></TD>
+  </TR>
+</TABLE>
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 30-Jan-2007 by Bob Supnik (simh AT trailing-edge DOT com
+- anti-spam encoded)</SMALL></I>
+</BODY></HTML>

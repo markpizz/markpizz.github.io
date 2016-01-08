@@ -1,0 +1,402 @@
+.TOC	"VECTOR.MIC -- Vector Option Instructions"
+.TOC	"Revision 2.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989 BY					    	    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (2)0 19-Nov-89 RMS	Revised for simplified decoder.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 06-Apr-89 RMS	Revised for actual entry point assignments.
+;    2 01-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 04-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN VECTOR
+.nobin
+
+;	This module implements the vector option instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	31FD	 MFVP regnum.rw, dst.wl						- - - -		vec
+;
+;	34FD	 VLDL cntrl.rw, base.ab, stride.rl				- - - -		vec
+;	36FD	 VLDQ cntrl.rw, base.ab, stride.rl				- - - -		vec
+;	9CFD	 VSTL cntrl.rw, base.ab, stride.rl				- - - -		vec
+;	9EFD	 VSTQ cntrl.rw, base.ab, stride.rl				- - - -		vec
+
+;	35FD	 VGATHL cntrl.rw, base.ab					- - - -		vec
+;	37FD	 VGATHQ cntrl.rw, base.ab					- - - -		vec
+;	9DFD	 VSCATL cntrl.rw, base.ab					- - - -		vec
+;	9FFD	 VSCATQ cntrl.rw, base.ab					- - - -		vec
+
+;	EDFD	 IOTA   cntrl.rw, scal.rl					- - - -		vec
+;	A9FD	 MTVP regnum.rw, src.rl						- - - -		vec
+;	85FD	 VSADDF cntrl.rw, scal.rl					- - - -		vec
+;	81FD	 VSADDL cntrl.rw, scal.rl					- - - -		vec
+;	CDFD	 VSBICL cntrl.rw, scal.rl					- - - -		vec
+;	C9FD	 VSBISL cntrl.rw, scal.rl					- - - -		vec
+;	C5FD	 VSCMPF cntrl.rw, scal.rl					- - - -		vec
+;	C1FD	 VSCMPL cntrl.rw, scal.rl					- - - -		vec
+;	ADFD	 VSDIVF cntrl.rw, scal.rl					- - - -		vec
+;	A5FD	 VSMULF cntrl.rw, scal.rl					- - - -		vec
+;	A1FD	 VSMULL cntrl.rw, scal.rl					- - - -		vec
+;	E5FD	 VSSLLL cntrl.rw, scal.rl					- - - -		vec
+;	E1FD	 VSSRLL cntrl.rw, scal.rl					- - - -		vec
+;	89FD	 VSSUBL cntrl.rw, scal.rl					- - - -		vec
+;	E9FD	 VSXORL cntrl.rw, scal.rl					- - - -		vec
+;	8DFD	 VSSUBF cntrl.rw, scal.rl					- - - -		vec
+
+;	87FD	 VSADDD cntrl.rw, scal.rq					- - - -		vec
+;	83FD	 VSADDG cntrl.rw, scal.rq					- - - -		vec
+;	C7FD	 VSCMPD cntrl.rw, scal.rq					- - - -		vec
+;	C3FD	 VSCMPG cntrl.rw, scal.rq					- - - -		vec
+;	AFFD	 VSDIVD cntrl.rw, scal.rq					- - - -		vec
+;	ABFD	 VSDIVG cntrl.rw, scal.rq					- - - -		vec
+;	EFFD	 VSMERGE cntrl.rw, scal.rq					- - - -		vec
+;	A7FD	 VSMULD cntrl.rw, scal.rq					- - - -		vec
+;	A3FD	 VSMULG cntrl.rw, scal.rq					- - - -		vec
+;	8FFD	 VSSUBD cntrl.rw, scal.rq					- - - -		vec
+;	8BFD	 VSSUBG cntrl.rw, scal.rq					- - - -		vec
+
+;	A8FD	 VSYNC regnum.rw						- - - -		vec
+;	86FD	 VVADDD	cntrl.rw						- - - -		vec
+;	84FD	 VVADDF	cntrl.rw						- - - -		vec
+;	82FD	 VVADDG	cntrl.rw						- - - -		vec
+;	80FD	 VVADDL	cntrl.rw						- - - -		vec
+;	CCFD	 VVBICL	cntrl.rw						- - - -		vec
+;	C8FD	 VVBISL	cntrl.rw						- - - -		vec
+;	C4FD	 VVCMPF	cntrl.rw						- - - -		vec
+;	C6FD	 VVCMPD	cntrl.rw						- - - -		vec
+;	C2FD	 VVCMPG	cntrl.rw						- - - -		vec
+;	C0FD	 VVCMPL	cntrl.rw						- - - -		vec
+;	ECFD	 VVCVT cntrl.rw							- - - -		vec
+;	ACFD	 VVDIVF	cntrl.rw						- - - -		vec
+;	AEFD	 VVDIVD	cntrl.rw						- - - -		vec
+;	AAFD	 VVDIVG	cntrl.rw						- - - -		vec
+;	EEFD	 VVMERGE cntrl.rw						- - - -		vec
+;	A4FD	 VVMULF	cntrl.rw						- - - -		vec
+;	A6FD	 VVMULD	cntrl.rw						- - - -		vec
+;	A2FD	 VVMULG	cntrl.rw						- - - -		vec
+;	A0FD	 VVMULL	cntrl.rw						- - - -		vec
+;	E4FD	 VVSLLL	cntrl.rw						- - - -		vec
+;	E0FD	 VVSRLL	cntrl.rw						- - - -		vec
+;	8CFD	 VVSUBF	cntrl.rw						- - - -		vec
+;	8EFD	 VVSUBD	cntrl.rw						- - - -		vec
+;	8AFD	 VVSUBG	cntrl.rw						- - - -		vec
+;	88FD	 VVSUBL	cntrl.rw						- - - -		vec
+;	E8FD	 VVXORL	cntrl.rw						- - - -		vec
+.TOC	"	Vector - Scalar Operate Instructions"
+
+;	These instructions perform an operation with a scalar and a vector.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VSADDG		83FD	vector - scalar G-floating add		 2	rr/wq	--	VEC.VS.Q	--
+;	VSADDD		87FD	vector - scalar D-floating add		 2	rr/wq	--	VEC.VS.Q	--
+;	VSSUBG		8BFD	vector - scalar G-floating subtract	 2	rr/wq	--	VEC.VS.Q	--
+;	VSSUBD		8FFD	vector - scalar D-floating subtract	 2	rr/wq	--	VEC.VS.Q	--
+;	VSMULG		A3FD	vector - scalar G-floating multiply	 2	rr/wq	--	VEC.VS.Q	--
+;	VSMULD		A7FD	vector - scalar D-floating multiply	 2	rr/wq	--	VEC.VS.Q	--
+;	VSDIVG		ABFD	vector - scalar G-floating divide	 2	rr/wq	--	VEC.VS.Q	--
+;	VSDIVD		AFFD	vector - scalar D-floating divide	 2	rr/wq	--	VEC.VS.Q	--
+;	VSCMPG		C3FD	vector - scalar G-floating compare	 2	rr/wq	--	VEC.VS.Q	--
+;	VSCMPD		C7FD	vector - scalar D-floating compare	 2	rr/wq	--	VEC.VS.Q	--
+;	VSMERGE		EFFD	vector - scalar merge			 2	rr/wq	--	VEC.VS.Q	--
+;
+;	VSADDL		81FD	vector - scalar longword add		 2	rr/wl	--	VEC.VS.L	--
+;	VSADDF		85FD	vector - scalar F-floating add		 2	rr/wl	--	VEC.VS.L	--
+;	VSSUBL		89FD	vector - scalar longword subtract	 2	rr/wl	--	VEC.VS.L	--
+;	VSSUBF		8DFD	vector - scalar F-floating subtract	 2	rr/wl	--	VEC.VS.L	--
+;	VSMULL		A1FD	vector - scalar longword multiply	 2	rr/wl	--	VEC.VS.L	--
+;	VSMULF		A5FD	vector - scalar F-floating multiply	 2	rr/wl	--	VEC.VS.L	--
+;	MTVP		A9FD	vector register <-- src.rl		 2	rr/wl	--	VEC.VS.L	--
+;	VSDIVF		ADFD	vector - scalar F-floating divide	 2	rr/wl	--	VEC.VS.L	--
+;	VSCMPL		C1FD	vector - scalar longword compare	 2	rr/wl	--	VEC.VS.L	--
+;	VSCMPF		C5FD	vector - scalar F-floating compare	 2	rr/wl	--	VEC.VS.L	--
+;	VSBISL		C9FD	vector - scalar longword bit set	 2	rr/wl	--	VEC.VS.L	--
+;	VSBICL		CDFD	vector - scalar longword bit clear	 2	rr/wl	--	VEC.VS.L	--
+;	VSSRLL		E1FD	vector - scalar longword shift right	 2	rr/wl	--	VEC.VS.L	--
+;	VSSLLL		E5FD	vector - scalar longword shift left	 2	rr/wl	--	VEC.VS.L	--
+;	VSXORL		E9FD	vector - scalar longword exclusive or	 2	rr/wl	--	VEC.VS.L	--
+;	IOTA		EDFD	generate compressed iota vector		 2	rr/wl	--	VEC.VS.L	--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (control word) operand
+;		W2 (W3'W2) =	second (scalar) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data length of second operand
+;		IB<31:24> =	opcode
+;
+;	Exit conditions:
+;		Reserved instruction fault.
+;
+;	Condition codes:
+;		N <-- 0				[in exception flows]
+;		Z <-- 0
+;		V <-- 0				[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+
+.bin
+
+;	Scalar-vector instructions, scalar length = quadword.
+
+VEC.VS.Q:
+	;********** Hardware dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.VS.Q.R:
+	;********** Hardware dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+
+;	Scalar-vector instructions, scalar length = longword.
+
+VEC.VS.L:
+	;********** Hardware dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.VS.L.R:
+	;********** Hardware dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+.nobin
+.TOC	"	Vector Load/Store Instructions"
+
+;	These instruction load a vector register from memory or store a vector vegister to memory.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VLDL		34FD	load longword vector into register	 3	rar/wbl	--	VEC.LDX		--
+;	VLDQ		36FD	load quadword vector into register	 3	rar/wbl	--	VEC.LDX		--
+;	VSTL		9CFD	store longword vector from register	 3	rar/wbl	--	VEC.STX		--
+;	VSTQ		9EFD	store quadword vector from register	 3	rar/wbl	--	VEC.STX		--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (control word) operand
+;		W2	=	second (base) operand
+;		W4	=	third (stride) operand, if memory
+;		RN	=	register number of third specifier
+;		DL	=	data length of third operand (longword)
+;		IB<31:24> =	opcode
+;
+;	Exit conditions:
+;		Reserved instruction fault.
+;
+;	Condition codes:
+;		N <-- 0				[in exception flows]
+;		Z <-- 0
+;		V <-- 0				[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+
+.bin
+
+;	Vector load/store instructions.
+
+VEC.LDX:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.LDX.R:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.STX:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.STX.R:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+.nobin
+.TOC	"	Vector Scatter/Gather Instructions"
+
+;	These instruction scatter a vector register to memory or gather a vector register from memory.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VGATHL		35FD	gather longword vector into register	 2	ra/wb	--	VEC.GATHX	--
+;	VGATHQ		37FD	gather quadword vector into register	 2	ra/wb	--	VEC.GATHX	--
+;	VSCATL		9DFD	scatter longword vector into register	 2	ra/wb	--	VEC.SCATX	--
+;	VSCATQ		9FFD	scatter quadword vector into register	 2	ra/wb	--	VEC.SCATX	--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (control word) operand
+;		W2	=	second (base) operand
+;		RN	=	register number of second specifier
+;		DL	=	data length of second operand (byte)
+;		IB<31:24> =	opcode
+;
+;	Exit conditions:
+;		Reserved instruction fault.
+;
+;	Condition codes:
+;		N <-- 0				[in exception flows]
+;		Z <-- 0
+;		V <-- 0				[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Because the last specifier is address mode, register references are trapped
+;		   by the I Box, and no register entry point is needed.
+
+.bin
+
+VEC.GATHX:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.SCATX:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+.nobin
+.TOC	"	MFVP"
+
+;	This instruction reads a vector register.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MFVP		31FD	dst.wl <-- vector register		 2	rw/wl	--	VEC.MFVP	--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (vector register number) operand
+;		W2	=	address of second (destination) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data length of second operand (longword)
+;		IB<31:24> =	opcode
+;
+;	Exit conditions:
+;		Reserved instruction fault.
+;
+;	Condition codes:
+;		N <-- 0				[in exception flows]
+;		Z <-- 0
+;		V <-- 0				[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+
+.bin
+
+;	Move from vector register.
+
+VEC.MFVP:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.MFVP.R:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+.nobin
+.TOC	"	Vector - Vector Operate Instructions"
+
+;	These instructions perform an operation with two vectors.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	VVADDL		80FD	vector - vector longword add		 1	 r/w	--	VEC.VV		--
+;	VVADDG		82FD	vector - vector G-floating add		 1	 r/w	--	VEC.VV		--
+;	VVADDF		84FD	vector - vector F-floating add		 1	 r/w	--	VEC.VV		--
+;	VVADDD		86FD	vector - vector D-floating add		 1	 r/w	--	VEC.VV		--
+;	VVSUBL		88FD	vector - vector longword subtract	 1	 r/w	--	VEC.VV		--
+;	VVSUBG		8AFD	vector - vector G-floating subtract	 1	 r/w	--	VEC.VV		--
+;	VVSUBF		8CFD	vector - vector F-floating subtract	 1	 r/w	--	VEC.VV		--
+;	VVSUBD		8EFD	vector - vector D-floating subtract	 1	 r/w	--	VEC.VV		--
+;
+;	VVMULL		A0FD	vector - vector longword multiply	 1	 r/w	--	VEC.VV		--
+;	VVMULG		A2FD	vector - vector G-floating multiply	 1	 r/w	--	VEC.VV		--
+;	VVMULF		A4FD	vector - vector F-floating multiply	 1	 r/w	--	VEC.VV		--
+;	VVMULD		A6FD	vector - vector D-floating multiply	 1	 r/w	--	VEC.VV		--
+;	VSYNC		A8FD	synchronize vector memory access	 1	 r/w	--	VEC.VV		--
+;	VVDIVG		AAFD	vector - vector G-floating divide	 1	 r/w	--	VEC.VV		--
+;	VVDIVF		ACFD	vector - vector F-floating divide	 1	 r/w	--	VEC.VV		--
+;	VVDIVD		AEFD	vector - vector D-floating divide	 1	 r/w	--	VEC.VV		--
+;
+;	VVCMPL		C0FD	vector - vector longword compare	 1	 r/w	--	VEC.VV		--
+;	VVCMPG		C2FD	vector - vector G-floating compare	 1	 r/w	--	VEC.VV		--
+;	VVCMPF		C4FD	vector - vector F-floating compare	 1	 r/w	--	VEC.VV		--
+;	VVCMPD		C6FD	vector - vector D-floating compare	 1	 r/w	--	VEC.VV		--
+;	VVBISL		C8FD	vector - vector longword bit set	 1	 r/w	--	VEC.VV		--
+;	VVBICL		CCFD	vector - vector longword bit clear	 1	 r/w	--	VEC.VV		--
+;
+;	VVSRLL		E0FD	vector - vector longword shift right	 1	 r/w	--	VEC.VV		--
+;	VVSLLL		E4FD	vector - vector longword shift left	 1	 r/w	--	VEC.VV		--
+;	VVXORL		E8FD	vector - vector longword exclusive OR	 1	 r/w	--	VEC.VV		--
+;	VVCVT		ECFD	vector convert				 1	 r/w	--	VEC.VV		--
+;	VVMERGE		EEFD	vector - vector merge			 1	 r/w	--	VEC.VV		--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (control word) operand
+;		RN	=	register number of first specifier
+;		DL	=	data length of first operand (word)
+;		IB<31:24> =	opcode
+;
+;	Exit conditions:
+;		Reserved instruction fault.
+;
+;	Condition codes:
+;		N <-- 0				[in exception flows]
+;		Z <-- 0
+;		V <-- 0				[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Single operand instructions are not optimized for trailing register specifiers.
+;
+.bin
+
+;	Vector to vector operates.
+
+VEC.VV:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+VEC.VV.R:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; fault
+
+;= END VECTOR

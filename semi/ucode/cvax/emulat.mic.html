@@ -1,0 +1,453 @@
+.TOC	"EMULAT.MIC -- Emulation Support"
+.TOC	"Revision 4.1"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 04	25-Sep-86	[RMS]	Removed CMPC3, CMPC5, SCANC, SPANC, LOCC, SKPC
+; 03	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	24-Jun-86	[RMS]	Documented additional PSL restriction (ECO 6JUN18DWA.1)
+;	16-Feb-86	[RMS]	Restored SPEC.RN (ECO rescinded)
+;	31-Jan-86	[RMS]	Documented additional PSL restriction (ECO 6JAN31DWA.3)
+;	31-Jan-86	[RMS]	Changed SPEC.RN (ECO 6JAN31DWA.2)
+;	19-Sep-85	[RMS]	Removed PASS.A/B.ZEXT.DL functions (ECO 5SEP19FF.1)
+; 02	29-Jul-85	[RMS]	Editorial changes
+;	26-Jul-85	[RMS]	Documented additional PSL restrictions
+;	1-Jul-85	[RMS]	Revised to create one line mask subroutine
+;	25-Jun-85	[RMS]	Fixed bug in CVTPL register mode
+; 01	19-Mar-85	[RMS]	Revised for second pass model
+; 00	15-Aug-83	[RMS]	First edit for CVAX
+
+.bin
+
+;= BEGIN EMULAT
+
+.nobin
+;	This module provides emulation support for instructions omitted from this implementation
+;	of the VAX architecture.
+;	The instructions in this class are:
+;
+;	Opcode	Instruction							N Z V C		Exceptions
+;	------	-----------							-------		----------
+;
+;	20	ADDP4  addlen.rw, addaddr.ab, sumlen.rw, sumaddr.ab		* * * 0		rsv, dov
+;	21	ADDP6  add1len.rw, add1addr.ab, add2len.rw, add2addr.ab,	* * * 0		rsv, dov
+;		       sumlen.rw, sumaddr.ab
+;
+;	F8	ASHP   cnt.rb, srclen.rw, srcaddr.ab, round.rb,			* * * 0		rsv, dov
+;		       dstlen.rw, dstaddr.ab
+;
+;	35	CMPP3  len.rw, src1addr.ab, src2addr.ab				* * 0 0
+;	37	CMPP4  src1len.rw, src1addr.ab, src2len.rw, src2addr.ab		* * 0 0
+;
+;	0B	CRC    tbl.ab, inicrc.rl, strlen.rw, stream.ab			* * 0 0
+;
+;	F9	CVTLP  src.rl, dstlen.rw, dstaddr.ab				* * * 0		rsv, dov
+;	36	CVTPL  srclen.rw, srcaddr.ab, dst.wl				* * * 0		rsv, iov
+;	08	CVTPS  srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab		* * * 0		rsv, dov
+;	24	CVTPT  srclen.rw, srcaddr.ab, tbladdr.ab,			* * * 0		rsv, dov
+;		       dstlen.rw, dstaddr.ab
+;	09	CVTSP  srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab		* * * 0		rsv, dov
+;	26	CVTTP  srclen.rw, srcaddr.ab, tbladdr.ab,			* * * 0		rsv, dov
+;		       dstlen.rw, dstaddr.ab
+;
+;	27	DIVP   divrlen.rw, divraddr.ab, divdlen.rw, divdaddr.ab,	* * * 0		rsv, dov, ddvz
+;		       quolen.rw, quoaddr.ab
+;
+;	38	EDITPC srclen.rw, srcaddr.ab, pattern.ab, dstaddr.ab		* * * *		rsv, dov
+;
+;	39	MATCHC objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab		0 * 0 0
+;
+;	34	MOVP   len.rw, srcaddr.ab, dstaddr.ab				* * 0 0
+;
+;	2E	MOVTC  srclen.rw, srcaddr.ab, fill.rb, tbladdr.ab,		* * 0 *
+;		       dstlen.rw, dstaddr.ab
+;	2F	MOVTUC srclen.rw, srcaddr.ab, esc.rb, tbladdr.ab,		* * * *
+;		       dstlen.rw, dstaddr.ab
+;
+;	25	MULP   mulrlen.rw, mulraddr.ab, muldlen.rw, muldaddr.ab,	* * * 0		rsv, dov
+;		       prodlen.rw, prodaddr.ab
+;
+;	22	SUBP4  sublen.rw, subaddr.ab, diflen.rw, difaddr.ab		* * * 0		rsv, dov
+;	23	SUBP6  sublen.rw, subaddr.ab, minlen.rw, minaddr.ab,		* * * 0		rsv, dov
+;		       diflen.rw, difaddr.ab
+;
+
+.TOC	"	Normal Emulation (FPD Clear)"
+
+;	If FPD is clear, the emulation process consists of three steps:
+;
+;	1)  Parse the operand specifiers.
+;	2)  Build the specifier stack frame.
+;	3)  Take a same mode exception to the normal emulation exception handler.
+;
+;	In greater detail:
+;
+;	1)  Parse the operand specifiers.  The operand specifiers are parsed and
+;	    accumulated in the micromachine temporary registers.
+;
+;	2)  Build the specifier stack frame.  The specifier stack frame is 12
+;	    longwords, as follows:
+;
+;	 3
+;	 1							       0
+;	+---------------------------------------------------------------+
+;	|			    opcode				|	: SP - 48
+;	+---------------------------------------------------------------+
+;	|			    old PC				|	: SP - 44
+;	+---------------------------------------------------------------+
+;	|			  argument #1				|	: SP - 40
+;	+---------------------------------------------------------------+
+;	|			  argument #2				|	: SP - 36
+;	+---------------------------------------------------------------+
+;	|			  argument #3				|	: SP - 32
+;	+---------------------------------------------------------------+
+;	|			  argument #4				|	: SP - 28
+;	+---------------------------------------------------------------+
+;	|			  argument #5				|	: SP - 24
+;	+---------------------------------------------------------------+
+;	|			  argument #6				|	: SP - 20
+;	+---------------------------------------------------------------+
+;	|			  argument #7				|	: SP - 16
+;	+---------------------------------------------------------------+
+;	|			  argument #8				|	: SP - 12
+;	+---------------------------------------------------------------+
+;	|			    new PC				|	: SP - 8
+;	+---------------------------------------------------------------+
+;	|			   saved PSL				|	: SP - 4
+;	+---------------------------------------------------------------+
+;
+;	3)  Take a same mode exception through the emulated instruction vector.
+;	    This involves clearing PSL<tp,fpd,dv,fu,iv,t,cc> and vectoring through
+;	    the specified location in the SCB.
+;
+
+;	The emulated instructions are parsed in the specifier flows.
+;
+;	Mnemonic      Opcode	Operands					Spec	AT/DL		Dispatch
+;	--------      ------	--------					----	-----		--------
+;	MOVP		34	len.rw, srcaddr.ab, dstaddr.ab			3	raa/wbb		EMULATE.A
+;	CMPP3		35	len.rw, src1addr.ab, src2addr.ab		3	raa/wbb		EMULATE.A
+;	CVTLP		F9	src.rl, dstlen.rw, dstaddr.ab			3	rra/lwb		EMULATE.A
+;
+;	CVTPL		36	srclen.rw, srcaddr.ab, dst.wl			3	rav/wbl		EMULATE.3W
+;
+;	CVTPS		08	srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab	4	rara/wbwb	EMULATE.A
+;	CVTSP		09	srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab	4	rara/wbwb	EMULATE.A
+;	CRC		0B	tbl.ab, inicrc.rl, strlen.rw, stream.ab		4	arra/blwb	EMULATE.A
+;	ADDP4		20	addlen.rw, addaddr.ab, sumlen.rw, sumaddr.ab	4	rara/wbwb	EMULATE.A
+;	SUBP4		22	sublen.rw, subaddr.ab, diflen.rw, difaddr.ab	4	rara/wbwb	EMULATE.A
+;	CMPP4		37	src1len.rw, src1addr.ab, src2len.rw,		4	rara/wbwb	EMULATE.A
+;				src2addr.ab
+;	EDITPC		38	srclen.rw, srcaddr.ab, pattern.ab, dstaddr.ab	4	raaa/wbbb	EMULATE.A
+;	MATCHC		39	objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab	4	rara/wbwb	EMULATE.A
+;
+;
+;	CVTPT		24	srclen.rw, srcaddr.ab, tbladdr.ab,		5	raara/wbbwb	EMULATE.A
+;				dstlen.rw, dstaddr.ab
+;	CVTTP		26	srclen.rw, srcaddr.ab, tbladdr.ab,		5	raara/wbbwb	EMULATE.A
+;				dstlen.rw, dstaddr.ab
+;
+;	ADDP6		21	add1len.rw, add1addr.ab, add2len.rw,		6	rarara/wbwbwb	EMULATE.A
+;				add2addr.ab, sumlen.rw, sumaddr.ab
+;	SUBP6		23	sublen.rw, subaddr.ab, minlen.rw, 		6	rarara/wbwbwb	EMULATE.A
+;				minaddr.ab, diflen.rw, difaddr.ab
+;	MULP		25	mulrlen.rw, mulraddr.ab, muldlen.rw,		6	rarara/wbwbwb	EMULATE.A
+;				muladdr.ab, prodlen.rw, prodaddr.ab
+;	DIVP		27	divrlen.rw, divraddr.ab, divdlen.rw,		6	rarara/wbwbwb	EMULATE.A
+;				divaddr.ab, quolen.rw, quoaddr.ab
+;	MOVTC		2E	srclen.rw, srcaddr.ab, fill.rb,			6	rarara/wbbbwb	EMULATE.A
+;				tbladdr.ab, dstlen.rw, dstaddr.ab
+;	MOVTUC		2F	srclen.rw, srcaddr.ab, esc.rb, 			6	rarara/wbbbwb	EMULATE.A
+;				tbladdr.ab, dstlen.rw, dstaddr.ab
+;	ASHP		F8	cnt.rb, srclen.rw, srcaddr.ab,			6	rrarra/bwbbwb	EMULATE.A
+;				round.rb, dstlen.rw, dstaddr.ab
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first operand
+;		W2	=	second operand
+;		W4	=	third operand
+;		SC	=	fourth operand (if 4, 5, or 6 specifiers)
+;		W3	=	fifth operand (if 5 or 6 specifiers)
+;		W1	=	sixth operand (if 6 specifiers)
+;		RN	=	register number of last operand
+;		DL	=	data type of last operand
+;
+;	Exit conditions:
+;		Emulation stack frame is built.
+;		PC, PSL set up for emulation trap.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	Emulated instructions, last specifier = .ax.
+
+;	emop.a ...,x,r --
+
+EMULATE.A.RMODE:
+	;********** Hardware dispatch **********;
+	GOTO[RSRV.ADDR.FLT]			; fault
+
+;	emop.a ...,x,m --
+
+EMULATE.A:
+	;********** Hardware dispatch **********;
+	VA&, [WBUS]<--[SP]-K[48.],		; set VA pointing to new top of stack
+	GOTO[EMULATE.NORMAL]			; start exception processing
+
+;	Three operand emulated instructions, last specifier = .wx.
+
+;	emop.3w x,x,r --
+
+EMULATE.3W.RMODE:
+	;********** Hardware dispatch **********;
+	[W4]<--MXPS0[SPEC.RN],			; get register number of last specifier
+						; >>spur read, prev cycle was DEC.NEXT
+	CALL[MASK.W4.0F]			; mask register number to four bits
+
+	;---------------------------------------;
+	[W4]<--NOT.[W4]				; report in one's complement form
+
+;	emop.3w x,x,m --
+
+EMULATE.3W:
+	;********** Hardware dispatch **********;
+	VA&, [WBUS]<--[SP]-K[48.],		; set VA pointing to new top of stack
+	GOTO[EMULATE.NORMAL]			; start exception processing
+
+.nobin
+
+;	The specifiers have been parsed and are stored in the working registers.
+;	This routine builds the emulator stack frame and executes the emulator exception process.
+;
+;	For the various classes of emulated instructions, the argument slots in the emulator
+;	stack frame are used as follows:
+;
+;			3 spec		4 spec		5 spec		6 spec
+;			------		------		------		------
+;	arg #1 (W0)	spec 1		spec 1		spec 1		spec 1
+;	arg #2 (W2)	spec 2		spec 2		spec 2		spec 2
+;	arg #3 (W4)	spec 3		spec 3		spec 3		spec 3
+;	arg #4 (SC)	unused		spec 4		spec 4		spec 4
+;	arg #5 (W3)	unused		unused		spec 5		spec 5
+;	arg #6 (W1)	unused		unused		unused		spec 6
+;	arg #7		unused		unused		unused		unused
+;	arg #8		unused		unused		unused		unused
+;
+;	The detailed steps are as follows:
+;
+;	1)  Probe the stack for writeability.
+;	2)  Write out the stack base (PSL, PC).
+;	3)  Write out the arguments and stack top.
+;	4)  Fetch the SCB exception vector.
+;	5)  Update PSL, PC and exit.
+;
+.bin
+
+;	Normal emulation exception.
+;	Operands parsed.  Finish exception processing.
+
+EMULATE.NORMAL:
+	;---------------------------------------;
+	PROBE.WRITE.CURMODE,			; probe new stack top
+	STATE0<--1				; set flag for normal exception
+
+	;---------------------------------------;
+	[W5]<--MXPS0[OPCODE],			; get opcode for top of stack
+						; >>spur read, prev dst was WBUS
+	DL<--QUAD,				; set dl = quad for stack write
+	CASE2[MREF.STATUS].AT.[EMULATE.WRITE.PSL.PC]	; case on results of previous probe
+
+;= ALIGNLIST 110*	(EMULATE.WRITE.PSL.PC,	EMULATE.WRITE.PROBE.ERROR)
+
+EMULATE.WRITE.PROBE.ERROR:
+	;---------------------------------------; mref.status<0> = 1:
+	GOTO[MM.ACV.TNV]			; probe error, enter ACV/TNV flows
+
+EMULATE.WRITE.PSL.PC:
+	;---------------------------------------; mref.status<0> = 0:
+	VA&, [WBUS]<--[SP]-K[8.]		; decrement stack by quadword
+
+	;---------------------------------------;
+	MEM(VA)<--[PC], LEN(DL),		; write PC to stack
+						; >>PC read, not written in prev cycle
+	CALL[RESTORE.PC]			; restore PC (uses dead cycle)
+
+	;---------------------------------------;
+	MEM(VAP)<--[PSL], LONG,			; write PSL to stack
+						; >>PSL read, not written in prev cycle
+	CASE2[STATE2-0].AT.[EMULATE.FPD.CONTINUE]	; case on fpd vs normal exception
+
+;	Normal emulation exception, continued.
+;	Stack base written, now write out arguments.
+
+;	At this point,
+;		W0	=	argument #1
+;		W1	=	argument #6
+;		W2	=	argument #2
+;		W3	=	argument #5
+;		W4	=	argument #3
+;		W5	=	opcode
+;		SC	=	argument #4
+
+;= ALIGNLIST 1*0*	(EMULATE.FPD.CONTINUE,	EMULATE.NORMAL.CONTINUE)
+;  STATE<1> = 0 --> STATE<2:0> = ?0?
+
+EMULATE.NORMAL.CONTINUE:
+	;---------------------------------------; STATE<0> = 1:
+	VA&, [SP]<--[SP]-K[20.]			; set stack ptr to argument #6 slot
+
+	;---------------------------------------;
+	MEM(VA)<--[W1], LONG,			; write out argument #6 to stack
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W3], LONG,			; write out argument #5 to stack
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[SC], LONG,			; write out argument #4 to stack
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W4], LONG,			; write out argument #3 to stack
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W2], LONG,			; write out argument #2 to stack
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W0], LONG,			; write out argument #1 to stack
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[PC], LONG,			; write out original PC to stack
+						; >>PC read, not written in prev cycle
+	CALL[DECREMENT.SP]			; decrement stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W5], LONG			; write out opcode to stack
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[SCBB]+K[SCB.EMULATE],	; compute address of vector in SCB
+	GOTO[EMULATE.VECTOR]			; go finish exception processing
+
+;	Emulation exception, continued.
+;	Stack frame written, now update PSL.
+
+;	At this point,
+;		VA	=	SCB offset for exception
+
+EMULATE.VECTOR:
+	;---------------------------------------;
+	[PSL]<--[PSL].ANDNOT.K[48]000		; clear PSL<tp,fpd>
+						; >>PSL read, not written in prev cycle
+						; >>PSL update, no decode for two cycles
+
+	;---------------------------------------;
+	[W1]<--MEM(VA).PHYS, LONG		; read vector from SCB
+
+	;---------------------------------------;
+	[PSL]<--[PSL].ANDNOT.K[0FF],		; clear PSL<dv,fu,iv,t,cc>
+						; >>PSL read, not written in prev cycle
+						; >>PSW update, no decode in next cycle
+	GOTO[IE.EXCEPT2]			; go finish off in exception flows
+
+;	One line subroutine to mask W4 to four bits.
+
+MASK.W4.0F:
+	;---------------------------------------;
+	[W4]<--[W4].AND.K[0F], RETURN		; mask W4 to four bits, return
+
+;	One line subroutine to restore PC from backup PC.
+
+RESTORE.PC:
+	;---------------------------------------;
+	PC<--BPC, RETURN			; restore PC, return
+
+;	One line subroutine to decrement SP by one longword.
+
+DECREMENT.SP:
+	;---------------------------------------;
+	VA&, [SP]<--[SP]-K[4], RETURN		; decrement SP, copy to VA, return
+
+.nobin
+.TOC	"	Special Emulation (FPD Set)"
+
+;	If FPD is set, the emulation process consists of two steps:
+;
+;	1)  Build the exception stack frame.
+;	2)  Take a same mode exception to the special emulation exception handler.
+;
+;	In greater detail:
+;
+;	1)  Build the exception stack frame.  The exception stack frame is 2
+;	    longwords, as follows:
+;
+;	 3
+;	 1							       0
+;	+---------------------------------------------------------------+
+;	|			    old PC				|	: SP - 8
+;	+---------------------------------------------------------------+
+;	|			   saved PSL				|	: SP - 4
+;	+---------------------------------------------------------------+
+;
+;	2)  Take a same mode exception through the FPD emulated instruction vector.
+;	    This involves clearing PSL<tp,fpd,dv,fu,iv,t,cc> and vectoring through the
+;	    specified location in the SCB.
+;
+.bin
+
+;	Special emulation processor.
+;	Reached from FPD processor.  Build exception stack frame, process exception.
+
+EMULATE.FPD:
+	;---------------------------------------;
+	PC<--BPC, DL<--QUAD,			; recover original PC, set dl = quad
+	GOTO[EMULATE.WRITE.PSL.PC]		; go join common emulation flows
+						; return to next line after writing
+						; base of stack frame
+
+EMULATE.FPD.CONTINUE:
+	;---------------------------------------; STATE<0> = 0:
+	[SP]<--[SP]-K[8.]			; update stack pointer
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[SCBB]+K[SCB.EMULFPD],	; compute address of vector in SCB
+	GOTO[EMULATE.VECTOR]			; go finish exception processing
+
+;= END EMULAT

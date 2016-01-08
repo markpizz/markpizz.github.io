@@ -1,0 +1,236 @@
+.TOC	"POWERUP_MARIAH.MIC -- Powerup Initialization"
+.TOC    "Revision 3.4"
+
+;	Rick Calcagni, Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC 	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    4 17-May-89 REC	Constrain microword to former spare uaddr 6A2 to
+;			allow a patch at SPEC.AV.REG..
+;    3 28-Feb-89 GMU	Separated Rigel and Mariah modules; initialized
+;			30/32-bit PA mode to 30-bit on powerup, changed
+;			boot ROM address to E0040000.
+;    2 06-Jan-88 RMS	Editorial changes for VM option.
+; (3)1 21-Aug-87 RMS	Removed reset of F-chip and vector unit present
+;			flags, editorial changes; pass 1 code freeze.
+;
+;    7 30-Jul-87 GMU	Added CONSOLE.HALT.. global name.
+;    6 09-Jun-87 GMU	Added ABORT TRAP at POWERUP..+1 to clear trap
+;			state due to new powerup microtrap.
+;    5 13-May-87 GMU	Cleared bad parity flop after console halt.
+;    4 30-Mar-87 GMU	Updated comments to reflect F-chip and vector
+;			unit initialization.
+;    3 11-Mar-87 GMU	Initialized F-chip present, vector unit present,
+;			and odd parity flops.
+;    2 29-Dec-86 RMS	Editorial changes.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+
+.bin
+;= BEGIN POWERUP
+.nobin
+.TOC	"	Powerup Initialization"
+
+;	This module contains the power up initialization code for Rigel.
+
+;	At power up, the microcode must assure that:
+;
+;		1.  MAPEN is cleared (memory management is disabled)
+;		2.  PSL is initialized to a known state	=	041F0000
+;		3.  ASTLVL is initialized to a known state =	4
+;		    (VMPSL is cleared as a side effect)
+;		4.  SISR is initialized to a known state =	0
+;		5.  ICCS<6> is initialized to a known state = 	0
+;		6.  Hardware interrupt requests are cleared
+;		7.  ACCS is initialized to a known state =	0
+;		7.  The console is passed the initial halt code (power up)
+
+;	There is an alternate entry point to this module (CONSOLE.HALT..),
+;	which is used for passing control to the console after an error.  It
+;	does the following:
+;
+;		1.  Saves PC in SAVEPC
+;		2.  Saves PSL in SAVEPSL<31:16,7:0>
+;		3.  Saves MAPEN in SAVEPSL<15>
+;		4.  Saves the halt code in SAVEPSL<13:8>
+;		5.  Saves the PSL valid flag in SAVPSL<14>
+;		6.  Saves SP in the current mode stack pointer
+;		7.  Sets PSL	= 041F0000
+;		8.  Sets PC	= E0040000
+;		9.  Sets MAPEN	= 0
+;		10. Loads SP from the interrupt stack pointer
+;		11. Clears all internal funny flags
+;
+;	An important consideration during powerup is the use of MD registers.
+;	As the MD valid bits may powerup in an indeterminate state, no MD
+;	may be referenced without writing it first.  In addition, there must
+;	be at least one microinstruction between the first W-bus write of an
+;	MD and a subsequent read.  If an MD, whose valid bit is clear, is
+;	written and then read in the next microinstruction, the reference
+;	will stall the entire pipeline, preventing the MD write from completing,
+;	and resulting in deadlock.  The first cycle assertion that results
+;	from a LOAD VIBA AND PC/DECODER NEXT sequence will set all MD valid
+;	bits and resolve the potential deadlock condition.
+
+.bin
+.TOC	"	Powerup Entry Point"
+
+
+;	Power up sequence for Rigel.
+
+POWERUP..:
+	;********** Hardware Dispatch **********;
+	[ICCS..SISR] <-- [0FF]000000,		; clear interrupt latches
+	DISABLE IB PREFETCH			; disable prefetching
+
+;= AT POWERUP..+1
+	;---------------------------------------;
+	[ICCS..SISR] <-- 00[0BF]0000,		; clear remaining interrupt latches,
+						; write iccs<6> and sisr<15:1> to 0
+	ABORT TRAP				; clear powerup trap state
+
+	;---------------------------------------;
+	[ASTLVL] <-- [04]000000,		; set ASTLVL (clear VMPSL)
+	SET 30 BIT PA MODE,			; force 30-bit PA mode
+	CALL [SELFTEST]				; do powerup selftest
+
+	;---------------------------------------;
+	CONSOLE HALT [ERR.PWRUP]		; power up, invoke console
+.TOC	"	Console Halt Entry Point"
+
+
+;	Console halt entry point.
+
+;	At this point,
+;		SAVEPSL<13:8>	=	console halt code (via CONSOLE HALT macro)
+;		SAVEPSL<31:14,7:0> =	0
+
+CONSOLE.HALT..:
+CONSOLE.HALT:
+	;---------------------------------------;
+	[SC] <-- [MAPEN] LSH [15.],		; [1] position mapen<0> to bit <15>
+	DISABLE IB PREFETCH			; make sure prefetch is off
+
+;= AT 6A2					; Constrain to allow patch at SPEC.AV.REG..
+	;---------------------------------------;
+	[SAVEPSL] <-- [SAVEPSL] OR [SC]		; [2] include mapen<0> in savpsl<15>
+
+	;---------------------------------------;
+	[SAVEPSL] <-- [PSL] OR [SAVEPSL]	; [3] include psl<31:16,7:0>
+
+	;---------------------------------------;
+	[MAPEN] <-- S[K0],			; [4] clear MAPEN
+	WRITE ODD PARITY,			; initialize to write odd parity
+	ABORT TRAP,				; clear trap state
+	CALL [END.OPTIMIZED.WRITE]		; [5] force off optimized writes
+
+	;---------------------------------------;
+	[SAVEPC] <-- [PC],			; [6] save current PC
+	FLUSH WRITE BUFFERS,			; push writes to memory
+	CASE [PSL26-24] AT [CONSOLE.PSL.000]	; case on current PSL<26:24>
+
+;	Console halt, continued.
+;	PC, PSL, MAPEN saved, MAPEN off.
+;	Save current stack.
+
+;= ALIGNLIST 000*	(CONSOLE.PSL.000,	CONSOLE.PSL.001,
+;=			 CONSOLE.PSL.010,	CONSOLE.PSL.011,
+;=			 CONSOLE.PSL.100,	CONSOLE.PSL.101,
+;=			 CONSOLE.PSL.110,	CONSOLE.PSL.111)
+
+CONSOLE.PSL.000:
+	;---------------------------------------; psl<26:24> = 000:
+	[KSP] <-- [SP],				; save SP in KSP
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.001:
+	;---------------------------------------; psl<26:24> = 001:
+	[ESP] <-- [SP],				; save SP in ESP
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.010:
+	;---------------------------------------; psl<26:24> = 010:
+	[SSP] <-- [SP],				; save SP in SSP
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.011:
+	;---------------------------------------; psl<26:24> = 011:
+	[USP] <-- [SP],				; save SP in USP
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.100:
+	;---------------------------------------; psl<26:24> = 100:
+	[IS] <-- [SP],				; save SP in ISP
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.101:
+	;---------------------------------------; psl<26:24> = 101:
+	[SAVEPSL] <-- [SAVEPSL] OR 0000[40]00,	; mark corrupted PSL, set SAVEPSL<14>
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.110:
+	;---------------------------------------; psl<26:24> = 110:
+	[SAVEPSL] <-- [SAVEPSL] OR 0000[40]00,	; mark corrupted PSL, set SAVEPSL<14>
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+CONSOLE.PSL.111:
+	;---------------------------------------; psl<26:24> = 111:
+	[SAVEPSL] <-- [SAVEPSL] OR 0000[40]00,	; mark corrupted PSL, set SAVEPSL<14>
+	GOTO [CONSOLE.LOAD.PSL]			; go load ISP
+
+;	Console halt, continued.
+;	PC, PSL, MAPEN saved, MAPEN off, current SP saved.
+;	Initialize PSL, load new SP and PC, start machine.
+
+CONSOLE.LOAD.PSL:
+	;---------------------------------------;
+	[MD.S1] <-- [0E0]000000			; powerup address<31:24> 
+
+	;---------------------------------------;
+	[SC] <-- [04]000000,			; new PSL<is> = 1
+		sim halt if not powerup		; goto PMCODE for halt processing
+						; 7FE if SAVEPSL<13:8> <> ERR.PWRUP
+						; 7FB if SAVEPSL<13:8> =  ERR.PWRUP
+
+	;---------------------------------------;
+	[MD.S1] <-- [MD.S1] OR 00[04]0000	; powerup address<23:16>
+ 						; >> MD read, S1 set valid > 1 cycle ago
+						; full address = E0040000
+
+;	Rejoin flow here from PMCODE if the powerup code was ERR.PWRUP.
+;	MD.S1 contains the start PC.
+
+CONSOLE.SIM.START:
+	;---------------------------------------;
+	[PSL] <-- [SC] OR 00[1F]0000		; new PSL = 041F0000
+
+	;---------------------------------------;
+	[SP] <-- S[IS],				; load ISP into SP
+	STATE5-4 <-- 0,				; clear all permanent state flags
+	GOTO [POWERUP.START]			; exit thru code in CTRL.MIC
+
+;= END POWERUP
+

@@ -1,0 +1,206 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>MicroVAX</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  MicroVAX II (1985)
+</H1>
+<P>
+MicroVAX (formally MicroVAX II, "code name" uVAX) was DEC's first single
+chip VAX microprocessor, and the first microprocessor in the industry with
+virtual memory management. Bob Supnik was the project manager for the CPU,
+Larry Walker for the FPU. Dan Dobberpuhl was project lead for the CPU, Bob
+Simcoe for the FPU. Rich Witek did the CPU microarchitecture;.Bob Supnik
+wrote the CPU microcode.
+<P>
+MicroVAX was intended to establish an industry standard for 32b processing
+by creating a single-chip VAX microprocessor. To reach this goal, much of
+the complexity of the VAX architecture -- h_floating, commercial instruction
+set, compatibility mode, console, standard peripherals -- was tossed overboard.
+In fact, the initial subset definition included a different memory management
+scheme, primarily to limit the scope of systems built around MicroVAX. When
+the impact of this change on VMS was fully understood, MicroVAX reverted
+to standard VAX memory management.
+<P>
+In addition to subsetting the architecture, MicroVAX cut down the implementation
+complexity as far as possible. There was no support for caching; the processor
+ran in lockstep with memory. The translation buffer (TLB) was only 8 entries
+and contained both system and process entries. All external communications
+-- to memory, to the FPU, and to support chips -- was done over a single
+multiplexed bus, with very simple timing and protocols. Despite all these
+simplifications, MicroVAX ran at 85% to 90% of the performance of the VAX-11/780,
+because of its faster memory access time (400ns vs 1600ns).
+<P>
+The MicroVAX CPU and FPU were implemented in DEC's 3u double-metal NMOS process
+(ZMOS) and ran at 5Mhz. Although faster bins were possible, most system designs
+locked processor and memory timing and could not use faster chips.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/uvax_p.jpg">MicroVAX CPU</A></TD>
+    <TD>DC333</TD>
+    <TD>353x358</TD>
+    <TD>125,000 sites</TD>
+    <TD>The MicroVAX CPU is a high performance, single chip 32b microprocessor
+      that implements a compatible subset of the VAX architecture. Key features
+      include:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      32b internal and external data path
+	    <LI>
+	      Pipelined architecture
+	    <LI>
+	      Instruction prefetch
+	  </UL>
+	<LI>
+	  Subset VAX architecture
+	  <UL>
+	    <LI>
+	      Sixteen 32b general purpose registers
+	    <LI>
+	      175 instructions
+	    <LI>
+	      21 addressing modes
+	    <LI>
+	      6 data types
+	  </UL>
+	<LI>
+	  VAX memory management
+	  <UL>
+	    <LI>
+	      4GB virtual address space
+	    <LI>
+	      64MB physical address space
+	    <LI>
+	      Demand paging
+	    <LI>
+	      Memory protection
+	    <LI>
+	      Four privilege modes
+	  </UL>
+	<LI>
+	  Vectored multi-level interrupts (15 software, 7 hardware)
+	<LI>
+	  Industry compatible external interface
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 2.5W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/uvax_f.jpg">MicroVAX FPU</A></TD>
+    <TD>DC337</TD>
+    <TD>339x272</TD>
+    <TD>34,000</TD>
+    <TD>The MicroVAX FPU is a high performance, single chip floating point processor
+      for the MicroVAX CPU. Its key features are:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      Implements all floating point operations
+	    <LI>
+	      Accelerates integer multiply and divide
+	  </UL>
+	<LI>
+	  f_, d_, and g_floating point format support
+	<LI>
+	  Full VAX floating point instruction set, including ACBf, EMODf, POLYf
+	<LI>
+	  Arithmetic error checking and reporting
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 2.5W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+MicroVAX systems shipped in May, 1985 and were an instant hit. Their low
+price, good performance, small form factor, and full VMS compatibility made
+MicroVAX systems appealing for all kinds of departmental applications, as
+well as OEM and embedded use. Another milestone was the shipment of the
+VAXstation 2000 in 1987, which brought VMS to the desktop. The VAXstation
+outsold all other workstation models that year.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+MicroVAX was not my idea; indeed, it wasn't DEC's idea. In the summer of
+1981, Zilog approached DEC about building a single chip, subset VAX to set
+an industry standard for 32b computing. This idea was so intriguing that
+Roy Moffa formed a MicroVAX Program Office to investigate the business
+implications. As manager of the Advanced Development Group, I joined the
+team to provide technical guidance. The Program team like the idea of a subset
+VAX and an industry standard but wanted a different partner than Zilog. While
+they talked to all the "major" semiconductor players, I worked with Dave
+Cutler and Dick Hustvedt to define the subset. We quickly arrived at a definition
+that left out d_ and h_floating point, the commercial instructions, the console,
+and all the standard peripherals, and that changed system space from virtual
+to physical (this limited the size of systems that could be built). I
+also worked with Dan Dobberpuhl (then a consultant to the Advanced Development
+Group) to develop a baseline of what a chip might look like, how big it might
+be, how much it might cost, etc. We used existing architecture and componentry
+from V-11's IE chip to construct a model of MicroVAX in DEC ZMOS, as a comparison
+for proposals from industry partners.
+<P>
+Unfortunately, no proposals were forthcoming. The Program Team was so frustrated
+that it proposed adopting an industry chip (the National NS32032, which hadn't
+shipped) and porting VMS to that. I counterproposed that DEC build the chip
+itself, based on the feasibility work done to date. After a short but heated
+debate, the company's top management approved MicroVAX, and I was told to
+go build it, and quickly.
+<P>
+That was easier said than done. Most of DEC's chip designers were busy finishing
+J-11 or working on V-11. In order to build MicroVAX quickly, I begged and
+borrowed resources and components wherever possible. The core microarchitecture
+of the CPU chip, as well as the main data path, the microsequencer, and parts
+of the instruction decoder, were taken from V-11; the control store, memory
+management unit, and bus interface unit were new. The FPU was a direct lift
+of the J-11 FPA. The <A HREF="pics/uvax_team.jpg">CPU team </A>was assembled
+from consultants (like Dan Dobberpuhl and layout lead Tim Thrush), newcomers
+(MicroVAX was Rich Witek's first architectural assignment, and John Beck's
+first NMOS design), and new hires; the FPU team was equally eclectic in its
+origins. MicroVAX was allocated 2.5 VAX-11/780's for design use; that's
+about half the computing power in a modern optical USB mouse.
+<P>
+The chip taped out at the end of January, 1984, only 21 months after the
+initial proposal, and 19 months after project start. The fab processed the
+lot in record time; but, horrifyingly, the first pass parts didn't function:
+the control store didn't work reliably. Heroic debugging work led by Rich
+Witek enabled the testers to overdrive the control store from test inputs.
+This way, 100 of the 175 instructions, and most of the chip logic, was shaken
+down. Pass 2 taped out, amidst high hopes, in June, 1984.
+<P>
+It didn't work either. Another bug in the control store again prevented
+stand-alone operation. Laser trimming got the chip running on a test bench
+and then in a real system; VMS booted successfully in August, 1984. Nonetheless,
+it would take several more passes to get all the circuit bugs out of the
+chip. Indeed, DEC's ability to simulate large circuits at the time was so
+limited, and the correlation between models and actual process so poor, that
+eventually the design team had to guess about the right values for fixing
+the control store. Fortunately, they guessed right.
+<P>
+MicroVAX was presented at the 1984 International Solid State Circuits Conference. 
+It won the company's outstanding product award for 1986.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

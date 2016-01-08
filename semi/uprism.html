@@ -1,0 +1,152 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>uPrism</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  MicroPrism (1988)
+</H1>
+<P>
+Prism was the first RISC technology program at DEC to reach product development
+status. MicroPrism was a CMOS microprocessor that implemented the Prism
+architecture. Dan Dobberpuhl was the project leader; Rich Witek was the
+architect.
+<P>
+MicroPrism was implemented in 1.5u double-metal CMOS (CMOS2) and operated
+at 50Mhz-62Mhz.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/uprism.jpg">MicroPrism</A></TD>
+    <TD>DC536</TD>
+    <TD>572x375</TD>
+    <TD>294,353</TD>
+    <TD>MicroPrism is a high performance RISC 32b microprocessor. Subject to
+      date dependencies, the chip can issue one 32b instruction every 20ns cycle,
+      achieving a peak performance of 50 MIPS for worst case process and operating
+      conditions. Key features:
+      <UL>
+	<LI>
+	  RISC-like architecture
+	<LI>
+	  64 x 32b general purpose register file
+	<LI>
+	  22 x 32b privileged register file for epicode
+	<LI>
+	  1KB eight-way associative virtual I-cache
+	<LI>
+	  2KB direct-mapped write-through D-cache
+	<LI>
+	  8-entry fully-associative ITLB
+	<LI>
+	  32-entry fully associative DTLB
+	<LI>
+	  Heavily pipelined integer execution unit
+	<LI>
+	  Support for multiprocessors
+	<LI>
+	  64b cache and external interface
+	<LI>
+	  Sychronous external data and address bus with read-and-run and write-and-run
+	  packet protocol, supporting 64b packet transfers between CPU, FPU, and cache
+	  chip at a peak bandwidth of 400MB/s
+      </UL>
+      <P>
+      Power: 9W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+MicroPrism taped out in April, 1988. The entire Prism program was cancelled
+in June, 1988. First pass parts were completed and were shown to be mostly
+functional.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+DEC made numerous attempts to investigate or build RISC systems. Among the
+proposals prior to Prism were
+<UL>
+  <LI>
+    SAFE (a 64b system that would run VMS, proposed by the Large Computer Group)
+  <LI>
+    Titan (a 32b system that ran Unix, prototyped by the Western Research Lab)
+  <LI>
+    Cascade (a 32b system proposed by Dave Cutler's DECWest team)
+  <LI>
+    HR32 (a 32b coprocessor proposed by the Dan Dobberpuhl and Rich Witek).
+</UL>
+<P>
+In 1985, Jack Smith unified all the competing projects and named Dave Cutler
+to lead the resulting program. Dave's team created a new architecture named
+Prism. Prism was initially a 64b RISC system, but it was changed to a 32b
+system with vector and 64b extensions, focused on technical computing. Prism
+had a unified 64 entry register set. It included a concept called epicode
+that implemented privileged operations in normal machine instructions.
+<P>
+Two CPU implementations were started: a mid-range ECL system called Crystal
+(designed at DECWest) and a microprocessor called MicroPrism (designed by
+Semiconductor Advanced Development). Dave Cutler's team was also designing
+a new operating system to support Prism. This operating system offered some
+degree of VMS application compatibility but was more focused on providing
+a robust Unix environment.
+<P>
+From the outset, Prism was beset by difficulties. The two competing VAX ECL
+system teams (Aquarius, later the VAX 9000, and Argonaut, later cancelled)
+viewed Crystal as a competitor. The VMS and Ultrix groups viewed the proposed
+new operating system with suspicion. MicroPrism had to compete for resources
+with CVAX and Rigel. The closure of the architecture spec was delayed by
+questions of 32b vs 64b, commercial versus technical focus, and so
+on. As a result, the uPrism CPU was unable to start full implementation until
+September, 1986. Work on an FPU (derived from the Rigel FPU) and cache controller
+(derived from the Rigel Cache chip) was planned but interrupted by an edict,
+in mid 1987, to make Prism a 64b architecture from the outset. This was rescinded
+a few weeks later, and instead the Crystal systems project was cancelled.
+MicroPrism, the only remaining hardware implementation, was directed to focus
+on high-performance Unix workstations, but the project had been grievously
+delayed. The team scrapped the cache controller and deferred the FPU in order
+to concentrate on the CPU chip, which taped out in April, 1988, months behind
+schedule.
+<P>
+Earlier in 1988, a group of workstation designers in DEC's Palo Alto office,
+fed up with the delays, took matters into their own hands and decided to
+build a Unix workstation around existing Mips chips, using the existing Ultrix
+operating system. In 90 days, they produced a working prototype with a working
+operating system. They then proposed that Prism be cancelled in favor of
+using the Mips architecture. The rationale was that using the Mips chips
+would allow DEC to field a UNIX RISC workstation by January, 1989; since
+MicroPrism's FPU had just been started, using Prism would delay availability
+by a year or more. The competing Mips and Prism proposals were evaluated
+by the company's Executive Committee in June, 1988, and Prism was cancelled.
+Dave Cutler left the company for Microsoft within a year. Dan Dobberpuhl
+and Rich Witek left the Microprocessor Group to work in Advanced Development
+(eventually on EV-4, the first Alpha).
+<P>
+I hadn't had much personal involvement with Prism, up until the very end.
+Running the Microprocessor Group, writing VAX microcode, and trying to avoid
+collateral damage from the VAX ECL system wars, had kept me busy. But as
+part of the runup to the June Executive Committee meeting, I was asked to
+evaluate the competing proposals. In a triumph of analytical purity over
+common sense, I concluded that the Mips proposal would cost less and reach
+the market sooner. For failing to back my own team in its moment of crisis,
+I was barred from higher management roles in the Semiconductor Group. In
+September, 1988, I was "promoted" from manager of the Microprocessor Group
+to Technical Director of Semiconductor Engineering and leader of the Alpha
+Program Office. I did not hold a line management job again for eight years.
+<P>
+MicroPrism was presented at the 1989 International Solid State Circuits
+Conference.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

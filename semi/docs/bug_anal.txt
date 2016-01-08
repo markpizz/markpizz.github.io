@@ -1,0 +1,554 @@
++---+---+---+---+---+---+---+		INTEROFFICE MEMORANDUM
+| d | i | g | i | t | a | l |
++---+---+---+---+---+---+---+
+
+To:	Distribution			Date:	10-Dec-91
+cc:					From:	Bob Supnik
+					Dept:	VSS
+					Ext:	293-5690
+					Loc:	BXB1-2/C04
+					Enet:	HUMAN::SUPNIK
+
+Subj:	VLSI CPU Bugs: A Comparative Analysis (Revised)
+This memorandum compares the bugs found during the debug of MicroVAX,
+CVAX, Rigel, and NVAX in terms of overall numbers, distribution by pass,
+bug type, etc.
+
+1 MicroVAX Bugs
+
+"Pass" is the pass in which the bug was fixed.
+"Type/Fix" is the type of bug and type of fix,
+where l = logic, c = circuit, la = layout, m = microcode.
+
+Description			[Section] Diagnosis	       Pass Type/Fix
+-----------			-------------------	       ---- --------
+33.MTPR ASTLVL checks src<31:0>	[Ucode] Bug in MTPR; ECO	na   m/spec
+   instead of src<2:0>		SRM
+
+32.MDM randomly crashes with	[M Box] Circuit race;		5.1  c/c
+   FATAL KERNEL ERROR msg	fix circuit
+
+31.DMR deassertion before DMG	[BIU] Sequencing error;		na   l/spec
+   hangs chip			change spec
+
+30.DMA trashes FPU microtrap	[Useq] Sequencing error;	5.0  l/l
+   sequencing			fix logic
+
+29.BBC #sh literal with worst	[E Box] Race condition on	4.1  c/m
+   case DAL noise fails		ALU "fast path"; fix in
+				microcode
+
+28.Interrupted MOVCx faults	[Ucode] Bug in interrupt	4.1  m/m
+   as reserved instruction	passive release flows; fix
+				in microcode
+
+27.PSL.Z still too slow at	[E Box] Bad circuit		4.0  c/c
+   high temperature		configuration; fix circuit
+
+26.AS L randomly tristates	[Clock] Noise on P45 clock;	4.0  c/c
+				fix circuit
+
+25.DMA trashes PTE read		[BIU/M Box] Interaction		4.0  l/l
+				problem; fix logic
+
+24.DMA trashes CS<2> assertion	[BIU] uTEST interaction;	4.0  l/l
+				fix logic
+
+23.RLOG failure on push of	[E Box] Charge sharing in	3.5  c/c
+   five specifiers		hold circuit; fix circuit
+
+22.Random failures relating	[M Box] MME read control latch	3.4  c/c
+   to corruption of AW_Bus<0>	misconfigured; fix circuit
+
+21.Random ACV/TNV failures,	[M Box] TB race condition;	3.3  c/c
+   voltage sensitive		fix circuit
+
+20.I Box zero extender noise	[I Box] Precharge levels low;	3.3  c/c
+   sensitive			fix circuit
+
+19.INCL of 7FFFFFFF gives	[E Box] PSL.Z circuit too	3.2  c/c
+   psl cc's = 1110		slow; fix circuit
+
+18.Power bussing to lower	[E Box] Redo power bussing	3.1  la/la
+   ALU inadequate
+
+17.CS<2> doesn't meet chip	[Pads] Fix circuit		3.0  c/c
+   spec
+
+16.Strobes don't meet chip	[Pads] Fix circuit		3.0  c/c
+   spec
+
+15.Byte mask incorrect on	[BIU] Logic error;		3.0  l/l
+   second cycle of unaligned	fix logic
+   word
+
+14.Write probe with m=0 and 	[M Box] Logic error; fix	3.0  l/l+m
+   ACV/TNV takes ACV/TNV	logic and microcode
+   microtrap
+
+13.Interlocked queue instr	[E Box] Logic error; fix	3.0  l/m
+   give wrong status on mem	in microcode
+   mgt error
+
+12.Reset fails at low		[Useq] Using wrong clock;	3.0  l/l
+   frequency			fix logic
+
+11.LDPCTX on kernel stack	[Ucode] Faulty SRM		3.0  m/m
+   stack doesn't work		description; fix microcode
+
+10.RLOG failure on push of	[E Box] Charge sharing in	3.0  c/c
+   more than one specifier	end circuit; fix circuit
+
+9. Control Store doesn't work	[CS] Redesign precharge, mux's,	3.0  c/c
+				sense amps
+				Decouple reference voltage	2.2  c/c
+				Adjust timeout, reference	2.1  c/c
+				Redesign timeout		2.0  c/c
+
+8. G_floating instructions	[Ucode] Bug in indexed		2.2  m/m
+   with indexed immediate	immediate flows; fix microcode
+   operands treated as
+   F_floating
+
+7. Restarted POLYG treated	[Ucode] Bug in POLYf		2.2  m/m
+   as POLYF			restart; fix microcode
+
+6. Random mismatches in TB	[M Box] Coupling problem at	2.0  c/c
+				FF; fix circuit
+
+5. WR L misasserted on writes	[M Box] Race condition in	2.0  c/c
+				decoding mem reqs; fix circuit
+
+4. Random macroinstruction	[E Box] Coupling problem in	2.0  c/c
+   failures			literal generation; fix circuit
+
+3. Memory to register instrs	[I Box] Coupling problem in	2.0  c/c
+   screw up prefetcher		delta PC; fix circuit
+
+2. G_floating treated as rsrvd	[I Box] FD logic misprogrammed;	2.0  la/la
+   instruction			fix layout
+
+1. Interrupts missequence on	[Intr] Identified interrupt	2.0  l/l
+   passive release		not screened by IPL; fix logic
+
+[There were two abortive minipasses, 1.1 and 1.6, which were not fabricated.]
+
+2 CVAX Bugs
+
+"Pass" is the pass in which the bug was fixed.
+"Type/Fix" is the type of bug and type of fix,
+where l = logic, c = circuit, la = layout, m = microcode.
+
+Description			[Section] Diagnosis	       Pass Type/Fix
+-----------			-------------------	       ---- --------
+36.Write errors fetch wrong     [BIU] Write cycle terminated	shr  l/l
+   SCB vector.			with ERR_L for just one sample
+				point corrupts next external
+				bus cycle.
+
+35.MFPR to memory from non-	[Ucode] Path does not		shr  m/m
+   existent register writes	restore VA.
+   wrong memory location.
+
+34.Interrupt passive release	[Ucode] POLYf does not		4.3  m/m
+   during POLYf causes		back up PC on passive
+   instruction to be skipped	release
+
+33.MTPR ASTLVL checks src<31:0>	[Ucode] Bug in MTPR; ECO	na   m/spec
+   instead of src<2:0>		SRM
+
+32.Cache parity error		[Cache] Race condition		4.2  c/c
+				in parity circuit;
+				fix circuit
+
+31.Interrupt passive release	[M Box] Aborted prefetch	4.2  l/l
+   misreported			followed by TB miss followed
+				by passive release reports
+				wrong error; fix logic
+
+30.Write machine check		[BIU] Cache prefetch hit	4.2  l/l
+   misreported			followed by write error
+				reports wrong error; fix logic
+
+29.DMA grant following retried	[BIU] Simultaneous microprobe	3.2  l/l
+   write hangs chip		with TB miss and invalidate
+				while retried write pending
+				gets state machines out of
+				sync; fix logic
+
+28.Cache invalidate lost	[BIU] Simultaneous microprobe	3.2  l/l
+				with TB miss and invalidate
+				loses invalidate; fix logic
+
+27.Cache invalidate lost	[BIU] Simultaneous EPR		3.1  l/l
+				I/O and invalidate loses
+				invalidate; fix logic
+
+26.Branch to self starves	[Cache] Refresh analysis	3.0  l/l
+   cache			incorrect; add refresh counter
+
+25.POPR to SP fails		[Ucode] Bug; fix microcode	3.0  m/m
+
+24.Cache row 63 leaks at high	[Cache] Array error; fix	3.0  c+la/la
+   temperature			layout
+
+23.Interrupts inputs don't	[Pads] Noise; fix circuit	3.0  c/c
+   meet DC spec
+
+22.Cache not coherent		[BIU] Cache updates not		3.0  l/l
+				blocked on I/O space and EPR
+				write hits; fix logic
+
+21.Macrocode missequences	[Ucode] Interrupts in string	2.2  m/l
+				instructions violate		3.0  m/m
+				microcode restriction;
+				fix microcode
+
+20.Powerup fails		[I Box] Spurious polygon in	2.1  la/la
+				database; fix layout
+
+19.PROBEx fails			[M Box] Charge sharing induced	2.0  c/c
+				by minipass 1.3/1.4
+
+18.CALLx fails			[Ucode] Stack frame across	2.0  m/m
+				page boundary not handled
+				correctly; fix microcode
+
+17.Data used as prefetch	[BIU] Simultaneous prefetch,	2.0  l/l
+   address			read broadcast, DMA confuses
+				BIU; fix logic
+
+16.CCTL_L misinterpreted	[BIU] Latch not cleared;	2.0  l/l
+   or cache invalidate lost	fix logic
+   on parity error
+
+15.AS_L power bussing		[Pads] Fix layout		2.0  la/la
+   inadequate
+
+14.Control store power bussing	[CS] Fix layout			2.0  la/la
+   inadequate
+
+13.Cache power bussing		[Cache] Fix layout		1.4  la/la
+   inadequate
+
+12.MFPR from external register	[Ucode] Bug; fix microcode	2.0  m/m
+   to memory writes wrong
+   memory location
+
+11.ERR L to MTPR microtraps,	[BIU] Logic error; fix logic	1.3  l/l
+   loses prefetch						2.0  l/l
+
+10.IAK reported as read		[BIU] MIB misdecode; fix logic	1.3  l/l
+
+9. Coprocessor signal asserts	[BIU] Fast path; fix circuit	1.3  c/c
+   early
+
+8. TB miss reported as xpage	[M Box] Race in cross page	1.3  c/c
+				logic; fix circuit
+
+7. Instructions missequence	[E Box] Race in condition	1.3  c/c
+				code logic; fix circuit
+
+6. Immediate data is lost	[I Box] STALL interacts		1.3  l/l
+				incorrectly with CASE.ID.LOAD
+
+5. Misdecode of 2byte opcode	[I Box] SECOND_IID_EXPECTED	1.3  l/l
+				not reset by zero operand instr
+
+4. +4 adder fails		[M Box] Charge sharing; fix	1.2  c/c
+				circuit
+
+3. Low order address bits	[M Box] Latch ratio error;	1.2  c/c
+   always 11			fix circuit
+
+2. Modify intent reported as	[I Box] Incorrect gate; fix	1.2  l/l
+   ordinary read		logic
+
+1. CASE.LOAD.ID, DEC.NEXT fail	[I Box] Precharge race		1.2  c/c
+				condition in self-timed PLA;
+				fix circuit
+
+[There were two abortive minipasses, 1.1 and 2.3, which were not fabricated.
+Pass 4.2 was the first 4.x pass, 4.0 and 4.1 were superceded prior to PG.]
+
+3 Rigel Bugs
+
+"Pass" is the pass in which the bug was fixed.
+"Type/Fix" is the type of bug and type of fix,
+where l = logic, c = circuit, la = layout, m = microcode.
+
+Description			[Section] Diagnosis	       Pass Type/Fix
+-----------			-------------------	       ---- --------
+16.INSV to register with pos	[Ucode] Wrong alignment		-    m/-
+   = 800000x fails to fault	constraint; waiver
+
+15.MOVC5 with srclen = dstlen   [Ucode] Specifier read target   6.0  m/m
+   = 0 and fill character in	never "consumed"; fix ucode
+   memory corrupts next instr
+
+14.Byte masks wrong on		[BIU] Logic error; fix logic	5.0  l/l
+   I/O space I stream reads
+
+13.Multiprocessor crashes	[Ucode] Race condition in	5.0  m/m
+   with PC wrong by +/-4	IB TBM routine; fix ucode
+
+12.MULLx delivers wrong		[Ucode] MULix, field		4.0  m/m
+   result			violates ucode restriction;
+				fix ucode
+
+11.Interrupt in middle of	[I Box] Race condition;		3.0  c/c
+   instruction			fix circuit
+
+10.PC wrong when halted		[Ucode] BACKUP PC not		3.0  m/m
+				restored; fix microcode
+
+9. Stack writes corrupted	[E Box] KDL latches not		3.0  c/c
+				static; fix circuit
+
+8. Prefetch error loops		[Ucode] Routine uses wrong	3.0  m/m
+				register; fix microcode
+
+7. Prefetch error reports	[Ucode] Routine violates	2.1  m/m
+   wrong PC			restriction; fix microcode
+
+6. Possible I/O latchup		[Pads] Output buffer		2.0  c/c
+				predriver needs guard-
+				banding; fix circuit
+
+5. Random data corruption	[E Box] Coupling in data	2.0  c/c
+				rotator; fix circuit
+
+4. Illegal opcode can take	[I Box] Bug; fix logic		2.0  l/l
+   precedence over trace trap
+
+3. Flushing primary cache	[Pcache] Valid bits set		2.0  l/l
+   doesn't work			incorrectly in columns
+				1 and 3; fix logic
+
+2. MVFP does not check for	[Ucode] Bug; fix microcode	2.0  m/m
+   vector unit disabled at
+   end of instruction
+
+1. Current mode encodings	[Ucode] Bug; fix microcode	2.0  m/m
+   incorrect in vector
+   instruction packets
+
+4 NVAX Bugs
+
+"Pass" is the pass in which the bug was fixed.
+"Type/Fix" is the type of bug and type of fix,
+where l = logic, c = circuit, la = layout, m = microcode.
+
+Description			[Section] Diagnosis	       Pass Type/Fix
+-----------			-------------------	       ---- --------
+18.System can't run with	[C Box] Flip_ecc incorrectly	3.0    l/l
+   uninitialized Bcache.	asserted; fix logic
+
+17.Primary cache not enabled	[Ucode] PCSTS<lock> not		3.0    u/u
+   during burnin.		cleared by powerup for
+				burnin flows; fix microcode
+
+16.Console halt misexecutes.	[Ucode] VIC must be flushed	3.0    u/u
+				on entry to console; fix 
+				microcode
+
+15.S3 stall timeout		[E Box] Floating point		2.0    l/l
+				instruction with PSL<fpd>
+				set deadlocks; fix logic
+
+14.POLYf emulation fails	[E Box] POLYf with PSL<fpd>	2.0    l/m
+				set dispatched incorrectly;
+				creates new restriction; fix
+				in microcode
+
+13.Wrong PC on console HALT	[Ucode] State rolled back	2.0    m/m
+   when PSL<fpd> set		twice; fix microcode
+
+12.Interlocked instructions	[C Box] Bug; fix logic		2.0    l/l
+   fail in ETM
+
+11.S3 stall timeout		[M Box] Infinite loop on	2.0    l/m
+				double TB miss during TBIA;
+				creates new restriction; fix
+				in microcode
+
+10.Hang on transition into	[C Box] Bug; fix logic		2.0    l/l
+   ETM (error transition mode)
+
+9. PC = 0 on exception stack	[I Box] PAQUEUE overflows	2.0    l/l
+				after JSR followed by JMP;
+				fix logic
+
+8. IPR writes corrupt PCache	[PCache] Race condition at	2.0    l/l
+				cycles > 20ns; fix logic
+
+7. Incorrect branching		[M Box] PAQUEUE status not	2.0    l/m
+				updated soon enough after
+				branch mis-predict; creates
+				new restriction; fix in
+				microcode
+
+6. Unexpected RDE handled	[C Box] Bug; fix logic		2.0    l/l
+   incorrectly
+
+5. Test clocks sensitive to	[Pads] Differential amp is	2.0    c/c
+   low VDD			voltage sensitive; fix circuit
+
+4. MULL2 gets wrong PSL<v>	[Ucode] Multiplier rather	2.0    m/m
+				than multiplicand sign
+				tested; fix microcode
+
+3. Incorrect pad ring		[Pads] Eleven power/ground	2.0    la/la
+				pads wired wrong; fix layout
+
+2. System deadlock on INSV	[Ucode] Restriction violation;	2.0    m/m
+				fix microcode
+
+1. System deadlock on floating	[F Box-E Box-M Box] Premature	2.0    l/l
+   point operation.		destination fault on F Box S4
+				bypass abort; fix E Box logic
+
+5 Analysis
+
+Total passes+minipasses (CVAX includes CMOS-2 shrink bug fix pass):
+
+	uVAX		CVAX		Rigel		NVAX
+	----		----		-----		----
+	5+11		5+11		6+1		2+0
+
+
+Bugs found per pass:
+
+	pass:	1	2	3	4	5
+		-	-	-	-	-
+uVAX		 6	11	10	3	3
+CVAX		19	 7	 7	3
+Rigel		 7       4	 1	2	2
+NVAX		15	 3
+
+
+Breakdown of bugs by error type:
+
+	type:	logic	circuit	layout	ucode	spec change
+		-----	-------	------	-----	-----------
+uVAX errors	  9	   17	   2	  5	    0
+uVAX fixes	  7	   16	   2	  5	    2
+
+CVAX errors	 15	    9	   5	  7	    0
+CVAX fixes	 15	    9	   5	  6	    1
+
+Rigel errors	  3	    4	   0	  9	    0
+Rigel fixes	  3	    4	   0	  8	    1
+
+NVAX errors	 11	    1	   1	  5	    0
+NVAX fixes	  8	    1	   1	  8	    0
+
+
+Breakdown of microcode bugs by type:
+
+			uVAX	CVAX	Rigel	NVAX	comment
+			----	----	-----	----	-------
+Indexed immediate	  1				ECO'd out of SRM
+Interrupt passive rel	  1	  1
+Interrupt to string		  1
+LDPCTX			  1				ECO'd out of SRM
+POLYG restart		  1				ECO'd out of SRM
+CALLx cross page		  1			Improved in AXE V15
+POPR to SP			  1			Added to AXE V14
+MFPR external to memory		  2			Added to HCORE
+MTPR ASTLVL		  1	  1			Added to AXE V15
+Vectors					  2		Added to AXE V15
+IB prefetch error			  2
+IB TB miss error			  1
+Halt PC when FPD set			  1	  1
+Restriction violation			  2
+INSV reserved operand			  1
+INSV specifier combination			  1	Found by MAX after PG
+MULL2 PSL<v> result				  1
+VIC flushing on HALT				  1
+Powerup initialization				  1
+
+Breakdown of bugs by chip section:
+
+		total	type:	logic	circuit	layout
+		-----		-----	-------	------
+uVAX I Box	  3			   2	   1
+CVAX I Box	  5		  3	   1	   1
+Rigel I Box	  2		  1        1
+NVAX I Box	  1		  1
+
+uVAX E Box	  8		  1	   6	   1
+CVAX E Box	  1			   1
+Rigel E Box	  2			   2
+NVAX E Box	  3		  3
+ (includes Useq/CS/interrupts)
+
+uVAX M Box	 5.5		 1.5	   4
+CVAX M Box	  5		  1	   4
+Rigel M Box
+NVAX M Box	  2		  2
+
+uVAX BIU	 3.5			  3.5
+CVAX BIU	 11		 10	   1
+Rigel BIU	  1		  1
+NVAX C Box	  4		  4
+
+uVAX Useq/CS	  3		  2	    1
+CVAX Useq/CS	  1				   1
+Rigel Useq/CS
+
+uVAX Clocks	  1			   1
+CVAX Clocks
+Rigel Clocks
+
+uVAX Interrupts	  1		  1
+CVAX Interrupts
+Rigel Interrupts
+
+uVAX Pads	  2			   2
+CVAX Pads	  2			   1	   1
+Rigel Pads	  1			   1
+NVAX Pads	  2			   1	   1
+
+CVAX Cache	  4		  1	   1	   2
+Rigel Cache	  1		  1
+NVAX Pcache	  1		  1
+
+NVAX F Box
+
+
+Breakdown of circuit design errors:
+
+			uVAX		CVAX		Rigel		NVAX
+			----		----		-----		----
+coupling		  4		  0		  1		  0
+configuration/ratio	  3		  1		  1		  1
+race			  3		  4		  1		  0
+speed 			  3		  1		  0		  0
+charge sharing		  2		  2		  0		  0
+noise			  1		  1		  0		  0
+latchup			  0		  0		  1		  0
+			 --		 --		 --		 --
+total			 16		  9		  4		  1
+
+7 Conclusions
+
+o The significantly increased verification efforts on Rigel and NVAX were
+  repaid by significantly reduced bug rates.
+o The patchable control store on NVAX allowed debug on first pass parts
+  to proceed further and find more problems.
+o The halving of the number of circuit bugs from MicroVAX to CVAX, and
+  the further halving from CVAX to Rigel, demonstrates the relative
+  simplicity of CMOS vs NMOS circuit design, and the value of improved
+  circuit checking tools.
+o The high degree of functionality on CVAX pass 1 allowed for a classical
+  "descending exponential" bug rate.  Nonetheless, the tail proved very long,
+  with several bugs showing up in pass 4.  Rigel showed a similar curve,
+  with several bugs showing up in pass 4 and 5.  Only NVAX finally broke
+  through this barrier.
+o Interrupts, errors, passive release, halt, and other boundary
+  conditions must be explicitly checked with processor specific DVTs.
+o The microcode bug rate actually got worse, despite better tools, because
+  of the addition of new functionality (eg, vectors, IB error handling, etc)
+  and new microarchitectural complexity.
+

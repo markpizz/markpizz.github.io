@@ -1,0 +1,53 @@
+.TOC	"HACK4IPLA.MIC	- Special hack file for separate assemble of IPLA"
+.TOC	"Revision 2.0"
+
+;	Rich Witek, Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 02	12-Nov-82	[RMS]	Editorial changes
+; 01	18-Aug-82	[RTW]	Initial edit for MicroVAX
+
+.TOC	"	Introduction"
+
+; This file is included in a separate assembly of the IPLA microcode.
+; It causes "U space" to have a value so the .ULD file has a format of:
+;
+;		[addr]I=value
+;
+; for example:
+;
+;		[1000]I=0009D100E0500
+;
+; This is all so the IPLATEXT.PLI postprocessor works in converting
+; the ULD file to a DECSIM MEM file.
+
+.bin			; restore binary output
+.UCODE			; set to U space
+.WIDTH/5		; set width for next dummy microword
+HACK4IPLA/=<4:0>	; define an unused macro
+HACK4IPLA/2		; invoke it so there is some data in U space 
+.ICODE			; switch back to I space

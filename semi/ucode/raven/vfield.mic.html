@@ -1,0 +1,1011 @@
+.TOC	"VFIELD.MIC -- Variable-Length Bit Field Instructions"
+.TOC	"Revision 2.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    2 16-Jan-90 RMS	Editorial changes.
+;    1 21-Dec-89 RMS	Fixed bug in INSV register.
+; (2)0 16-Nov-89 RMS	Revised for simplified decoder.
+;    5 13-Nov-89 RMS	Editorial changes.
+;    4 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    3 08-Jul-89 RMS	Moved SC load out of harms way.
+;    2 05-Jul-89 RMS	Moved state flag clear out of harms way.
+;    1 02-Jul-89 RMS	Editorial changes.
+; (1)0 12-Jun-89 RMS	Revised right shifts and for release to CMS.
+;    3 11-Jun-89 RMS	Revised register extract algorithm.
+;    2 03-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 12-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN VFIELD
+.nobin
+
+;	This module implements the variable-length bit field class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	EC	 CMPV pos.rl, size.rb, base.vb, {field.rv}, src.rl		* * 0 *		rsv
+;	ED	 CMPZV pos.rl, size.rb, base.vb, {field.rv}, src.rl		* * 0 *		rsv
+;
+;	EE	 EXTV pos.rl, size.rb, base.vb, {field.rv}, dst.wl		* * 0 -		rsv
+;	EF	 EXTZV pos.rl, size.rb, base.vb, {field.rv}, dst.wl		* * 0 -		rsv
+;
+;	EB	 FFC startpos.rl, size.rb, base.vb, {field.rv}, findpos.wl	0 * 0 0		rsv
+;	EA	 FFS startpos.rl, size.rb, base.vb, {field.rv}, findpos.wl	0 * 0 0		rsv
+;
+;	F0	 INSV src.rl, pos.rl, size.rb, base.vb, {field.wv}		- - - -		rsv
+;
+.TOC	"	FFS, FFC, CMPV, CMPZV, EXTV, EXTZV"
+
+;	These instructions find the first set/clear bit in, compare an operand to, or
+;	extract, a variable-length bit field.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----		--	--------   -----
+;	FFS		EA	dst.wl <-- first one in			4	rrvw/lbbl	iiii	FFS	   --
+;					field(pos.rl, size.rb, base.vb)
+;	FFC		EB	dst.wl <-- first zero in		4	rrvw/lbbl	iiii	FFC	   --
+;					field(pos.rl, size.rb, base.vb)
+;
+;	CMPV		EC	sext{field(pos.rl, size.rb, base.vb)} -	4	rrvr/lbbl	jizj	CMPV	   --
+;					src2.rl
+;	CMPZV		ED	zext{field(pos.rl, size.rb, base.vb)} -	4	rrvr/lbbl	jizj	CMPZV      --
+;					src2.rl
+;
+;	EXTV		EE	dst.wl <--				4	rrvw/lbbl	iiip	EXTV	   --
+;					sext{field(pos.rl, size.rb, base.vb)}
+;	EXTZV		EF	dst.wl <--				4	rrvw/lbbl	iiip	EXTZV	   --
+;					zext{field(pos.rl, size.rb, base.vb)}
+;
+;	Entry conditions from specifier flows:
+;
+;		W0	=	first (position) operand
+;		W2	=	second (size) operand
+;		W5'W4	=	third (base) operand, if register
+;		W4	=	address of third (base) operand, if memory
+;		W6	=	fourth (src2) operand, if CMPxV memory
+;		W6 = VA	=	address of fourth (dst) operand, if EXTxV, FFx memory
+;		RN	=	register number of fourth specifier
+;		DL	=	data length of fourth operand (longword)
+;		STATE<2> =	1 if field in register
+;			 =	0 if field in memory
+;
+;	Exit conditions (EXTV, EXTZV, FFS, FFC):
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;		(CMPV, CMPZV):
+;		The PSL condition codes are set.
+;
+;	Condition codes:
+;		(FFS, FFC)		(CMPV, CMPZV)		(EXTV, EXTZV)
+;		N <-- 0			N <-- field LSS src2	N <-- dst LSS 0
+;		Z <-- {bit not found}	Z <-- field EQL src2	Z <-- dst EQL 0
+;		V <-- 0			V <-- 0			V <-- 0		[Integer overflow trap disabled.]
+;		C <-- 0			C <-- field LSSU src2	C <-- C
+;
+;	Tradeoffs:
+;		Consolidated entry points save 14 microwords but cost a cycle in EXTxV.
+;
+.bin
+
+;	CMPV, CMPZV operation:
+;
+;		sext (zext){field(pos.rl, size.rb, base.vb)} - src2.rl
+
+CMPV:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[W3] <-- SEXT [W3] LSH (SC 1-32), LONG,	; [10] right justify and sign extend field
+	GOTO [CMPV.EXIT]			; join common code
+
+CMPV.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[W3] <-- SEXT [W3] LSH (SC 1-32), LONG,	; [8] right justify and sign extend field
+	GOTO [CMPV.R.EXIT]			; join common code
+
+CMPZV:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[W3] <-- ZEXT [W3] LSH (SC 1-32), LONG	; [10] right justify and zero extend field
+
+CMPV.EXIT:
+	;---------------------------------------;
+	[WBUS] <-- (-[W6] + [W3]), LONG,	; [11] compare field to src2
+	SET PSL CC (JIZJ),			; set psl cc's, psl map is jizj
+	LAST CYCLE				; decode next instruction
+
+CMPZV.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[W3] <-- ZEXT [W3] LSH (SC 1-32), LONG	; [8] right justify and zero extend field
+
+CMPV.R.EXIT:
+	;---------------------------------------;
+	[WBUS] <-- (-[Rrn] + [W3]), LONG,	; [9] compare field to src2
+	SET PSL CC (JIZJ),			; set psl cc's, psl map is jizj
+	LAST CYCLE				; decode next instruction
+
+;	EXTV, EXTZV operation:
+;
+;		dst.wl <-- sext (zext){field(pos.rl, size.rb, base.vb)}
+
+EXTV:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- SEXT [W3] LSH (SC 1-32), ; [10] right justify and
+	LONG,					; sign extend field
+	SET PSL CC (IIIP),			; set psl cc's, psl map is iiip
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+EXTV.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[Rrn] <-- SEXT [W3] LSH (SC 1-32), LONG,; [8] right justify and sign extend field
+	SET PSL CC (IIIP),			; set psl cc's, psl map is iiip
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+EXTZV:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- ZEXT [W3] LSH (SC 1-32), ; [10] right justify and
+	LONG,					; zero extend field
+	SET PSL CC (IIIP),			; set psl cc's, psl map is iiip
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+EXTZV.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[Rrn] <-- ZEXT [W3] LSH (SC 1-32), LONG,; [8] right justify and zero extend field
+	SET PSL CC (IIIP),			; set psl cc's, psl map is iiip
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+;	FFS, FFC operation:
+;
+;		dst.wl <-- pos of first one (zero) bit in {field(pos.rl, size.rb, base.vb)}
+
+FFS:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+FFX:
+	;---------------------------------------;
+	[W3] <-- [K1]!![W3] LSH (SC 1-32),	; [10] right justify field, guard with '1'
+	LONG,					; load field<3:0> into Wbus<3:0>
+	STATE.0 <-- 1,				; flag memory destination
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.CONTINUE]			; join common flows
+
+FFS.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+FFX.R:
+	;---------------------------------------;
+	[W3] <-- [K1]!![W3] LSH (SC 1-32),	; [8] right justify field, guard with '1'
+	LONG,					; load field<3:0> into Wbus<3:0>
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.CONTINUE]			; join common flows
+
+FFC:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[W3] <-- [K0] + NOT [W3], LONG,		; [10] complement 1's and 0's
+	GOTO [FFX]				; join FFS code
+
+FFC.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W2], BYTE,	; [1] calc 32 - size, test size > 32
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CALL [FIELD.EXTRACT]			; extract left justified field to W3
+
+	;---------------------------------------;
+	[W3] <-- [K0] + NOT [W3], LONG,		; [8] complement 1's and 0's
+	GOTO [FFX.R]				; join FFS code
+
+;	FFx, continued.
+;	Prepare to case through bits.
+
+;	At this point,
+;		W0	=	position
+;		W2	=	size
+;		W3	=	right justified field, guarded with leading '1'
+;		W6	=	address of fourth (dst) operand, if memory
+;		RN	=	register number of fourth specifier
+;		WBUS	=	field<3:0> in cycle [10]
+;		STATE<1:0> =	<field size is zero><destination is memory>
+
+;	The upcoming bit search can only fail if (FFS) field = 00..00 (FFC) field = 11..11.
+;	In FFC, the field was complemented BEFORE right shifting.  Garbage to the right of
+;	the field was shifted off, and a guard bit was shifted in.
+
+FFX.CONTINUE:
+	;---------------------------------------;
+	[W3] <-- [K1]!![W3] RSH [4], LONG,	; [11] load field<7:4> into Wbus<3:0>
+						; bring in guard '1' in case size = 32
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [FFX.CONTINUE.1]		; case on field size flag
+
+;= ALIGNLIST **01*	(FFX.CONTINUE.1,	FFX.ZERO)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+FFX.CONTINUE.1:
+	;---------------------------------------; state<1> = 0:
+	VA <-- [K0],				; [12] VA will count position
+	[W3] <-- [K0]!![W3] RSH [4], LONG,	; load field<11:8> into Wbus<3:0>
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [FF.3.0.0000]			; case on Wbus<3:0> from cycle [10]
+
+FFX.ZERO:
+	;---------------------------------------; state<1> = 1:
+	VA <-- [K0], LONG,			; [12] VA is final position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; abort search
+
+;	FFx, continued.
+;	Search field four bits at a time to find set bit.
+
+;	At this point,
+;		W0	=	position
+;		W2	=	size
+;		W3	=	field to search, right shifted 12, known to contain a 1
+;		W6	=	address of fourth (dst) operand, if memory
+;		RN	=	register number of fourth specifier
+;		VA	=	relative position
+;		WBUS	=	field shifted right 4, 8 in pipeline
+;		STATE<1:0> =	<field size is zero><destination is memory>
+
+;= ALIGNLIST 0000*	(FF.3.0.0000,	FF.3.0.0001,	FF.3.0.0010,	FF.3.0.0011,
+;=			 FF.3.0.0100,	FF.3.0.0101,	FF.3.0.0110,	FF.3.0.0111,
+;= 			 FF.3.0.1000,	FF.3.0.1001,	FF.3.0.1010,	FF.3.0.1011,
+;=			 FF.3.0.1100,	FF.3.0.1101,	FF.3.0.1110,	FF.3.0.1111)
+
+FF.3.0.0000:
+	;---------------------------------------; wbus<3:0> = 0000:
+	VA <-- [VA] + 4,			; [13,14,15,...] increment pos by 4 bits
+	[W3] <-- [VA]!![W3] RSH [4], LONG,	; load next 4b of field into Wbus<3:0>
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [FF.3.0.0000]			; case on Wbus<3:0> from cycle [11,12,13...]
+
+FFX.SET.POS:
+FF.3.0.0001:
+	;---------------------------------------; wbus<3:0> = 0001:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.0010:
+	;---------------------------------------; wbus<3:0> = 0010:
+	VA <-- [VA] + 000000[01], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.0011:
+	;---------------------------------------; wbus<3:0> = 0011:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.0100:
+	;---------------------------------------; wbus<3:0> = 0100:
+	VA <-- [VA] + 000000[02], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.0101:
+	;---------------------------------------; wbus<3:0> = 0101:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.0110:
+	;---------------------------------------; wbus<3:0> = 0110:
+	VA <-- [VA] + 000000[01], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.0111:
+	;---------------------------------------; wbus<3:0> = 0111:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.1000:
+	;---------------------------------------; wbus<3:0> = 1000:
+	VA <-- [VA] + 000000[03], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.1001:
+	;---------------------------------------; wbus<3:0> = 1001:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.1010:
+	;---------------------------------------; wbus<3:0> = 1010:
+	VA <-- [VA] + 000000[01], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.1011:
+	;---------------------------------------; wbus<3:0> = 1011:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.1100:
+	;---------------------------------------; wbus<3:0> = 1100:
+	VA <-- [VA] + 000000[02], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.1101:
+	;---------------------------------------; wbus<3:0> = 1101:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+FF.3.0.1110:
+	;---------------------------------------; wbus<3:0> = 1110:
+	VA <-- [VA] + 000000[01], LONG,		; set final relative bit position
+	GOTO [FFX.SET.POS]			; go set final absolute position
+
+FF.3.0.1111:
+	;---------------------------------------; wbus<3:0> = 1111:
+	[W0] <-- [VA] + [W0], LONG,		; VA is right, set final bit position
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [FFX.TEST]				; go set condition codes
+
+;	FFx, continued.
+;	Set PSL condition codes, write result.
+
+;	At this point,
+;		W0	=	final bit position
+;		W2	=	size
+;		W6	=	address of fourth (dst) operand, if memory
+;		VA	=	relative bit position
+;		RN	=	register number of fourth specifier
+
+;	The relative bit position must be 0 <= rel pos <= size, because of the
+;	guard bit inserted into the field before searching.  If rel pos = size,
+;	then the search reached the guard bit and thus failed.  Subtracting
+;	rel pos from size produces the correct condition codes:
+;
+;		psl.n = 0	because rel pos <= size
+;		psl.z = 0	if rel pos < size (bit found)
+;		      = 1	if rel pos = size (search failed)
+;		psl.v = 0	because rel pos and size are unsigned integer bytes
+;		psl.c = 0	because alu.c is always 1 and then inverted
+
+FFX.TEST:
+	;---------------------------------------;
+	[WBUS] <-- (-[VA] + [W2]), BYTE,	; test rel position vs size
+	SET PSL CC (IIIJ),			; set psl cc's, psl map is iiij
+	CASE AT [FFX.WRITE.REG]			; case on register vs memory
+
+;= ALIGNLIST **10*	(FFX.WRITE.REG,	FFX.WRITE.MEM)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+FFX.WRITE.REG:
+	;---------------------------------------; state<0> = 0:
+	[Rrn] <-- [W0], LONG,			; store result
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+FFX.WRITE.MEM:
+	;---------------------------------------; state<0> = 1:
+	VA <-- [W6],				; get address of destination
+						; >> W6 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W0], LONG,	; write result
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+;	Common subroutine to extract a field.
+;
+;	Entry conditions:
+;		W0	=	position
+;		W1 = SC	=	32 - size
+;		W2	=	size
+;		W5'W4	=	field surround if register
+;		W4	=	field address if memory
+;		W6	=	fourth operand
+;		WBUS CC's =	set from 32 - size, testable in [3]
+;		STATE<2> =	1 if field in register
+;
+;	A case on STATE<3:0> is selected.
+;
+;	Exit conditions:
+;		W0	=	position
+;		W2 = SC	=	size
+;		W3	=	left justified field
+;		W6 = VA	=	fourth operand
+;		STATE<3:0> =	00<field size is 0>0
+;
+;	If the field size was zero, W3 is zero, and SC is unpredictable.
+;	The final shift
+;
+;		[W3] <-- {ZEXT/SEXT} [W3] LSH (SC 1-32), LONG,
+;
+;	will produce the correct result (zero), except for FFx, which
+;	must be special cased.
+
+FIELD.EXTRACT:
+	;---------------------------------------;
+	[W3] <-- [W4] LSH [3], LONG,		; [2] for memory flows, calc base * 8
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [FIELD.EXTRACT.MEM]		; case on field in memory or register
+
+;	Field in memory.
+
+;	At this point,
+;		W0	=	position
+;		W1 = SC	=	32 - size
+;		W2	=	size
+;		W3	=	base * 8
+;		W4	=	field address
+;		W6	=	fourth operand
+;		WBUS CC's =	set from 32 - size, testable in [3]
+
+;= ALIGNLIST *0***	(FIELD.EXTRACT.MEM,	FIELD.EXTRACT.REG)
+;  STATE<3,1:0> = 000 --> STATE<3:0> = 0?00
+
+FIELD.EXTRACT.MEM:
+	;---------------------------------------; state<2> = 0:
+	[W3] <-- [W0] + [W3], LONG,		; [3] calc base * 8 + position
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [FIELD.MEM.RSRV.OPER]		; case on size > 32 test from [1]
+
+;= ALIGNLIST 1110*	(FIELD.MEM.RSRV.OPER,	FIELD.MEM.CONTINUE)
+
+FIELD.MEM.RSRV.OPER:
+	;---------------------------------------; wbus.c = 0:
+	RESERVED OPERAND FAULT			; [4] size > 32, fault
+
+FIELD.MEM.CONTINUE:
+	;---------------------------------------; wbus.c = 1:
+	[W3] <-- [W3] AND 000000[1F], LONG,	; [4] mask position to five bits
+	STATE.3-0 <-- 0,			; clear state flags
+	CASE AT [FIELD.MEM.1.255]		; case on size = 0 test from [1]
+
+;= ALIGNLIST **01*	(FIELD.MEM.1.255,	FIELD.MEM.0)
+;  32 - size is known to be >= 0, ie, 0..32.
+;  If size = 0,	    then 32 - size = 32     = 00100000, SC<5> = 1.
+;  If size = 1..32, then 32 - size = 31..0  = 000xxxxx, SC<5> = 0.
+
+FIELD.MEM.0:
+	;---------------------------------------; sc<5> = 1:
+	VA <-- [W6],				; [5] reload VA in case clobbered
+						; >> W6 not written in prev cycle
+	[W3] <-- 000000[00], LONG,		; field = 0
+	STATE.1 <-- 1,				; flag special case
+	RETURN					; return to caller
+
+;	Field in memory, continued.
+;	Size verified, longword aligned position calculated.
+;	Calculate longword aligned base address.
+
+;	At this point,
+;		W0	=	position
+;		W1	=	32 - size
+;		W2	=	size (1..32)
+;		W3	=	position (mod 32) relative to base LONGWORD
+;		W4	=	base address
+;		W6	=	fourth operand
+;		RN	=	register number of fourth specifier
+
+FIELD.MEM.1.255:
+	;---------------------------------------; sc<5> = 0:
+	[W5] <-- SEXT [W0] RSH [3], LONG	; [5] convert position to signed byte offset
+
+	;---------------------------------------;
+	SC&, [WBUS] <-- [W1] - [W3], BYTE	; [6] calc 32 - size - pos =
+						;	   32 - (pos + size)
+
+	;---------------------------------------;
+	VA <-- [W4] + [W5],			; [7] calc base + sext(position)
+						; >> W4, W5 not written in prev cycle
+	[W4] <-- MEM (VA), BYTE,		; read aligned longword containing field
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- [W4] LSH (SC), LONG,		; [8] shift field to left aligned position
+	CASE AT [FIELD.MEM.2]			; case on number of longwords from [6]
+
+;= ALIGNLIST 11*0*	(FIELD.MEM.2,	FIELD.MEM.1)
+;  WBUS.NZVC set by subtract of positive integers --> V = 0
+
+FIELD.MEM.1:
+	;---------------------------------------; wbus.c = 1:
+	VA <-- [W6],				; [9] restore VA in case clobbered
+						; >> W6 not written in prev cycle
+	SC&, [WBUS] <-- B [W2], LONG,		; load size into SC
+	RETURN					; return to caller
+
+FIELD.MEM.2:
+	;---------------------------------------; wbus.c = 0:
+	VA <-- [VA] + 4,			; [9] point at second longword
+	[W5] <-- MEM (VA), BYTE			; read second aligned longword
+
+	;---------------------------------------;
+	[W3] <-- [W5]!![W4] LSH (SC), LONG,	; [10] left align field
+	GOTO [FIELD.MEM.1]			; [11] load size into SC, return to caller
+
+;	Field in register(s).
+;	Verify position and size parameters.
+
+;	At this point,
+;		W0	=	position
+;		W1 = SC	=	32 - size
+;		W2	=	size
+;		W5'W4	=	field surround
+;		W6	=	fourth operand
+;		WBUS CC's =	set from 32 - size, testable in [3]
+
+FIELD.EXTRACT.REG:
+	;---------------------------------------; state<2> = 1:
+	[WBUS] <-- [W1] - [W0], BYTE,		; [3] test 32 : (pos + size)
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [FIELD.REG.RSRV.OPER.1]		; case on size > 32 test from [1]
+
+;= ALIGNLIST 1110*	(FIELD.REG.RSRV.OPER.1,	FIELD.REG.CONTINUE.1)
+
+FIELD.REG.RSRV.OPER.1:
+	;---------------------------------------; wbus.c = 0:
+	RESERVED OPERAND FAULT			; [4] size > 32, fault
+
+FIELD.REG.CONTINUE.1:
+	;---------------------------------------; wbus.c = 1:
+	[WBUS] <-- ZEXT [W0] RSH [5.], LONG,	; [4] test for position < 32
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [FIELD.REG.1.255]		; case on size = 0 test from [1]
+
+;= ALIGNLIST **01*	(FIELD.REG.1.255,	FIELD.REG.0)
+;  32 - size is known to be >= 0, ie, 0..32.
+;  If size = 0,	    then 32 - size = 32     = 00100000, SC<5> = 1.
+;  If size = 1..32, then 32 - size = 31..0  = 000xxxxx, SC<5> = 0.
+
+FIELD.REG.0:
+	;---------------------------------------; sc<5> = 1:
+	VA <-- [W6],				; [5] reload VA in case clobbered
+						; >> W6 not written in prev cycle
+	[W3] <-- 000000[00], LONG,		; field = 0
+	STATE.1 <-- 1,				; flag special case
+	RETURN					; return to caller
+
+;	Field in registers, continued.
+;	Finish field extraction.
+
+;	At this point,
+;		W0	=	position
+;		W1	=	32 - size
+;		W2	=	size
+;		W5'W4	=	field surround
+;		W6	=	fourth operand
+;		RN	=	register number of fourth specifier
+
+FIELD.REG.1.255:
+	;---------------------------------------; sc<5> = 0:
+	SC&, [WBUS] <-- [W1] - [W0], BYTE,	; [5] load 32 - (pos + size) into SC
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [FIELD.REG.2]			; case on number of longwords from [3]
+
+;= ALIGNLIST 1110*	(FIELD.REG.2,	FIELD.REG.1)
+
+FIELD.REG.1:
+	;---------------------------------------; wbus.c = 1:
+	[W3] <-- [W4] LSH (SC), LONG,		; [6] left align field
+	CASE AT [FIELD.REG.RSRV.OPER.2]		; case on position > 31 from [4]
+
+FIELD.REG.2:
+	;---------------------------------------; wbus.c = 0:
+	[W3] <-- [W5]!![W4] LSH (SC), LONG,	; [6] left align field
+	CASE AT [FIELD.REG.RSRV.OPER.2]		; case on position > 31 from [4]
+
+;= ALIGNLIST *0***	(FIELD.REG.RSRV.OPER.2,	FIELD.REG.CONTINUE.2)
+;  WBUS.NZVC set by ZEXT right shift --> N = V = C = 0
+
+FIELD.REG.RSRV.OPER.2:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [7] position > 31, fault
+
+FIELD.REG.CONTINUE.2:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [W6],				; [7] restore VA in case clobbered
+						; >> W6 not written in prev cycle
+	SC&, [WBUS] <-- B [W2], LONG,		; load size into SC
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	INSV"
+
+;	This instruction inserts a source operand into a variable-length bit field.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----		--	--------   -----
+;	INSV		F0	field(pos.rl, size.rb, base.vb)		4	rrrw/llbb	--	INSV	   --
+;					<-- src.rl
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (source) operand
+;		W2	=	second (position) operand
+;		W4	=	third (size) operand
+;		W6	=	address of fourth (base) operand, if memory
+;		RN	=	register number of fourth specifier
+;		DL	=	data length of fourth operand (byte)
+;
+;	Exit conditions:
+;		The source has been inserted into the specified bit field.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled.]
+;		C <-- C
+;
+;	Tradeoffs:
+;		None.
+;
+.bin
+
+;	INSV operation:
+;
+;		field(pos.rl, size.rb, base.vb) <-- src.rl
+
+INSV:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W4], BYTE	; [1] calc 32 - size, test size > 32
+
+	;---------------------------------------;
+	[W3] <-- [W6] LSH [3], LONG,		; [2] calc base * 8
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- [W2] + [W3], LONG,		; [3] calc base * 8 + pos
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [INSV.MEM.RSRV.OPER]		; case on size > 32 test from [1]
+
+;= ALIGNLIST 1110*	(INSV.MEM.RSRV.OPER,	INSV.MEM.CONTINUE)
+
+INSV.MEM.RSRV.OPER:
+	;---------------------------------------; wbus.c = 0:
+	RESERVED OPERAND FAULT			; [4] size > 32, fault
+
+INSV.MEM.CONTINUE:
+	;---------------------------------------; wbus.c = 1:
+	[W5] <-- SEXT [W2] RSH [3], LONG,	; [4] convert position to signed byte offset
+	CASE AT [INSV.MEM.1.255]		; case on size = 0 test from [1]
+
+;= ALIGNLIST **01*	(INSV.MEM.1.255,	INSV.MEM.0)
+;  32 - size is known to be >= 0, ie, 0..32.
+;  If size = 0,	    then 32 - size = 32     = 00100000, SC<5> = 1.
+;  If size = 1..32, then 32 - size = 31..0  = 000xxxxx, SC<5> = 0.
+
+INSV.MEM.0:
+	;---------------------------------------; sc<5> = 0:
+	NOP,					; [5] nothing to do...
+	LAST CYCLE				; decode next instruction
+
+;	INSV, continued.
+;	Size verified, longword aligned position calculated.
+;	Calculate longword aligned base address.
+
+;	At this point,
+;		W0	=	source
+;		W1	=	32 - size
+;		W3	=	base*8 + position
+;		W4	=	size (1..32)
+;		W5	=	sext(position) rsh 3
+;		W6	=	base address
+
+INSV.MEM.1.255:
+	;---------------------------------------; sc<5> = 1:
+	[W2] <-- [W3] AND 000000[1F], LONG	; [5] mask position to five bits
+
+	;---------------------------------------;
+	VA <-- [W6] + [W5],			; [6] calc base + sext(position)
+						; >> W6, W5 not written in prev cycle
+	[W3] <-- MEM.WCHK (VA), BYTE		; read, write check aligned field surround
+
+	;---------------------------------------;
+	[W1] <-- [W1] - [W2], BYTE		; [7] calc 32 - size - pos =
+						;	   32 - (pos + size)
+
+	;---------------------------------------;
+	SC&, [WBUS] <-- 000000[32.] - [W2],	; [8] load 32 - position into SC
+	LONG,					;
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- [W3] LROT (SC), LONG,		; [9] rotate low field left by 32-position
+	CASE AT [INSV.MEM.2]			; case on number of longwords from [7]
+
+;	INSV, continued.
+;	Field in one longword.
+;	Longword aligned address/position calculated.
+;	Insert field.
+
+;	At this point,
+;		W0	=	source
+;		W1	=	32 - (pos + size)
+;		W2	=	position (mod 32) relative to base LONGWORD
+;		W3	=	field surround, rotated right by pos (aabbcc --> ccaabb)
+;		W4	=	size
+;		VA	=	base LONGWORD address
+
+;= ALIGNLIST 11*0*	(INSV.MEM.2,	INSV.MEM.1)
+;  WBUS.NZVC set by subtract of positive integers --> V = 0
+
+INSV.MEM.1:
+	;---------------------------------------; wbus.c = 1 (pos + size <= 32):
+	SC&, [WBUS] <-- 000000[32.] - [W4],	; [10] set SC = 32 - size for shift
+	LONG					;
+
+	;---------------------------------------;                 --W0--  --W3--
+	[W0] <-- [W0]!![W3] LSH (SC), LONG,	; [11] nnccaa <-- xxxxnn!!ccaabb
+	CALL [INSV.POS.PLUS.SIZE]		; [12] use pos + size as shift value
+
+	;---------------------------------------;                 --W0--
+	MEM (VA)&, [WDR] <-- [W0] LROT (SC),	; [13] aanncc <-- nnccaa
+	BYTE,					; write aligned longword
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+;	INSV, continued.
+;	Field in two longwords.
+;	Longword aligned address/position calculated.
+;	Insert field.
+
+;	At this point,
+;		W0	=	source
+;		W1	=	32 - (pos + size)
+;		W2	=	position (mod 32) relative to base LONGWORD
+;		W3	=	low field surround, rot right by pos (yyaaaa --> aaaayy)
+;		W4	=	size
+;		VA	=	base LONGWORD address
+
+INSV.MEM.2:
+	;---------------------------------------; wbus.c = 0 (pos + size > 32):
+	VA <-- [VA] + 4,			; [10] point at second lw of field
+	[W5] <-- MEM.WCHK (VA), BYTE		; read second aligned lw of field surround
+
+	;---------------------------------------;
+	VA <-- [VA] - 4,			; [11] point back at first lw of field
+	SC&, [WBUS] <-- B [W2], LONG		; load position into SC
+
+	;---------------------------------------;
+	[W6] <-- ZEXT [W0] LSH (SC), LONG	; [12] isolate source insert for high lw
+
+	;---------------------------------------;                   --W0--  --W3--
+	MEM (VA)&, [WDR] <-- [W0]!![W3] LSH (SC), ; [13] mmbbbb <-- xxnnmm!!bbbbzz
+	BYTE,					;
+	SET NORETRY,				; set disable retry flag
+	CALL [INSV.2.INSERT]			; [14] load 32 - (pos + size) into SC, incr VA
+						;      --W1--     --W6--  --W5--
+						; [15] nnaaaa <-- ....nn!!aaaayy
+						; [16] load pos + size into SC
+
+	;---------------------------------------;                 --W1--  
+	MEM (VA)&, [WDR] <-- [W1] LROT (SC),	; [17] aaaann <-- nnaaaa
+	BYTE,					; write high result aligned
+	LAST CYCLE				; decode next instruction
+
+;	INSV, register mode.
+
+INSV.R:
+	;********** Hardware dispatch **********;
+	SC&, [W1] <-- 000000[32.] - [W4], BYTE	; [1] calc 32 - size, test size > 32
+
+	;---------------------------------------;
+	[W3] <-- [Rrn], LONG,			; [2] get first lw containing field
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- [W1] - [W2], BYTE,		; [3] calc 32 - size - pos =
+						;          32 - (pos + size)
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [INSV.REG.RSRV.OPER.1]		; case on size > 32 test from [1]
+
+;= ALIGNLIST 1110*	(INSV.REG.RSRV.OPER.1,	INSV.REG.CONTINUE.1)
+
+INSV.REG.RSRV.OPER.1:
+	;---------------------------------------; wbus.c = 0:
+	RESERVED OPERAND FAULT			; [4] size > 32, fault
+	
+INSV.REG.CONTINUE.1:
+	;---------------------------------------; wbus.c = 1:
+	SC&, [WBUS] <-- 000000[32.] - [W2],	; [4] load 32 - pos, test pos > 31
+	LONG,					;
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [INSV.REG.1.255]		; case on size = 0 test from [1]
+
+;= ALIGNLIST **01*	(INSV.REG.1.255,	INSV.REG.0)
+;  32 - size is known to be >= 0, ie, 0..32.
+;  If size = 0,	    then 32 - size = 32     = 00100000, SC<5> = 1.
+;  If size = 1..32, then 32 - size = 31..0  = 000xxxxx, SC<5> = 0.
+
+INSV.REG.0:
+	;---------------------------------------; sc<5> = 1:
+	NOP,					; [5] nothing to do...
+	LAST CYCLE				; decode next instruction
+
+INSV.REG.1.255:
+	;---------------------------------------;
+	[W3] <-- [W3] LROT (SC), LONG,		; [5] rotate low field left by 32-position
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [INSV.REG.2]			; case on 32 - (pos + size) test from [3]
+
+;	INSV register mode, continued.
+;	Field in one longword.
+
+;	At this point,
+;		W0	=	source
+;		W1	=	32 - (pos + size)
+;		W2	=	position
+;		W3	=	field surround rotated right by position (aabbcc --> ccaabb)
+;		W4	=	size (1..32)
+;		RN	=	register number of fourth specifier
+;		WBUS CC's =	32 - position, testable in [6]
+
+;= ALIGNLIST 1110*	(INSV.REG.2,	INSV.REG.1)
+
+INSV.REG.1:
+	;---------------------------------------; wbus.c = 1 (pos + size <= 32):
+	SC&, [WBUS] <-- 000000[32.] - [W4],	; [6] set 32 - size for shift
+	BYTE,					;
+	CASE AT [INSV.REG.RSRV.OPER.2]		; case on position > 31 test from [4]
+
+;= ALIGNLIST 1010*	(INSV.REG.RSRV.OPER.2,	INSV.REG.1.EXIT,
+;=			 		,	INSV.REG.RSRV.OPER.3)
+
+INSV.REG.RSRV.OPER.2:
+	;---------------------------------------; wbus.zc = 00:
+	RESERVED OPERAND FAULT			; [7] position > 32, fault
+
+INSV.REG.RSRV.OPER.3:
+	;---------------------------------------; wbus.zc = 11:
+	RESERVED OPERAND FAULT			; [7] position = 32, fault
+
+INSV.REG.1.EXIT:
+	;---------------------------------------; wbus.zc = 01:  --W0--  --W3--
+	[W0] <-- [W0]!![W3] LSH (SC), LONG,	; [7] nnccaa <-- xxxxnn!!ccaabb
+	CALL [INSV.POS.PLUS.SIZE]		; [8] use pos + size as shift value
+
+	;---------------------------------------;                --W0--
+	[Rrn] <-- [W0] LROT (SC), LONG,		; [9] aanncc <-- nnccaa
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE				; decode next instruction
+
+;	INSV register mode, continued.
+;	Field in two longwords.
+
+;	At this point,
+;		W0	=	source
+;		W1	=	32 - (pos + size)
+;		W2	=	position
+;		W3	=	low field surround, rot right by pos (yyaaaa --> aaaayy)
+;		W4	=	size (1..32)
+;		RN	=	register number of fourth specifier
+;		WBUS CC's =	32 - position, testable in [7]
+
+INSV.REG.2:
+	;---------------------------------------; wbus.n = 1 (pos + size > 32):
+	[W5] <-- [Rrn+1], LONG,			; [6] get second longword of field surround
+	CASE AT [INSV.REG.2.EXIT]		; case on position > 31 test from [4]
+
+;= ALIGNLIST 1010*	(INSV.REG.RSRV.OPER.4,	INSV.REG.2.EXIT,
+;=			 		,	INSV.REG.RSRV.OPER.5)
+
+INSV.REG.RSRV.OPER.4:
+	;---------------------------------------; wbus.zc = 00:
+	RESERVED OPERAND FAULT			; [7] position > 32, fault
+
+INSV.REG.RSRV.OPER.5:
+	;---------------------------------------; wbus.zc = 11:
+	RESERVED OPERAND FAULT			; [7] position = 32, fault
+
+INSV.REG.2.EXIT:
+	;---------------------------------------; wbus.zc = 01:
+	SC&, [WBUS] <-- [W2], LONG		; [7] load position into SC
+
+	;---------------------------------------;
+	[W6] <-- ZEXT [W0] LSH (SC), LONG	; [8] isolate source insert for high lw
+
+	;---------------------------------------;                --W0--  --W3--
+	[Rrn] <-- [W0]!![W3] LSH (SC), LONG,	; [9] mmbbbb <-- xxnnmm!!bbbbzz
+	SET NORETRY,				; set disable retry flag
+	CALL [INSV.2.INSERT]			; [10] load 32 - size - pos into SC
+						;      --W1--     --W6--  --W5--
+						; [11] nnaaaa <-- ....nn!!aaaayy
+						; [12] load pos + size into SC
+
+	;---------------------------------------;                 --W1--
+	[Rrn+1] <-- [W1] LROT (SC), LONG,	; [13] aaaann <-- nnaaaa
+	LAST CYCLE				; decode next instruction
+
+;	Common subroutine for INSV unaligned field flows.
+
+INSV.2.INSERT:
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; if memory, point at second lw of field
+	SC&, [WBUS] <-- B [W1], BYTE		; load 32 - (pos + size) into SC
+
+	;---------------------------------------;
+	[W1] <-- [W6]!![W5] LSH (SC), LONG	; start insert into high longword
+
+;	One line subroutine for INSV flows.
+
+INSV.POS.PLUS.SIZE:
+	;---------------------------------------;
+	SC&, [WBUS] <-- [W2] + [W4], BYTE,	; load pos + size into SC
+	RETURN					; return to caller
+
+;= END VFIELD

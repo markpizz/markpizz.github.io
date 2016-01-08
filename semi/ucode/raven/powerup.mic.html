@@ -1,0 +1,288 @@
+.TOC	"POWERUP.MIC -- Powerup Initialization"
+.TOC    "Revision 2.5"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC 	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    5 19-Feb-90 RMS	Documented MAPEN write restriction.
+;    4 15-Feb-90 RMS	Documented PSL write restriction.
+;    3 14-Feb-90 RMS	Moved microtrap enable into common path.
+;    2 26-Jan-90 RMS	Fixed ordering problem in register initialization.
+;    1 10-Jan-90 RMS	Revised to clear Pcache data RAMs.
+; (2)0 16-Nov-89 RMS	Revised for simplified decoder.
+;    6 13-Nov-89 RMS	Editorial changes.
+;    5 13-Oct-89 RMS	Documented ADR data forwarding restriction.
+;    4 15-Sep-89 RMS	Revised for change to TB invalidate routine.
+;    3 10-Jul-89 RMS	Revised for change to INTLOGADR.
+;    2 09-Jul-89 RMS	Editorial changes.
+;    1 22-Jun-89 RMS	Replaced stub with real code.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 06-Apr-89 RMS	Revised for actual entry points.
+;    2 02-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 14-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN POWERUP
+.nobin
+.TOC	"	Powerup Initialization"
+
+;	This module contains the power up initialization code.
+
+;	Powerup initialization consists of three stages, which are
+;	sequenced by a hardware state machine:
+;
+;		1.  Pre-BIST initialization
+;		2.  BIST (built in self test)
+;		3.  Post-BIST initialization
+;
+;	Pre-BIST initialization is intended to put the hardware in
+;	a known state, so that BIST will return a predictable signature.
+;	Most state in the CPU chip is initialized by the INIT signal,
+;	but the RAM-based structures (register file, TB, primary cache)
+;	and some state storage must be initialized by microcode.
+;	Microcode flows starting at location 000 perform pre-BIST
+;	initialization.
+;
+;	Built in self test is intended to test the CPU chip hardware.
+;	Built in pattern generation and signature reduction logic
+;	runs and collects the output of a large number of pseudo-
+;	random patterns.  The resulting signature can then be read
+;	and checked by the console macrocode.
+;
+;	Post-BIST initialization is intended to put the hardware in
+;	the known state specified by the SRM.  Most state in the CPU
+;	chip is again initialized with the INIT signal.  In order to
+;	clean up any inconsistencies introduced by BIST, the pre-BIST
+;	initialization microcode is run again.  Then any architecturally
+;	required initialization is performed.  Microcode flows starting
+;	at location 001 perform post-BIST initialization.
+
+;	The following table lists the major state elements in the CPU
+;	chip and how each is initialized:
+;
+;	section		element				how initialized
+;	-------		-------				---------------
+;	SEQUENCER	PC				init
+;			backup PC			init
+;			uPC				init - to 000
+;			usubroutine stack entry		microcode
+;			RLOG pointer			init
+;			RLOG stack entries		init
+;			STATE flags			init - to 0
+;			trap enable			init - to disabled
+;			trap silos			init
+;
+;	DECODER		IB				init
+;			control registers, flags	init
+;			opcode latch			init
+;
+;	EBOX		register file			microcode
+;			VA				microcode
+;			SC				microcode
+;			hardware PSW			microcode
+;			hardware PSL			microcode
+;			TB				microcode
+;			VAX CANT RESTART		init
+;
+;	CBOX		primary cache			microcode
+;			primary cache enable		init - to disabled
+;			MAPEN				init - to 0
+;			control registers, flags	init
+;
+;	The following table shows the architectural initialization
+;	requirements:
+;
+;		1.  MAPEN is cleared (memory management is disabled)
+;		2.  PSL is initialized to a known state	=	041F0000
+;		3.  ASTLVL is initialized to a known state =	4
+;		4.  SISR is initialized to a known state =	0
+;		5.  Hardware interrupt requests are cleared
+;		6.  The console is passed the initial halt code (power up).
+;
+;	Note that 1 and 2 are done by the console halt routine; 3, 4, and
+;	6 are done by the powerup microcode; and 5 is done by INIT.
+
+.bin
+
+;	Power up, pre-BIST.
+
+POWERUP:
+	;********** Hardware Dispatch **********;
+	[W2] <-- 000000[00], LONG,		; clear W2
+	GOTO [POWERUP.CONT]			; join common flows
+
+;	Power up, post-BIST.
+
+;= AT POWERUP+1
+POWERUP.POST.BIST:
+	;********** Hardware Dispatch **********;
+	[W2] <-- 000000[00], LONG,		; clear W2
+	STATE.0 <-- 1,				; flag post-BIST state
+	GOTO [POWERUP.CONT]			; join common flows
+
+POWERUP.CONT:
+	;---------------------------------------;
+	[R1] <-- 000000[00], LONG,		; clear R1
+	NEW PSL,				; clear hardware PSL
+						; >> no DECODE NEXT in next two cycles
+	CALL [CLEAR.W0]				; clear W0
+
+	;---------------------------------------;
+	[R2] <-- 000000[00], LONG,		; clear R2
+	NEW PSW,				; clear hardware PSW
+						; >> no DECODE NEXT in next two cycles
+	CALL [STRING.R0<--ZEXTW.W0]		; zextw W0 to R0
+
+	;---------------------------------------;
+	[W3] <-- 000000[00], LONG,		; clear W3
+	NEW MAPEN AND STATUS,			; clear MAPEN
+						; >> no TB operation in next cycle
+	CALL [ASHQ.RIGHT.128.33]		; sext W3 to W1
+
+	;---------------------------------------;
+	SC&, [R3] <-- 000000[00], LONG		; clear R3, SC
+
+	;---------------------------------------;
+	[R4] <-- 000000[00], LONG		; clear R4
+
+	;---------------------------------------;
+	[R5] <-- 000000[00], LONG		; clear R5
+
+	;---------------------------------------;
+	[R6] <-- 000000[00], LONG		; clear R6
+
+	;---------------------------------------;
+	[R7] <-- 000000[00], LONG		; clear R7
+
+;	Powerup, continued.
+;	Continue to sanitize register file.
+
+	;---------------------------------------;
+	[R8] <-- 000000[00], LONG		; clear R8
+
+	;---------------------------------------;
+	[R9] <-- 000000[00], LONG		; clear R9
+
+	;---------------------------------------;
+	[R10] <-- 000000[00], LONG		; clear R10
+
+	;---------------------------------------;
+	[R11] <-- 000000[00], LONG		; clear R11
+
+	;---------------------------------------;
+	[AP] <-- 000000[00], LONG		; clear AP
+
+	;---------------------------------------;
+	[FP] <-- 000000[00], LONG		; clear FP
+
+	;---------------------------------------;
+	[SP] <-- 000000[00], LONG		; clear SP
+
+	;---------------------------------------;
+	[VM.UEXC] <-- 000000[00], LONG		; clear VM.UEXC
+
+	;---------------------------------------;
+	[PSL] <-- 000000[00], LONG		; clear PSL
+
+	;---------------------------------------;
+	[P0BR] <-- 000000[00], LONG		; clear P0BR
+
+	;---------------------------------------;
+	[P0LR] <-- 000000[00], LONG		; clear P0LR
+
+	;---------------------------------------;
+	[P1BR] <-- 000000[00], LONG		; clear P1BR
+
+	;---------------------------------------;
+	[P1LR] <-- 000000[00], LONG		; clear P1LR
+
+	;---------------------------------------;
+	[SBR] <-- 000000[00], LONG		; clear SBR
+
+	;---------------------------------------;
+	[SLR] <-- 000000[00], LONG		; clear SLR
+
+	;---------------------------------------;
+	[SCBB] <-- 000000[00], LONG		; clear SCBB
+
+	;---------------------------------------;
+	[PCBB] <-- 000000[00], LONG		; clear PCBB
+
+;	Powerup, continued.
+;	Finish sanitizing register file, invalidate TB, Pcache.
+;	Exit to BIST routine or to console macrocode.
+
+	;---------------------------------------;
+	[WDR] <-- 000000[TB.LOOP], LONG,	; iterate through entire TB
+	CALL [TB.INVALIDATE.ALL]		; sanitize the TB, write TSPEC, MMGT0-3
+
+	;---------------------------------------;
+	VA <-- 0000[PCACHE.SIZE]00,		; prepare to iterate through Pcache
+	[IS] <-- 0000[PCACHE.SIZE]00, LONG	; sanitize IS
+
+	;---------------------------------------;
+	VA <-- [VA] - 000000[PCACHE.LINE],	; decrement VA to get next cache index
+	[W4] <-- [VA] - 000000[PCACHE.LINE],	; test for zero, sanitize W4
+	PCACHE INVALIDATE, LONG,		; invalidate Pcache tag, write data
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+;= ALIGNLIST *0*1*	(PCACHE.LOOP,	PCACHE.DONE)
+;  WBUS.NZVC set by subtract of 4 from >= 4 --> N = V = 0
+
+PCACHE.LOOP:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [VA] - 000000[PCACHE.LINE],	; decrement VA to get next cache index
+	[W5] <-- [VA] - 000000[PCACHE.LINE],	; test for zero, sanitize W5
+	PCACHE INVALIDATE, LONG,		; invalidate Pcache tag, write data
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [PCACHE.LOOP]			; case on previous Wbus cc's
+
+PCACHE.DONE:
+	;---------------------------------------; wbus.z = 1:
+	[WBUS] <-- ERROR REG, LONG,		; clear error register
+	SELECT [STATE.3-0]			; prepare to case on state flags
+
+	;---------------------------------------;
+	[AST.SISR] <-- [AST.INIT]000000, LONG,	; set ASTLVL, clear SISR
+	ENABLE TRAPS,				; make sure silos are running
+	CASE AT [POWERUP.WAIT.BIST]		; case on pre- vs post- BIST
+
+;= ALIGNLIST ***0*	(POWERUP.WAIT.BIST,	POWERUP.HALT)
+;  STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+POWERUP.WAIT.BIST:
+	;---------------------------------------; state<0> = 0:
+	[W6] <-- 000000[00], LONG,		; clear W6
+	GOTO [POWERUP.WAIT.BIST]		; wait for BIST to cut in
+
+POWERUP.HALT:
+	;---------------------------------------; state<0> = 1:
+	CONSOLE HALT [ERR.PWRUP]		; power up, invoke console (writes W6)
+
+;= END POWERUP

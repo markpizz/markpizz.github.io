@@ -1,0 +1,323 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>Rigel</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  Rigel (1989)
+</H1>
+<P>
+Rigel (never known as RVAX) was DEC's third generation VAX microprocessor.
+Amnon Fischer ran the project; Bill Herrick was project lead for the P (CPU)
+chip (code name REX), Moshe Gavrielov for the F chip (code name KIWI), and
+Rebecca Stamm for the C chip (code name COW). Mike Uhler was the supervising
+architect and wrote most of the microcode.
+<P>
+Rigel was the third step in an architectural roadmap for VLSI VAX processors.
+This roadmap, first published in 1982, envisioned new VAX processors every
+two years, with a performance increase of 50% per year, as well as
+optically-compatible CMOS processes starting at 2u and advancing down to
+.75u. The microprocessors provided increased performance through higher clock
+rates but also through improved microarchitecture: half-folded pipeline for
+CVAX, fully-folded pipeline for Rigel, instruction macropipelining for NVAX.
+<P>
+Rigel was intended to advance the MicroVAX family by providing 2.5X the
+performance of CVAX. Interestingly, maintaining lower power levels was not
+a goal. Rigel was in most ways a CMOS knockoff of the highly successful VAX
+8800. It included the 8800's autonomous, state-machine driven instruction
+parser; a fully folded microinstruction pipeline; read-and-run and write-and-run
+capability; simultaneous ALU and shift operations; support for a large external
+cache. The companion floating point unit provided a full floating point
+pipeline and multi-bit hardware divide. The pipeline was overkill for Rigel,
+but the design was intended to be reused in vector units, NVAX and RISC
+processors.
+<P>
+Like CVAX, Rigel had a family of support chips, including the Rigel System
+Support Chip (RSSC) and Ghidra, the VAX 4000 system interface chip. Ghidra
+included a memory controller and a bus adapter to the CVAX pin bus, thus
+allowing most CVAX peripheral chips to be reused.
+<P>
+Rigel was implemented in DEC's 1.5u double-metal CMOS process (CMOS2) and
+ran, depending on bin points, at 35Mhz-40Mhz.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/rigel_p.jpg">Rigel CPU (REX)</A></TD>
+    <TD>DC520</TD>
+    <TD>475x475</TD>
+    <TD>320,000</TD>
+    <TD>The Rigel CPU is a third generation VLSI VAX microprocessor. Compared
+      to its predecessor, it offers 2X to 3X more performance. Key features include:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      Macro-instruction prefetch
+	    <LI>
+	      Six stage micro-instruction pipeline
+	    <LI>
+	      2KB on chip instruction/data cache (configurable as instruction only)
+	    <LI>
+	      64 entry fully associative TLB
+	  </UL>
+	<LI>
+	  Subset VAX architecture
+	  <UL>
+	    <LI>
+	      Sixteen 32b general purpose registers
+	    <LI>
+	      181 instructions
+	    <LI>
+	      21 addressing modes
+	    <LI>
+	      6 data types
+	  </UL>
+	<LI>
+	  Support for optional vector processor
+	<LI>
+	  224 pin custom ceramic package with 3.3V I/O
+	<LI>
+	  Supports boundary scan and board-level continuity testing
+      </UL>
+      <P>
+      Power: 6W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/rigel_f.jpg">Rigel FPA (KIWI)</A></TD>
+    <TD>DC523</TD>
+    <TD>500x435</TD>
+    <TD>135,000</TD>
+    <TD>The Rigel FPA is the companion floating point coprocessor to the Rigel
+      CPU. Its key features are:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      Four-stage pipelined design
+	    <LI>
+	      ADd/subtract/multiply implemented combinatorially
+	    <LI>
+	      Multi-bit per cycle hardware divider
+	    <LI>
+	      Acceleration of integer multiply
+	  </UL>
+	<LI>
+	  f_, d_, and g_floating point format support
+	<LI>
+	  VAX floating point instruction set
+	<LI>
+	  Optimized external interface
+	  <UL>
+	    <LI>
+	      Dedicated CPU to FPA control bus
+	    <LI>
+	      Overlapped control and data transfers
+	  </UL>
+	<LI>
+	  224 pin custom ceramic package with 3.3V I/O
+	<LI>
+	  Supports boundary scan and board-level continuity testing
+      </UL>
+      <P>
+      Power: 4W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/rigel_c.jpg">Rigel Cache Controller (COW)</A></TD>
+    <TD>DC592</TD>
+    <TD>425x425</TD>
+    <TD>220,000</TD>
+    <TD>The Cache Controller (vector version) implements the tag store and cache
+      controller for the Rigel second-level cache. Key features include:
+      <UL>
+	<LI>
+	  Tag store and controller for 128KB second-level cache
+	<LI>
+	  Provides invalidate filtering mechanism with separate invalidate bus and
+	  primary cache tag store copy
+	<LI>
+	  Asynchronous bus interface for passing instruction and control information
+	  to an optional vector unit
+	<LI>
+	  224 pin custom ceramic package with 3.3V I/O
+	<LI>
+	  Supports boundary scan and board-level continuity testing
+      </UL>
+      <P>
+      Power: 2.5W</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/rigel_clk1.jpg">Rigel Clock</A></TD>
+    <TD>DC521</TD>
+    <TD>200x200</TD>
+    <TD>350</TD>
+    <TD>The Rigel clock provides the clocks used by the Rigel chip set. Its
+      features include:
+      <UL>
+	<LI>
+	  Precision clock generator for the Rigel chip set
+	<LI>
+	  Provides two sources for the four-phase overlapping Rigel clocks
+	<LI>
+	  Capable of driving up to four loads per clock source
+	<LI>
+	  Extremely low clock skew (&lt; 0.5ns at each receiver)
+	<LI>
+	  44-pin cerquad package
+      </UL>
+      <P>
+      Power: 2W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+Rigel shipped in mid-1989 in both the low-end VAX 4000 systems (the MicroVAX
+name was dropped) and the mid-range VAX 6400 multiprocessors. Rigel instantly
+made DEC's entire mid-range and high-end product family obsolete. Until the
+VAX 9000 shipped, Rigel (and Mariah) based systems were the fastest VAXen
+in the company's portfolio.
+<P>
+Rigel was the only VLSI VAX to support the VAX vector option. The chips for
+the vector unit were designed by Doug Williams' Mid-Range Systems VLSI team:
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/verse.jpg">Vector Register Set (VERSE)</A></TD>
+    <TD>DC555</TD>
+    <TD>520x475</TD>
+    <TD>200,000</TD>
+    <TD>The Vector Register set chip provides part of the register file for the
+      Rigel VAX Vector option. It also contains the control logic required to pipeline
+      vector instructions to the FAVOR chip. Key features include:
+      <UL>
+	<LI>
+	  Contains 1/4 of the storage for the VAX vector register set (16KB)
+	<LI>
+	  Provides four ports on the register file
+	<LI>
+	  Performs vector merge and logical instructions
+	<LI>
+	  Contains pipeline registers for instructions and scalar operands as well
+	  as the vector mask register
+	<LI>
+	  Provides a 64b port to the rest of the vector unit
+	<LI>
+	  Interfaces between the vector FPU and the other logic on the vector unit
+      </UL>
+      <P>
+      Power: 3W</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/favor.jpg">Vector Data Path (FAVOR)</A></TD>
+    <TD>DC556</TD>
+    <TD>522x460</TD>
+    <TD>135,000</TD>
+    <TD>The Vector Data Path chip implements the data path for a VAX vector unit. 
+      Key features include:
+      <UL>
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      Four-stage pipelined design
+	    <LI>
+	      ADd/subtract/multiply implemented combinatorially
+	    <LI>
+	      Multi-bit per cycle hardware divider
+	    <LI>
+	      Data-independent throughput
+	  </UL>
+	<LI>
+	  f_, d_, g_floating point and longword integer support
+	<LI>
+	  164 pin custom ceramic package with 3.3V I/O
+	<LI>
+	  Supports boundary scan and board-level continuity testing
+      </UL>
+      <P>
+      Power: 4W.</TD>
+  </TR>
+</TABLE>
+<H3>
+  Personal Narrative
+</H3>
+<P>
+Like CVAX, Rigel started as a meditation on a previous design, in this case,
+by key members of the V-11 team on how to do a multi-chip design that would
+significantly outperform a single-chip implementation. The team took the
+VAX 8600 as a starting point and elaborated from there. They proposed a four-chip
+set, with custom hybrid technology for the interconnect. By October, 1984,
+when I was named manager of the Microprocessor group, a full performance
+model was in place and undergoing analysis. But as a result of V-11 and J-11,
+I had developed a strong aversion to multi-chip implementations, due to the
+difficulty of partitioning and managing risks. I suggested (and then insisted)
+that Rigel instead be based on the VAX 8800, which would allow a single-chip
+CPU to be built. Matters came to a head in January of 1985, and the project
+was restarted. By mid 1985, the project was adequately staffed and finished
+with performance modeling. All chip specs were written by the end of 1985.
+<P>
+One of the key goals for Rigel was schedule predictability. Both MicroVAX
+and CVAX had met their functional and performance goals but had been three
+months late getting to tape-out. The Rigel management team, who were all
+new to their positions, accepted the challenge and developed a quantitative
+analysis methodology for measuring progress in schematic design, circuit
+design, and layout. This technique worked well, and Rigel kept to its development
+schedule without slips.
+<P>
+Midway through Rigel's implementation, the mini-supercomputer fad swept the
+industry, triggered by the success of startup Convex. Suddenly, vectors were
+a mandatory addition to every architecture: the VAX, the 360, DEC's RISC
+efforts... Adding vector instructions to the VAX architecture, in a way that
+was compatible with Rigel's already well-defined micro-architecture, was
+not easy. Dileep Bhandarkar, Tryggve Fossum, and I worked on this for much
+of 1986, eventually resulting in a vector spec that was acceptable to software,
+implementable in both microprocessors and mainframe class machines, and worthy
+of a few patents. The C chip, which had taped out much earlier than the other
+chips, was redesigned to provide an interface to the vector unit.
+<P>
+The Rigel C chip taped out in January 1987, the CPU chip October, 1987, the
+FPU in December, 1987 -- all on schedule. Thereafter, nothing seemed to go
+right. The Rigel CPU was substantially larger than any chip processed to
+date, and it wouldn't yield. This was a defect density issue with the new
+CMOS-2 process -- smaller chips like the Rigel Cache chip and the CMOS-2
+shrink worked. The first seven months of prototyping yielded <B>two</B>
+fully functional P chip and <B>seven</B> fully functional F chips -- a serious
+impediment to debug! Late in 1988, the drought lifted, and serious debug
+and characterization got underway. To everyone's surprise, Rigel ran much
+faster than anticipated. Designed for 25Mhz worst case operation (40ns
+microcycle), its most frequent bin point was 35Mhz, with some parts running
+as fast as 40Mhz. CMOS-2 was a bear to get working, but once it worked, it
+was a great process! Rigel systems shipped in July, 1989.
+<P>
+Like CVAX, the Rigel chips were lavishly decorated at the die level. The
+CPU chip sported a
+<A HREF="http://micro.magnet.fsu.edu/creatures/pages/rigeltrex.html">dinosaur
+logo</A> to match its code name, the F chip had a
+<A HREF="http://micro.magnet.fsu.edu/creatures/pages/kiwei.html">well dressed
+bird</A> as well as a
+<A HREF="http://micro.magnet.fsu.edu/creatures/pages/spaceinvader.html">doodled
+space-alien</A>, and the C chip a cow.
+<P>
+Rigel was presented at the 1989 International Solid State Circuits Conference.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

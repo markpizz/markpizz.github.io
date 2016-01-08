@@ -1,0 +1,1250 @@
+.TOC    "SPEC.MIC -- Specifier Flows"
+.TOC    "Revision 9.2"
+
+;       Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984, 1985 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC 	"	Revision History"
+
+;	3-Jun-85	[RMS]	Removed short literal alu func for pass 4.1
+;	7-May-84	[RMS]	Fixed FD problem in index flows (JLR)
+; 09	14-Feb-84	[RMS]	Fixed immediate.av flows for pass 2
+;	15-Sep-83	[RMS]	Relaxed alignment constraints
+; 08	10-Aug-83	[RMS]	Revised for SC delayed branches
+;	5-Aug-83	[RMS]	Editorial changes from code review
+;	4-Aug-83	[RMS]	Added global label
+;	6-Jun-83	[RMS]	Editorial changes
+;	5-Jun-83	[RMS]	Added global label
+; 07	31-May-83	[RMS]	Removed third at/dl field
+;	28-May-83	[RMS]	Revised machine check and console interfaces
+;	27-May-83	[RMS]	Code compression
+;	24-Mar-83	[RMS]	Revised nomenclature for alternate IID
+; 06	13-Mar-83	[RMS]	Major code compression
+;	17-Feb-83	[RMS]	Added IID no exceptions where needed
+;	27-Dec-82	[RMS]	Fixed PC load conflicts
+;	9-Dec-82	[RMS]	Revised for machine check convention
+;	7-Dec-82	[RMS]	Fixed CVTGF short literal problem
+;	6-Dec-82	[RMS]	Editorial changes
+;	28-Nov-82	[RMS]	Editorial changes
+; 05	24-Nov-82	[RMS]	Revised allocation limits
+; 04	4-Nov-82	[RMS]	Added d_floating support
+;	14-Oct-82	[RMS]	Editorial changes
+;	12-Oct-82	[RMS]	Changed allocation limits
+;	8-Oct-82	[RMS]	Saved word in immediate.av cases
+; 03	24-Sep-82	[RMS]	Added floating short literal support
+; 02	14-Sep-82	[RMS]	Consolidated FSD and GSD
+;	6-Sep-82	[RMS]	Editorial changes
+;	31-Aug-82	[RMS]	Changed IB restart instruction from probe to read
+;				Editorial changes for case statements
+;	26-Aug-82	[RMS]	Revised for W5 restriction
+;	19-Aug-82	[RMS]	Revised for case call on SPEC.IB.GET.DATA
+;	17-Aug-82	[RMS]	Revised for new pass versus zext operations
+;	15-Aug-82	[RMS]	Revised for changed shift, VA& nomenclature
+;	13-Aug-82	[RMS]	Changed GSD3 to GSD for compatability with
+;				proposed FSD/GSD hardware change
+;	10-Aug-82	[RMS]	Removed SC setting from SSD
+; 01	6-Aug-82	[RMS]	First edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN SPECIFIER
+
+.nobin
+.TOC	"	FSD/GSD -- First/General Specifier Decode"
+
+;	FSD	First Specifier Decode
+;	GSD	General Specifier Decode
+;
+;	FSD parses the first specifier following the opcode.  It is invoked 
+;	directly from IID by the hardware.
+;
+;	GSD parses the third and subsequent specifiers in long instructions.
+;	It is invoked by CALL.CASE.SPEC[GSD..]
+;
+;	Entry conditions:
+;		DL	=	contains operand length
+;		AT	=	contains access type
+;		RMODE	=	set if specifier is 5x
+;		RN	=	contains register number of specifier 
+;		ID	=	contains displacement if specifier is Ax - Dx
+;
+;	Exit conditions:
+;		VA	=	contains operand address
+;		W0	=	contains operand address if AT.AV  
+;		W0	=	contains operand if AT.RM and DL.BWL
+;		W1,W0	=	contains operand if AT.RM and DL.Q
+;		SC	=	contains duplicate of W0 if AT.RM (except for fl short lit!)
+;       	AT,DL	=	contain attributes of SECOND specifier
+;       	T[SPEC],T[MMGT]	=	trashed!!!!
+;		ALUCC,RMODE,RN,ID,STATE BITS<3:0>  are not affected
+;
+;	Note:	FSD exits with a call to the hardware NSD branch.  This forces control
+;		to SSD or execution flows.  GSD exits with an effective RETURN.  This
+;		returns control to the caller.
+;
+;	Note:	FSD/GSD contains LOAD.V&PC directives in the .av flows.  These will clear
+;		the FD bit if set.  Do NOT invoke FSD/GSD from g_floating microcode.
+;
+
+;	Special notes for FSD:
+;
+;	FSD and GSD can be physically the same routine, because of the following points:
+;
+;	1) Special interpretation of EXECUTE.NSD.  When the I Box recognizes
+;	   EXECUTE.NSD, it checks a special flag called EXECUTION_STARTED,
+;	   which is cleared at IID.  If EXECUTION_STARTED is cleared, NSD
+;	   performs either a case dispatch to SSD, or a masked dispatch to
+;	   the execution routine (in which case it also sets EXECUTION_STARTED).
+;	   If EXECUTION_STARTED is set, NSD is treated as an ordinary subroutine
+;	   return.  Thus FSD, which is reached by hardware dispatch, exits
+;	   to either SSD or execution, while GSD, which is reached by subroutine
+;	   call, exits to the caller.
+;
+;	2) Dedicated locations for IB dry at IID.  When the I Box recognizes
+;	   IB stall or halt at IID, it dispatches to dedicated exception
+;	   locations rather than to the FSD dry offsets.  Thus the FSD
+;	   dry offsets can be used by GSD to implement the required stall
+;	   looping and halt restart code.
+;
+;
+;	The processing of floating short literals is more complicated in FSD
+;	than in SSD because of the irregularity of the opcode assignments for
+;	certain converts.  F_floating can be split from d_ or g_ floating by
+;	the length field, but d_ and g_ cannot be split using just opcode
+;	bit <5>, because of CVTGF = 33FD.  Therefore, FSD must do a more
+;	elaborate breakout on bits <6:5>:
+;
+;	   <6:5> = 00	-->	impossible!
+;	   <6:5> = 01	-->	opcode = x x01x xxxx	-->	CVTGF
+;	   <6:5> = 10	-->	opcode = x x10x xxxx	-->	g_floating
+;	   <6:5> = 11	-->	opcode = x x11x xxxx	-->	d_floating
+;
+;	Note that SSD need only look at bit <5>, since CVTGF does not invoke SSD.
+;
+.bin
+
+GSD..:						; general entry point for GSD
+
+;	Short literal:  get specifier itself, check for special cases
+;	(mode = AVM, instr = Fbox, length = quad), else exit.
+
+FSD.SH.LIT..:					; general entry point for FSD
+	;********** Hardware dispatch **********; S^# flow start - 0x,0F,1x,1F,2x,2F,3x,3F
+	SC&, W[0]<--ZEXT.M[ID],			; store short lit
+	IF(AT.AVMF)_[FSD.SH.LIT.SPEC].IF(BWL)_NSD ; exit for bwl
+
+	;---------------------------------------;
+	W[1]<--0,				; zero 2nd longword of operand
+	EXECUTE.NSD				; exit for quad
+
+;	Index:  parse another specifier, add in register.shfl.dl, go fetch operand.
+
+FSD.INDEX..:
+	;********** Hardware dispatch **********; [R] flow start - 4x
+	W[0]<--G(RN).SHFL.(DL),			; store indexing amount
+	CALL.CASE.SPEC[INDEXSPEC.CASE]		; decode indexed specifier's address
+
+	;---------------------------------------;
+	VA&, W[0]<--W[0]+VA,			; add index amount to spec addr ret in VA
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; exit for a or v access
+
+;	Register:  get specified register(s).
+
+FSD.RMODE..:
+	;********** Hardware dispatch **********; R flow start - 5x
+	SC&, W[0]<--ZEXT.G(RN), 		; save first GPR (zext is implicitly len(dl))
+	IF(AT.A)_[FSD.RSRV.ADDR.FLT].IF(BWL.OR.AT.V)_NSD; exit for bwl or v access
+
+	;---------------------------------------;
+	W[1]<--G(RN+1),				; save second GPR
+	EXECUTE.NSD				; exit for quad
+
+;	Register deferred:  use register as address, go fetch operand.
+
+FSD.REG.DEFER..:
+	;********** Hardware dispatch **********; (R) flow start - 6x
+	VA&, W[0]<--G(RN),			; save operand address
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; exit for a and v access type
+
+;	Autodecrement:  compute register-k(dl), use as address, go fetch operand.
+
+FSD.AUTODEC..:
+	;********** Hardware dispatch **********; -(R) flow start - 7x
+	VA&, G(RN)&W[0]<--G(RN)-M[KDL].RLOG,	; decr G(RN) by DL to from operand address
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; exit for a and v access type
+
+;	Autoincrement:  use register as address, computer register+k(dl), go fetch operand.
+
+FSD.AUTOINC..: 
+	;********** Hardware dispatch **********; (R)+ flow start - 8x
+	VA&, W[0]<--G(RN)			; save operand address
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[KDL].RLOG,		; increment G(RN) by data length
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; exit for a and v access type
+
+;	Immediate:  get data item from instruction stream.
+
+FSD.IMED..:
+	;********** Hardware dispatch **********; (PC)+ flow start - 8F
+	VA<--G(RN),				; operand address into VA
+	ID<--IB.LEN(DL).CASE,			; case on getting data from IB
+	IF(AT.RM)_[FSD.IMED.RM.GOT.DATA]	; split data & address flows
+
+;= ALIGNLIST 00*	(FSD.IMED.AV.GOT.DATA,			,
+;=			 FSD.IMED.AV.STALL,	FSD.IMED.AV.IB.HALTED)
+
+FSD.IMED.AV.GOT.DATA:				; a and v access type immediate flows
+	;---------------------------------------; IB ok:
+	WBUS<--VA+M[KDL],			; increment program counter past inline data
+	LOAD.V&PC				; put new prefetch address in VIBA
+
+FSD.IMED.AV.EXIT:
+	;---------------------------------------;
+	W[0]<--VA, EXECUTE.NSD			; copy address to W0, exit
+
+FSD.IMED.AV.STALL:
+	;---------------------------------------; IB stall:
+	WBUS<--VA+M[KDL],			; increment program counter past inline data
+	LOAD.V&PC.GOTO[FSD.IMED.AV.EXIT]	; ignore prefetch problem, could be spurious
+
+FSD.IMED.AV.IB.HALTED:
+	;---------------------------------------; IB halted:
+	WBUS<--VA+M[KDL],			; increment program counter past inline data
+	LOAD.V&PC.GOTO[FSD.IMED.AV.EXIT]	; ignore prefetch problem, could be spurious
+
+;	Autoincrement deferred:  use register as pointer, compute register+4,
+;	go fetch pointer and operand.
+
+FSD.AUTOINC.DEFER..: 
+	;********** Hardware dispatch **********; @(R)+ flow start - 9x
+	VA<--G(RN)				; save address of operand address in VA
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[FOUR].RLOG,		; incr G(RN) to point beyond address in mem
+	GOTO[FSD.DEFERRED]			; go process deferred mode
+
+;	Absolute:  get address from instruction stream, go fetch operand.
+
+FSD.ABSOLUTE..:
+	;********** Hardware dispatch **********; @(PC)+ flow start - 9F
+	ID<--IB.LONG.CASE.AT.[FSD.ABS.GOT.ADR]	; get address of data from IB
+
+;= ALIGNLIST 00*	(FSD.ABS.GOT.ADR,		, 
+;=			 FSD.ABS.STALL,		FSD.ABS.HALT)
+
+FSD.ABS.GOT.ADR:
+	;---------------------------------------; IB ok:
+	VA&, W[0]<--M[ID],			; store away operand address
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; go read in the operand
+
+FSD.ABS.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LONG.CASE.AT.[FSD.ABS.GOT.ADR] 	; try again to read from IB
+
+FSD.ABS.HALT:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+
+;	Byte/word displacement:  compute register+m[id], use as address, go fetch operand.
+
+FSD.BW.DISP..: 
+	;********** Hardware dispatch **********; D^(R),D^(PC) flow start - Ax,AF,Cx,CF
+	VA&, W[0]<--G(RN)+M[ID],		; add in displ to form operand address
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; exit for a or v access type
+
+;	Longword displacement:  compute register+m[id], use as address, go fetch operand.
+
+FSD.L.DISP..:
+	;********** Hardware dispatch **********; D^(R),D^(PC) flow start - Ex,EF
+	ID<--IB.LONG.CASE.AT.[FSD.L.DISP.GOT.DISP]	; get longword displacement from IB
+
+;= ALIGNLIST 00*	(FSD.L.DISP.GOT.DISP,		, 
+;=			 FSD.L.DISP.STALL,	FSD.L.DISP.HALT)
+
+FSD.L.DISP.GOT.DISP:
+	;---------------------------------------; IB ok:
+	VA&, W[0]<--G(RN)+M[ID],		; add in displ to form operand address
+	IF(AT.AV)_NSD.ELSE.[FSD.MEM.READ]	; exit for a or v access type
+
+FSD.L.DISP.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LONG.CASE.AT.[FSD.L.DISP.GOT.DISP] 	; try again to load IB data
+
+FSD.L.DISP.HALT:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+	
+;	Byte/word displacement deferred:  compute register+m[id], use as pointer,
+;	go fetch pointer and operand.
+
+FSD.BW.DISP.DEFER..:
+	;********** Hardware dispatch **********; @D^(R),@D^(PC) flow start - Bx,BF,Dx,DF
+	VA&, WBUS<--G(RN)+M[ID], 		; add in disp to form addr of operand addr
+	GOTO[FSD.DEFERRED]			; go process deferred mode
+
+;	Longword displacement deferred:  compute register+m[id], use as pointer,
+;	go fetch pointer and operand.
+
+FSD.L.DISP.DEFER..:
+	;********** Hardware dispatch **********; @D^(R),@D^(PC) flow start - Fx,FF
+	ID<--IB.LONG.CASE,			; case call subroutine to return
+	CALL[SPEC.GET.L.DISP]			; longword displacement in VA
+						; fall thru to deferred processing
+
+;	Deferred modes:  VA holds pointer to effective address.
+;	Read pointer, go fetch operand.
+
+FSD.DEFERRED:
+	;---------------------------------------;
+	W[0]<--MEM(VA), LONG			; read address of operand from memory
+   
+	;---------------------------------------;
+	VA<--W[0],				; store operand address in VA
+	IF(AT.AV)_NSD				; exit for A and V type
+
+;	Data read:  VA holds effective address.
+;	Read data longword(s) and exit.
+
+FSD.MEM.READ:
+	;---------------------------------------;
+	SC&, W[0]<--MEM(VA).CHECK(AT),		; read data from memory DL dependent
+ 	LEN(DL),				; write check if AT is m
+	IF(AT.A)_[FSD.HARDWARE.FLT].IF(BWL.OR.AT.V)_NSD ; exit for bwl
+						; NOTE--> cheap use of an existing
+						;   branch field
+
+	;---------------------------------------;
+	W[1]<--MEM(VAP), LONG,			; read in second longword from memory
+	EXECUTE.NSD				; exit
+
+;	Short literal special cases:
+;
+;		if AVM, reserved addressing fault.
+;		if Fbox, convert to appropriate short literal format.
+
+FSD.SH.LIT.SPEC:
+	;---------------------------------------;
+	W[0]<--W[0].SHFL.[4],			; assume F short literal, shift into place
+	CASE2[DL].AT.[FSD.SH.LIT.F]		; case on data length:  long vs quad
+
+;= ALIGNLIST 1011*	(FSD.SH.LIT.F,	FSD.SH.LIT.DG)
+
+FSD.SH.LIT.F:
+	;---------------------------------------; DL = 10 (longword, F):
+	W[0]<--W[0].OR.K[40]0,			; insert top of exp in floating short lit
+	IF(AT.AVM)_[FSD.RSRV.ADDR.FLT].(DL.BWL)_NSD ; if avm, then reserved addr flt, if bwl, exit
+						; since DL = 10, this cannot fall through!!!
+
+FSD.SH.LIT.DG:
+	;---------------------------------------; DL = 11 (quadword, D or G):
+	W[SC]<--T[OPCODE],			; get opcode to SC for test
+	IF(AT.AVM)_[FSD.RSRV.ADDR.FLT].IF(BWL)_NSD ; if avm, then reserved addr flt, if bwl, exit
+						; since DL = 11, this cannot exit!!!
+
+	;---------------------------------------;
+	W[1]<--0, 				; quadword literal, zero second word
+	CASE2[SC7-4].AT.[FSD.HARDWARE.FLT]	; case on opcode<6:5> (G vs D)
+
+;= ALIGNLIST *001*	(FSD.HARDWARE.FLT,	FSD.SH.LIT.CVTGF,
+;=			 FSD.SH.LIT.G,		FSD.SH.LIT.D)
+;  FP opcodes are 0X(FD) to 7X(FD), except for 99FD, which is filtered by DL case.
+;  Opcode<7:4> = 0 to 7 --> SC<7:4> = 0???
+
+FSD.SH.LIT.CVTGF:
+	;---------------------------------------; SC<6:5> = 01:
+	W[0]<--ZEXT.W[0].SHFR.[3],		; CVTGF with short literal, shift into place
+	GOTO[FSD.SH.LIT.D]			; go insert top of exp
+
+FSD.SH.LIT.G:
+	;---------------------------------------; SC<6:5> = 10:
+	W[0]<--ZEXT.W[0].SHFR.[3]		; G short literal, shift into place
+
+FSD.SH.LIT.D:
+	;---------------------------------------; SC<6:5> = 11:
+	W[0]<--W[0].OR.K[40]0,			; D short literal, insert top of exp
+	EXECUTE.NSD				; exit
+
+;	Reserved addressing fault.
+
+FSD.RSRV.ADDR.FLT:
+FSD.PC.FAULT..:
+	;********** Hardware dispatch **********; [PC],PC,(PC),-(PC) flow start - 4F,5F,6F,7F
+	GOTO[RSRV.ADDR.FLT..]			; ILLEGAL specifiers modes
+
+;	The following locations can ONLY be reached if this code is CALLED as GSD.
+;	IB dry conditions at IID are handled by special, dedicated exception locations.
+
+FSD.IB.STALL..:
+	;********** Hardware dispatch **********; IB stall at GSD only:
+	JMP.CASE.SPEC[GSD..]			; keep trying GSD until IB is halted or
+						; get enough data to continue
+
+FSD.IB.HALTED..:
+	;********** Hardware dispatch **********; IB halted at GSD only:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from instruction stream
+						; NOTE--> does a return[-3]
+
+;	Immediate RM mode IB dry cases.
+
+;= ALIGNLIST 00*	(FSD.IMED.RM.GOT.DATA,			,
+;=			 FSD.IMED.RM.STALL,	FSD.IMED.RM.HALTED)
+
+FSD.IMED.RM.GOT.DATA:
+	;---------------------------------------; IB ok:
+	SC&, W[0]<--ZEXT.M[ID],			; store operand (zext is implicitly len(dl))
+	IF(AT.A)_[FSD.HARDWARE.FLT].IF(BWL.OR.AT.V)_NSD ; exit for bwl
+
+	;---------------------------------------;
+	ID<--IB.LEN(DL).CASE,			; load ID reg with next lw from IB
+	CALL[SPEC.GET.IB.DATA]			; check for stall, halt
+	
+	;---------------------------------------;  
+	W[1]<--M[ID],				; store 2nd lw
+	EXECUTE.NSD				; exit for quad
+
+FSD.IMED.RM.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[FSD.IMED.RM.GOT.DATA]	; try getting IB data again
+
+FSD.IMED.RM.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+
+;	Internal consistency error, take machine check.
+
+FSD.HARDWARE.FLT:
+	;---------------------------------------;
+	MACHINE.CHECK[MCHK.INST0]		; impossible hardware condition, die
+
+.nobin
+.TOC	"	SSD -- Second Specifier Decode"
+
+;	SSD	Second Specifer Decode
+;
+;	SSD parses the second specifier of VAX opcode.  It is invoked by a hardward
+;	next specifier decode (NSD) dispatch from FSD.
+;
+;	Entry conditions:
+;		DL	=	contains operand length
+;		AT	=	contains access type
+;		RMODE	=	set if specifier is 5x
+;		RN	=	contains register number of specifier 
+;		ID	=	contains displacement if specifier is Ax - Dx
+;
+;	Exit conditions:
+;		VA	=	contains operand address
+;		W2	=	contains operand address if AT.AV  
+;		W2	=	contains operand if AT.RM and DL.BWL
+;		W3,W2	=	contains operand if AT.RM and DL.Q
+;       	T[SPEC],T[MMGT]	=	trashed!!!!
+;		AT,DL,ALUCC,RMODE,RN,ID,STATE BITS<3:0> are not affected
+;		SC is not affected (except for fl short lit!)
+;
+;	Note:	SSD exits with a call to the hardware NSD dispatch.  This forces control
+;		to execution flows.
+;
+;	Note:	SSD contains LOAD.V&PC directives in the .av flows.  These will clear
+;		the FD bit if set.  Do NOT invoke SSD from g_floating microcode.
+;
+.bin
+
+;	Short literal:  get specifier itself, check for special cases
+;	(mode = AVM, instr = Fbox, length = quad), else exit.
+
+SSD.SH.LIT..:
+	;********** Hardware dispatch **********; S^# flow start - 0x,0F,1x,1F,2x,2F,3x,3F
+	W[2]<--ZEXT.M[ID],			; store short lit
+	IF(AT.AVMF)_[SSD.SH.LIT.SPEC].IF(BWL)_NSD ; exit for bwl
+
+	;---------------------------------------;
+	W[3]<--0,				; zero 2nd longword of operand
+	EXECUTE.NSD				; exit for quad
+
+;	Index:  parse another specifier, add in register.shfl.dl, go fetch operand.
+
+SSD.INDEX..:
+	;********** Hardware dispatch **********; [R] flow start - 4x
+	W[2]<--G(RN).SHFL.(DL),			; store indexing amount shift properly
+	CALL.CASE.SPEC[INDEXSPEC.CASE]		; decode indexed specifier's address
+
+	;---------------------------------------;
+	VA&, W[2]<--W[2]+VA,			; add index amount to spec addr ret in VA
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; exit for a or v access
+
+;	Register:  get specified register(s).
+
+SSD.RMODE..:
+	;********** Hardware dispatch **********; R flow start - 5x
+	W[2]<--ZEXT.G(RN), 			; save first GPR (zext is implicitly len(dl))
+	IF(AT.A)_[SSD.RSRV.ADDR.FLT].IF(BWL.OR.AT.V)_NSD; exit for bwl or v access
+
+	;---------------------------------------;
+	W[3]<--G(RN+1),				; save second GPR
+	EXECUTE.NSD				; exit
+
+;	Register deferred:  use register as address, go fetch operand.
+
+SSD.REG.DEFER..:
+	;********** Hardware dispatch **********; (R) flow start - 6x
+	VA&, W[2]<--G(RN),			; save operand address
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; exit for a and v access type
+
+;	Autodecrement:  compute register-k(dl), use as address, go fetch operand.
+
+SSD.AUTODEC..:
+	;********** Hardware dispatch **********; -(R) flow start - 7x
+	VA&, G(RN)&W[2]<--G(RN)-M[KDL].RLOG,	; decr G(RN) by DL to form operand address
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; exit for a and v access type
+
+;	Autoincrement:  use register as address, computer register+k(dl), go fetch operand.
+
+SSD.AUTOINC..: 
+	;********** Hardware dispatch **********; (R)+ flow start - 8x
+	VA&, W[2]<--G(RN)			; save operand address
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[KDL].RLOG,		; increment G(RN) by data length
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; exit for a and v access type
+
+;	Immediate:  get data item from instruction stream.
+
+SSD.IMED..:
+	;********** Hardware dispatch **********; (PC)+ flow start - 8F
+	VA<--G(RN),				; operand address into VA
+	ID<--IB.LEN(DL).CASE,			; case on getting data from IB
+	IF(AT.RM)_[SSD.IMED.RM.GOT.DATA]	; split data & address flows
+
+;= ALIGNLIST 00*	(SSD.IMED.AV.GOT.DATA,			,
+;=			 SSD.IMED.AV.STALL,	SSD.IMED.AV.IB.HALTED)
+
+SSD.IMED.AV.GOT.DATA:				; a and v access type immediate flows
+	;---------------------------------------; IB ok:
+	WBUS<--VA+M[KDL],			; increment program counter past inline data
+	LOAD.V&PC				; put new prefetch address in VIBA
+
+SSD.IMED.AV.EXIT:
+	;---------------------------------------;
+	W[2]<--VA, EXECUTE.NSD			; copy address to W2, exit
+
+SSD.IMED.AV.STALL:
+	;---------------------------------------; IB stall:
+	WBUS<--VA+M[KDL],			; increment program counter past inline data
+	LOAD.V&PC.GOTO[SSD.IMED.AV.EXIT]	; ignore prefetch problem, could be spurious
+
+SSD.IMED.AV.IB.HALTED:
+	;---------------------------------------; IB halted:
+	WBUS<--VA+M[KDL],			; increment program counter past inline data
+	LOAD.V&PC.GOTO[SSD.IMED.AV.EXIT]	; ignore prefetch problem, could be spurious
+
+;	Autoincrement deferred:  use register as pointer, compute register+4,
+;	go fetch pointer and operand.
+
+SSD.AUTOINC.DEFER..: 
+	;********** Hardware dispatch **********; @(R)+ flow start - 9x
+	VA<--G(RN)				; save address of operand address in VA
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[FOUR].RLOG,		; incr G(RN) to point beyond address in mem
+	GOTO[SSD.DEFERRED]			; go process deferred mode
+
+;	Absolute:  get address from instruction stream, go fetch operand.
+
+SSD.ABSOLUTE..:
+	;********** Hardware dispatch **********; @(PC)+ flow start - 9F
+	ID<--IB.LONG.CASE.AT.[SSD.ABS.GOT.ADR]	; get address of data from IB
+
+;= ALIGNLIST 00*	(SSD.ABS.GOT.ADR,		, 
+;=			 SSD.ABS.STALL,		SSD.ABS.HALT)
+
+SSD.ABS.GOT.ADR:
+	;---------------------------------------; IB ok:
+	VA&, W[2]<--M[ID],			; store away operand address
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; go read in the operand
+
+SSD.ABS.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LONG.CASE.AT.[SSD.ABS.GOT.ADR] 	; try again to read from IB
+
+SSD.ABS.HALT:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+
+;	Byte/word displacement:  compute register+m[id], use as address, go fetch operand.
+	
+SSD.BW.DISP..: 
+	;********** Hardware dispatch **********; D^(R),D^(PC) flow start - Ax,AF,Cx,CF
+	VA&, W[2]<--G(RN)+M[ID],		; add in displ to form operand address
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; exit for a or v access type
+
+;	Longword displacement:  compute register+m[id], use as address, go fetch operand.
+
+SSD.L.DISP..:
+	;********** Hardware dispatch **********; D^(R),D^(PC) flow start - Ex,EF
+	ID<--IB.LONG.CASE.AT.[SSD.L.DISP.GOT.DISP]	; get longword displacement from IB
+
+;= ALIGNLIST 00*	(SSD.L.DISP.GOT.DISP,		, 
+;=			 SSD.L.DISP.STALL,	SSD.L.DISP.HALT)
+
+SSD.L.DISP.GOT.DISP:
+	;---------------------------------------; IB ok:
+	VA&, W[2]<--G(RN)+M[ID],		; add in displ to form operand address
+	IF(AT.AV)_NSD.ELSE.[SSD.MEM.READ]	; exit for a or v access type
+
+SSD.L.DISP.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LONG.CASE.AT.[SSD.L.DISP.GOT.DISP] 	; try again to load IB data
+
+SSD.L.DISP.HALT:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+
+;	Byte/word displacement deferred:  compute register+m[id], use as pointer,
+;	go fetch pointer and operand.
+
+SSD.BW.DISP.DEFER..:
+	;********** Hardware dispatch **********; @D^(R),@D^(PC) flow start - Bx,BF,Dx,DF
+	VA&, WBUS<--G(RN)+M[ID],		; add in disp to form addr of operand addr
+	GOTO[SSD.DEFERRED]			; go process deferred mode
+
+;	Longword displacement deferred:  compute register+m[id], use as pointer,
+;	go fetch pointer and operand.
+
+SSD.L.DISP.DEFER..:
+	;********** Hardware dispatch **********; @D^(R),@D^(PC) flow start - Fx, FF
+	ID<--IB.LONG.CASE,			; case call on subroutine
+	CALL[SPEC.GET.L.DISP]			; to return longword displ in VA
+						; fall through to deferred processing
+
+;	Deferred modes:  VA holds pointer to effective address.
+;	Read pointer, go fetch operand.
+
+SSD.DEFERRED:
+	;---------------------------------------;
+	W[2]<--MEM(VA), LONG			; read address of operand from memory
+   
+	;---------------------------------------;
+	VA<--W[2],				; store operand address in VA
+	IF(AT.AV)_NSD				; exit for A and V type
+
+;	Data read:  VA holds effective address.
+;	Read data longword(s) and exit.
+
+SSD.MEM.READ:
+	;---------------------------------------;
+	W[2]<--MEM(VA).CHECK(AT),		; read data from memory DL dependent
+ 	LEN(DL),				; write check if AT is m
+	IF(AT.A)_[SSD.HARDWARE.FLT].IF(BWL.OR.AT.V)_NSD ; exit for bwl
+
+	;---------------------------------------;
+	W[3]<--MEM(VAP), LONG,			; read in second longword from memory
+	EXECUTE.NSD				; exit
+
+;	Short literal special cases:
+;
+;		if AVM, reserved addressing fault.
+;		if Fbox, convert to appropriate short literal format.
+
+SSD.SH.LIT.SPEC:
+	;---------------------------------------;
+	W[2]<--W[2].SHFL.[4],			; assume F short literal, shift into place
+	CASE2[DL].AT.[SSD.SH.LIT.F]		; case on data length:  long vs quad
+
+;= ALIGNLIST 1011*	(SSD.SH.LIT.F,	SSD.SH.LIT.DG)
+
+SSD.SH.LIT.F:
+	;---------------------------------------; DL = 10 (longword, F):
+	W[2]<--W[2].OR.K[40]0,			; insert top of exp in floating short lit
+	IF(AT.AVM)_[SSD.RSRV.ADDR.FLT].(DL.BWL)_NSD ; if avm, then reserved addr flt, if bwl, exit
+						; since DL = 10, this cannot fall through!!!
+
+SSD.SH.LIT.DG:
+	;---------------------------------------; DL = 11 (quadword, D or G):
+	W[SC]<--T[OPCODE],			; get opcode to SC for test
+	IF(AT.AVM)_[SSD.RSRV.ADDR.FLT].IF(BWL)_NSD ; if avm, then reserved addr flt, if bwl, exit
+						; since DL = 11, this cannot exit!!!
+
+	;---------------------------------------;
+	W[3]<--0, 				; quadword literal, zero second word
+	CASE2[SC7-4].AT.[SSD.SH.LIT.G]		; case on opcode<5> (G vs D)
+
+;= ALIGNLIST *101*	(SSD.SH.LIT.G,	SSD.SH.LIT.D)
+;  FP opcodes are 0X(FD) to 7X(FD), except for 99FD, which never reaches SSD.
+;  Opcode<7:4> = 0 to 7 --> SC<7:4> = 0???
+
+SSD.SH.LIT.G:
+	;---------------------------------------; SC<5> = 0:
+	W[2]<--ZEXT.W[2].SHFR.[3]		; G short literal, shift into place
+
+SSD.SH.LIT.D:
+	;---------------------------------------; SC<5> = 1:
+	W[2]<--W[2].OR.K[40]0,			; D short literal, insert top of exp
+	EXECUTE.NSD				; exit
+
+;	Reserved addressing fault.
+
+SSD.RSRV.ADDR.FLT:
+SSD.PC.FAULT..:
+	;********** Hardware dispatch **********; [PC],PC,(PC),-(PC) flow start - 4F,5F,6F,7F
+	GOTO[RSRV.ADDR.FLT..]			; ILLEGAL specifiers modes
+
+SSD.IB.STALL..:
+	;********** Hardware dispatch **********; IB stall at SSD:
+	EXECUTE.NSD				; keep trying NSD until IB is halted or 
+						; get enough data to continue
+
+SSD.IB.HALTED..:
+	;********** Hardware dispatch **********; IB halted at SSD:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from instruction stream
+						; NOTE--> does a return[-3]
+
+;	Immediate RM mode IB dry cases.
+
+;= ALIGNLIST 00*	(SSD.IMED.RM.GOT.DATA,			,
+;=		  	 SSD.IMED.RM.STALL,	SSD.IMED.RM.HALTED)
+
+SSD.IMED.RM.GOT.DATA:
+	;---------------------------------------; IB ok:
+	W[2]<--ZEXT.M[ID],			; store operand (zext is implicitly len(dl))
+	IF(AT.A)_[SSD.HARDWARE.FLT].IF(BWL.OR.AT.V)_NSD ; exit for bwl
+
+	;---------------------------------------;
+	ID<--IB.LEN(DL).CASE,			; load ID reg with next lw from IB
+	CALL[SPEC.GET.IB.DATA]			; call subr to check for stall, halt
+	
+	;---------------------------------------;  
+	W[3]<--M[ID],				; store 2nd lw
+	EXECUTE.NSD				; exit for quad
+
+SSD.IMED.RM.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[SSD.IMED.RM.GOT.DATA]	; try getting IB data again
+
+SSD.IMED.RM.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+
+;	Internal consistency error, take machine check.
+
+SSD.HARDWARE.FLT:
+	;---------------------------------------;
+	MACHINE.CHECK[MCHK.INST1]		; impossible hardware condition, die
+
+.nobin
+.TOC	"	INDEXSPEC -- Index Specifier Decode"
+
+;	INDEXSPEC	INDEX SPECifier flows
+;
+;	INDEXSPEC is called from the specifier flows to decode an index specifier.
+;
+;	Entry conditions:
+;		DL	=	contains operand length
+;		AT	=	contains access type
+;		RMODE	=	set if specifier is 5x
+;		RN	=	contains register number of specifier 
+;		ID	=	contains displacement if specifier is Ax - Dx
+;
+;	Exit conditions:
+;		VA	=	contains the unindexed operand address
+;       	T[SPEC],T[MMGT]	=	trashed!!!!!!!!!!
+;
+;	Note:	INDEXSPEC does NOT contain LOAD.V&PC directives, but does technically
+;		violate the SRM (as do the 11/780 and V-11) in its treatment of
+;		indexed immediate addressing, in order to preserve the FD bit.
+;
+.bin
+
+;= ALIGNLIST 0000*	(INDEXSPEC.SH.LIT, 		INDEXSPEC.INDEX,  
+;=			 INDEXSPEC.IB.STALL,    	INDEXSPEC.IB.HALTED,	
+;=			 INDEXSPEC.IMED,   		INDEXSPEC.RMODE,  
+;=			 INDEXSPEC.REG.DEFER,   	INDEXSPEC.PC.FAULT,  
+;=			 INDEXSPEC.AUTODEC,		INDEXSPEC.AUTOINC,
+;=			 INDEXSPEC.AUTOINC.DEFER,	INDEXSPEC.ABSOLUTE,	
+;=			 INDEXSPEC.BW.DISP,		INDEXSPEC.L.DISP, 
+;=			 INDEXSPEC.BW.DISP.DEFER, 	INDEXSPEC.L.DISP.DEFER)	
+
+INDEXSPEC.CASE:
+
+;	Short literal:  reserved addressing fault.
+
+INDEXSPEC.SH.LIT:
+	;---------------------------------------; S^# flow start - 0x,0F,1x,1F,2x,2F,3x,3F
+	GOTO[RSRV.ADDR.FLT..]			; reserved address fault
+
+;	Index:  reserved addressing fault.
+
+INDEXSPEC.INDEX:
+	;---------------------------------------; [R] flow start - 4x
+	GOTO[RSRV.ADDR.FLT..]			; reserved address fault
+
+;	Register:  reserved addressing fault.
+
+INDEXSPEC.RMODE:
+	;---------------------------------------; R flow start - 5x
+	GOTO[RSRV.ADDR.FLT..]			; reserved address fault
+
+;	Register deferred:  use register as address, return.
+
+INDEXSPEC.REG.DEFER:
+	;---------------------------------------; (R) flow start - 6x
+	VA<--G(RN), RETURN			; save operand address
+
+;	Autodecrement:  compute register-k(dl), use as address, return.
+
+INDEXSPEC.AUTODEC:
+	;---------------------------------------; -(R) flow start - 7x
+	VA&, G(RN)<--G(RN)-M[KDL].RLOG, RETURN	; decr G(RN) by DL to form operand address
+
+;	Autoincrement:  use register as address, compute register+k(dl), return.
+
+INDEXSPEC.AUTOINC: 
+	;---------------------------------------; (R)+ flow start - 8x
+	VA<--G(RN)				; save address of operand in VA
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[KDL].RLOG, RETURN	; increment G(RN) by data length
+
+;	Immediate:  use PC as address, get I stream immediate data, return.
+
+INDEXSPEC.IMED:
+	;---------------------------------------; (PC)+ flow start - 8F
+	VA<--G(RN),				; save address of operand in VA
+	CASE4[DL].AT.[INDEXSPEC.IMED.BYTE]	; case on prevailing data length
+
+;= ALIGNLIST 0011*	(INDEXSPEC.IMED.BYTE,	INDEXSPEC.IMED.WORD,
+;=			 INDEXSPEC.IMED.LONG,	INDEXSPEC.IMED.QUAD)
+
+INDEXSPEC.IMED.BYTE:
+	;---------------------------------------; dl = byte:
+	ID<--IB.LEN(DL).CASE.AT.[SPEC.GET.IB.DATA]	; case to get data loop, return from there
+
+INDEXSPEC.IMED.WORD:
+	;---------------------------------------; dl = word:
+	ID<--IB.LEN(DL).CASE.AT.[SPEC.GET.IB.DATA]	; case to get data loop, return from there
+
+INDEXSPEC.IMED.LONG:
+	;---------------------------------------; dl = long:
+	ID<--IB.LEN(DL).CASE.AT.[SPEC.GET.IB.DATA]	; case to get data loop, return from there
+
+INDEXSPEC.IMED.QUAD:
+	;---------------------------------------; dl = quad:
+	ID<--IB.LEN(DL).CASE,			; case call to get data loop,
+	CALL[SPEC.GET.IB.DATA]			; return in line
+
+	;---------------------------------------;
+	ID<--IB.LEN(DL).CASE.AT.[SPEC.GET.IB.DATA]	; case to get data loop, return from there
+
+;	Autoincrement deferred:  use register as pointer, compute register+4,
+;	go fetch pointer and return.
+
+INDEXSPEC.AUTOINC.DEFER: 
+	;---------------------------------------; @(R)+ flow start - 9x
+	VA<--G(RN)				; save address of operand in VA
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[FOUR].RLOG,		; incr G(RN) to point beyond address in mem
+	GOTO[INDEXSPEC.DEFERRED]		; go read operad address
+
+;	Absolute:  use instruction stream data as address, return
+
+INDEXSPEC.ABSOLUTE:
+	;---------------------------------------; @(PC)+ flow start - 9F
+	ID<--IB.LONG.CASE.AT.[INDEXSPEC.ABS.GOT.ADR]	; get address of data from IB
+
+;= ALIGNLIST 00*	(INDEXSPEC.ABS.GOT.ADR,			, 
+;=			 INDEXSPEC.ABS.STALL,	INDEXSPEC.ABS.HALT)
+
+SPEC.GET.ABS.ADDR:
+INDEXSPEC.ABS.GOT.ADR:
+	;---------------------------------------; IB ok:
+	VA<--M[ID], RETURN			; store away operand address
+
+INDEXSPEC.ABS.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LONG.CASE.AT.[INDEXSPEC.ABS.GOT.ADR] ; try again to read from IB
+
+INDEXSPEC.ABS.HALT:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+
+;	Byte/word displacement:  use register+m[id] as address, return.
+
+INDEXSPEC.BW.DISP: 
+	;---------------------------------------; D^(R),D^(PC) flow start - Ax,AF,Cx,CF
+	VA&, WBUS<--G(RN)+M[ID], RETURN		; add in displ to form operand address
+
+;	Longword displacement:  use register+m[id] as address, return.
+
+INDEXSPEC.L.DISP:
+	;---------------------------------------; D^(R),D^(PC) flow start - Ex,EF
+	ID<--IB.LONG.CASE.AT.[INDEXSPEC.L.DISP.GOT.DISP] ; get longword displacement from IB
+
+;= ALIGNLIST 00*	(INDEXSPEC.L.DISP.GOT.DISP,			, 
+;=			 INDEXSPEC.L.DISP.STALL,	INDEXSPEC.L.DISP.HALT)
+
+SPEC.GET.L.DISP:
+INDEXSPEC.L.DISP.GOT.DISP:
+	;---------------------------------------; IB ok:
+	VA&, WBUS<--G(RN)+M[ID], RETURN		; add in displ to form operand address
+
+INDEXSPEC.L.DISP.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LONG.CASE.AT.[INDEXSPEC.L.DISP.GOT.DISP] ; try again to load IB data
+
+INDEXSPEC.L.DISP.HALT:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from next page
+						; NOTE--> does a return[-3]
+	
+;	Byte/word displacement deferred:  use register+m[id] as pointer,
+;	go fetch pointer, return.
+
+INDEXSPEC.BW.DISP.DEFER:
+	;---------------------------------------; @D^(R),@D^(PC) flow start - Bx,BF,Dx,DF
+	VA&, WBUS<--G(RN)+M[ID],		; add in disp to form addr of operand addr
+	GOTO[INDEXSPEC.DEFERRED]		; go process deferred mode
+
+;	Longword displacement deferred:  use register+m[id] as pointer,
+;	go fetch pointer, return.
+
+INDEXSPEC.L.DISP.DEFER:
+	;---------------------------------------; @D^(R),@D^(PC) flow start - Fx,FF
+	ID<--IB.LONG.CASE,			; case call on subroutine
+	CALL[SPEC.GET.L.DISP]			; to return longword displacement in VA
+						; fall through to deferred processing
+
+;	Deferred modes:  VA contains address of pointer.
+;	Read pointer and return.
+
+INDEXSPEC.DEFERRED:
+	;---------------------------------------;
+	T[SPEC]<--MEM(VA), LONG			; read address of operand from memory
+   
+	;---------------------------------------;
+	VA&, WBUS<--T[SPEC], RETURN		; store operand address in VA
+
+;	Reserved addressing fault.
+
+INDEXSPEC.RSRV.ADDR.FLT:
+INDEXSPEC.PC.FAULT:
+	;---------------------------------------; [PC],PC,(PC),-(PC) flow start - 4F,5F,6F,7F
+	GOTO[RSRV.ADDR.FLT..]			; ILLEGAL specifiers modes
+
+;	IB stall at CALL.CASE.SPEC[INDEXSPEC].
+
+INDEXSPEC.IB.STALL:
+	;---------------------------------------; IB stall at INDEXSPEC:
+	JMP.CASE.SPEC[INDEXSPEC.CASE]		; keep trying until IB is halted or 
+						; get enough data to continue
+
+INDEXSPEC.IB.HALTED:
+	;---------------------------------------; IB halted at INDEXSPEC:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from instruction stream
+						; NOTE--> does a return[-3]
+
+.nobin
+.TOC	"	WDEST -- Write Destination Specifier Decode"
+
+;	WDEST	Write Destination Decode
+;
+;	This routine is jumped to from VAX instruction microcode to write the result
+;	in W1'W0.
+;
+;	Entry conditions:
+;		DL	=	contains operand length
+;		RMODE	=	set if specifier is 5x
+;		W0	=	contains byte, word, long word result
+;		W1,W0	=	contains quad result
+;		RN	=	contains register number of specifier
+;		ID	=	contains displacement if specifier is Ax - Dx
+;		ALU.CC	=	contains condition codes for result operand (AAA* mappings)
+;
+;	Exit conditions:
+;		The psl cc's are set to the proper value.
+;		The next microstate is IID.
+;
+.bin
+
+;= ALIGNLIST 0000*	(WDEST.SH.LIT,		WDEST.INDEX,   
+;=			 WDEST.IB.STALL,	WDEST.IB.HALTED,
+;=			 WDEST.IMED,		WDEST.RMODE,
+;=			 WDEST.REG.DEFER,	WDEST.PC.FAULT,
+;=			 WDEST.AUTODEC,		WDEST.AUTOINC,
+;=			 WDEST.AUTOINC.DEFER,	WDEST.ABSOLUTE,
+;=			 WDEST.BW.DISP,		WDEST.L.DISP,
+;=			 WDEST.BW.DISP.DEFER,	WDEST.L.DISP.DEFER)
+
+WDEST..:
+
+;	Short literal:  reserved addressing fault.
+
+WDEST.SH.LIT:
+	;---------------------------------------; S^# flow start - 0x,0F,1x,1F,2x,2F,3x,3F
+	GOTO[RSRV.ADDR.FLT..]			; fault for writing to short lit
+
+;	Index:  parse another specifier, add in register.shfl.dl, go store operand.
+
+WDEST.INDEX:
+	;---------------------------------------; [R] flow start - 4x
+	W[6]<--G(RN).SHFL.(DL),			; store indexing amount in W6
+	CALL.CASE.SPEC[INDEXSPEC.CASE]		; decode indexed specifier's address
+
+	;---------------------------------------;
+	VA<--VA+W[6], GOTO[WDEST.MEM.WRITE]	; add index amount to spec addr ret in VA
+
+;	Register:  store specified register(s).
+
+WDEST.RMODE:
+	;---------------------------------------; R flow start - 5x
+	G(RN)<--W[0], SET.PSLCC, LEN(DL),	; store low result in GPR, set psl cc's
+	RN<--RN+1,				; increment register pointer
+	IF(DL.BWL)_IID				; exit for bwl
+	
+	;---------------------------------------;
+	G(RN)<--W[1], SET.PSLCC, LEN(DL),	; store high result in GPR, set psl cc's
+	OLD.Z.AND.NEW.Z,			; on combined result
+	EXECUTE.IID				; exit for quad
+
+;	Register deferred:  use register as address, go store operand.
+
+WDEST.REG.DEFER:
+	;---------------------------------------; (R) flow start - 6x
+	VA<--G(RN), GOTO[WDEST.MEM.WRITE]	; put destination address into VA
+
+;	Autodecrement:  compute register-k(dl), use as address, go store operand.
+
+WDEST.AUTODEC:
+	;---------------------------------------; -(R) flow start - 7x
+	VA&, G(RN)<--G(RN)-M[KDL].RLOG,		; dec G(RN) by DL to form operand addr
+	GOTO[WDEST.MEM.WRITE]			; go write result to memory
+
+;	Autoincrement:  use register as address, compute register+k(dl), go store operand.
+
+WDEST.AUTOINC: 
+	;---------------------------------------; (R)+ flow start - 8x
+	VA<--G(RN)				; save operand address
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[KDL].RLOG,		; increment G(RN) by data length
+	GOTO[WDEST.MEM.WRITE]			; go write result to memory
+
+;	Immediate:  reserved addressing fault.
+
+WDEST.IMED:
+	;---------------------------------------; (PC)+ flow start - 4F,5F,6F,7F
+	GOTO[RSRV.ADDR.FLT..]			; fault on modifiying instruction stream
+
+;	Autoincrement deferred:  use register as pointer, computer register+4,
+;	go fetch pointer and store operand.
+
+WDEST.AUTOINC.DEFER: 
+	;---------------------------------------; @(R)+ flow start - 9x
+	VA<--G(RN)				; save address of operand address in VA
+
+	;---------------------------------------;
+	G(RN)<--G(RN)+M[FOUR].RLOG,		; incr G(RN) to point beyond address in mem
+	GOTO[WDEST.DEFERRED]			; go process deferred mode
+
+;	Absolute:  get address from instruction stream, go store operand.
+
+WDEST.ABSOLUTE:
+	;---------------------------------------; @(PC)+ flow start - 9F
+	ID<--IB.LONG.CASE,			; case call subroutine to
+	CALL[SPEC.GET.ABS.ADDR]			; get absolute addr in VA
+
+	;---------------------------------------;
+	MEM(VA)<--W[0], SET.PSLCC, LEN(DL),	; write first lw to memory, set psl cc's
+	IF(DL.BWL)_IID.ELSE.[WDEST.MEM.WRITE.QW]	; exit for bwl, else go write second lw
+
+;	Byte/word displacement:  compute register+m[id], use as address, go store operand.
+
+WDEST.BW.DISP: 
+	;---------------------------------------; D^(R), D^(PC) flow start - Ax,AF,Cx,CF
+	VA&, WBUS<--G(RN)+M[ID],		; add in displacement to form operand addr
+	GOTO[WDEST.MEM.WRITE]			; 
+
+;	Longword displacement:  compute register+m[id], use as address, go store operand.
+
+WDEST.L.DISP:
+	;---------------------------------------; D^(R), D^(PC) flow start - Ex,EF
+	ID<--IB.LONG.CASE,			; case call subroutine to return
+	CALL[SPEC.GET.L.DISP]			; longword displacement in VA
+						; fall through to operand write processing
+
+;	Store operand:  VA contains address of operand.
+;	Write longword(s) to memory.
+
+WDEST.MEM.WRITE:
+	;---------------------------------------;
+	MEM(VA)<--W[0], SET.PSLCC, LEN(DL),	; write data to memory, set psl cc's
+	IF(DL.BWL)_IID				; go to initial instruction decode if bwl
+
+WDEST.MEM.WRITE.QW:
+	;---------------------------------------;
+	MEM(VAP)<--W[1], SET.PSLCC, LONG,	; write second longword to memory
+	OLD.Z.AND.NEW.Z,			; set psl cc's on combined result
+	EXECUTE.IID				; exit to initial instruction decode for quad
+
+;	Byte/word displacement deferred:  compute register+m[id], use as pointer,
+;	go store pointer and operand.
+
+WDEST.BW.DISP.DEFER:
+	;---------------------------------------; @D^(R), @D^(PC) flow start - Bx,BF,Dx,DF
+	VA&, WBUS<--G(RN)+M[ID],		; add in disp to form addr of operand addr
+	GOTO[WDEST.DEFERRED]			; go process deferred mode
+
+;	Longword displacement deferred:  compute register+m[id], use as pointer,
+;	go store pointer and operand.
+
+WDEST.L.DISP.DEFER:
+	;---------------------------------------; @D^(R), @D^(PC) flow start - Fx,FF
+	ID<--IB.LONG.CASE,			; case call subroutine to return
+	CALL[SPEC.GET.L.DISP]			; longword displacement in VA
+						; fall through to deferred processing
+
+;	Deferred modes:  VA contains address of pointer.
+;	Read pointer, go store operand.
+
+WDEST.DEFERRED:
+	;---------------------------------------;
+	W[6]<--MEM(VA), LONG			; read address of destination from memory
+	
+	;---------------------------------------;
+	VA<--W[6], GOTO[WDEST.MEM.WRITE]	; store address of destination in W6
+
+;	Reserved addressing fault.
+
+WDEST.PC.FAULT:
+	;---------------------------------------;
+	GOTO[RSRV.ADDR.FLT..]			; come here on [PC], (PC), -(PC), PC
+
+;	IB stall at JMP.CASE.SPEC[WDEST..].
+
+JMP.CASE.SPEC.WDEST..:
+WDEST.IB.STALL:
+	;---------------------------------------; IB stall at WDEST:
+	JMP.CASE.SPEC[WDEST..]			; redispatch at top of routine
+
+WDEST.IB.HALTED:
+        ;---------------------------------------; IB halted at WDEST:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; force read from instruction stream
+						; NOTE--> does a return[-3]
+
+;	This routine checks for IB stalls and halts following
+;	a load ID.LEN(DL).CASE.
+;
+;	Called by--
+;
+;		ID<--IB.LEN(DL).CASE,
+;		CALL[SPEC.GET.IB.DATA]
+
+;= ALIGNLIST 00*	(SPEC.GET.IB.DATA,					,
+;=			 SPEC.GET.IB.DATA.STALL,	SPEC.GET.IB.DATA.HALTED)
+
+SPEC.GET.IB.DATA:
+WAIT.ONE.CYCLE..:
+	;---------------------------------------; IB ok:
+	RETURN					; got the data in ID, return
+
+SPEC.GET.IB.DATA.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[SPEC.GET.IB.DATA]	; try again to load ID
+
+SPEC.GET.IB.DATA.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA, 				; prepare to read from instruction stream
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; IB is halted, so get it started
+						; NOTE--> does a return[-3]
+
+
+;	This routine forces a read from the location where the IB
+;	prefetcher was halted.
+;
+;	It is called from the specifier flows whenever a prefetch
+;	halt is detected.
+;
+;	Called by--
+;
+;		T[SPEC]<--VA,
+;		CALL[SPEC.FORCE.IB.READ..]
+;
+;	The routine returns to CALL-2 rather than to CALL+1.
+
+SPEC.FORCE.IB.READ..:
+	;---------------------------------------; IB halted:
+	VA&, WBUS<--T[VIBA]			; load VA from last prefetch address (VIBA)
+
+	;---------------------------------------;
+	WBUS<--MEM(VA), LONG, 			; read from inst stream	
+	CLEAR.IB.HALT.BITS			; restart IB prefetch
+						; if return here, then no memory management problem!
+
+        ;---------------------------------------;
+        VA&, WBUS<--T[SPEC],			; restore VA and return [-3] to get back
+	RETURN[-3]				; into the specifier flows
+
+
+;	These locations are reached off IID if the
+;	instruction buffer is halted or stalled.
+;
+;	Note that the halt/stall locations inside
+;	FSD cannot be reached, because IB problems
+;	at IID are dispatched here.
+
+IID.PREFETCH.HALT..:
+	;********** Hardware dispatch **********; IB halted at IID:
+	VA&, WBUS<--T[VIBA]			; put VIBA into VA for probe
+
+	;---------------------------------------;
+	WBUS<--MEM(VA), LONG,			; read from inst stream
+	CLEAR.IB.HALT.BITS			; restart IB prefetch
+						; if return here, then no memory management problem!
+						; fall through to stall, execute IID again
+
+IID.PREFETCH.STALL..:
+	;********** Hardware dispatch **********; IB stalled at IID:
+	SECOND.IID				; try decode again and do NOT recognize
+						; exceptions (traps, T-bit)
+
+;= END SPECIFIER

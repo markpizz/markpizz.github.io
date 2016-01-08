@@ -1,0 +1,1981 @@
+.TOC	"OPSYS.MIC -- Operating System Support Instructions"
+.TOC	"Revision 11.3"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	30-Jun-84	[RMS]	Fixed bug in LDPCTX (AXE)
+;	12-Jun-84	[RMS]	Saved cycles in CHMx, PROBEx
+;	11-May-84	[RMS]	Saved cycle in LDPCTX
+; 11	14-Feb-84	[RMS]	Revised REI for pass 2
+;	20-Jan-84	[RMS]	Changed STATE7-0..ALUCC to STATE3-0..ALUCC
+;	21-Nov-83	[RMS]	Revised dispatch for CHMx
+;	22-Sep-83	[RMS]	Editorial changes
+;	14-Sep-83	[RMS]	Removed T[MMGT.STATUS] read from PROBEx
+;				Removed code from LDPCTX
+;	10-Sep-83	[RMS]	Fixed prefetch restart problem in REI
+;	9-Sep-83	[RMS]	Fixed potential race condition in PROBEx
+;	31-Aug-83	[RMS]	Fixed omission in MXPR validation
+; 10	26-Aug-83	[RMS]	Revised MXPR validation, removed SC5-2 case
+;	15-Aug-83	[RMS]	Revised for int stack test restriction
+; 09	10-Aug-83	[RMS]	Revised for SC delayed branches
+;	4-Aug-83	[RMS]	Revised external IPR protocol
+;	22-Jun-83	[RMS]	Fixed bug in IPR validity check (EVKAE)
+;	20-Jun-83	[RMS]	Removed CLEAR.RN function
+;	17-Jun-83	[RMS]	Final tweak to handling of IPRs 57, 58, 62, 63
+;	17-Jun-83	[RMS]	Fixed sign extend bug in CHMx (EVKAE)
+;	16-Jun-83	[RMS]	Fixed TNV bug in PROBEx (AXE)
+;	14-Jun-83	[RMS]	Fixed handling of IPRs 59 to 61
+;	8-Jun-83	[RMS]	Added console IPRs
+;	7-Jun-83	[RMS]	Optimized CHMx
+;	6-Jun-83	[RMS]	Relaxed alignment constraints
+; 08	5-Jun-83	[RMS]	Revised MxPR processing
+; 07	1-Jun-83	[RMS]	Removed third at/dl field
+;	28-May-83	[RMS]	Revised machine check and console interfaces
+;	27-May-83	[RMS]	Code compression
+;	5-May-83	[RMS]	Revised hardware interface
+;	19-Apr-83	[RMS]	Minor code compression
+; 06	12-Apr-83	[RMS]	Revised for new memory management
+;	31-Mar-83	[RMS]	Optimized LDPCTX, SVPCTX for alignment
+;	20-Mar-83	[RMS]	Fixed bug in REI with stack<tp> set (RW)
+;	17-Mar-83	[RMS]	Revised for new mreq, dl functions
+; 05	13-Mar-83	[RMS]	Major code compression
+;	12-Mar-83	[RMS]	Fixed loss of software interrupt problem, sid constant
+;	27-Dec-82	[RMS]	Fixed G[SP].RLOG problem
+;	9-Dec-82	[RMS]	Removed extraneous ..e linkages
+;	1-Dec-82	[RMS]	Revised to mask MAPEN on MFPR
+;	28-Nov-82	[RMS]	Editorial changes
+; 04	24-Nov-82	[RMS]	Revised allocation limits and constraints
+;	18-Nov-82	[RMS]	Revised for automatic TNV elimination
+;	16-Nov-82	[RMS]	Placed CHMx from int stk code in line
+;	15-Nov-82	[RMS]	Made UPDATE.SISR.MAX a global subroutine
+;	11-Nov-82	[RMS]	Revised to re-enable IB prefetch in REI
+;	1-Nov-82	[RMS]	Revised for proper system ident constant
+;	26-Oct-82	[RMS]	Made UPDATE.PSL.HWRE a global subroutine
+;	21-Oct-82	[RMS]	Re-ordered end of REI for FPD propagation time
+;	13-Oct-82	[RMS]	Fixed MxPR allocation problems
+;	12-Oct-82	[RMS]	Revised allocation limits
+;				Fixed allocation errors
+;	8-Oct-82	[RMS]	Fixed bugs in REI, SVPCTX
+;	1-Oct-82	[RMS]	Revised definition of MMGT_PD
+;	30-Sep-82	[RMS]	Added TBIS
+; 03	27-Sep-82	[RMS]	Revised for new AST.TRAP handling
+;	24-Sep-82	[RMS]	Revised for offset length registers
+;	20-Sep-82	[RMS]	Revised definition of PR[E]
+; 02	14-Sep-82	[RMS]	Revised for system mapping
+;	6-Sep-82	[RMS]	Fixed typos, editorial changes
+;	5-Sep-82	[RMS]	Consolidated software interrupt handling
+;			[RMS]	Added CHMx
+;	4-Sep-82	[RMS]	Added REI
+;	3-Sep-82	[RMS]	Added MxPR
+;	2-Sep-82	[RMS]	Added PROBEx
+; 01	31-Aug-82	[RMS]	Initial edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN OPSYS
+
+.nobin
+;	This module implements the operating system support class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	BD	 CHME param.rw, {-(ySP).w*}					0 0 0 0
+;	BC	 CHMK param.rw, {-(ySP).w*}					0 0 0 0
+;	BE	 CHMS param.rw, {-(ySP).w*}					0 0 0 0
+;	BF	 CHMU param.rw, {-(ySP).w*}					0 0 0 0
+;		 Where y=MINU(x, PSL<current_mode>)
+;
+;	06	 LDPCTX {PCB.r*, -(KSP).w*}					- - - -		rsv, prv
+;
+;	DB	 MFPR procreg.rl, dst.wl					* * 0 -		rsv, prv
+;
+;	DA	 MTPR src.rl, procreg.rl					* * 0 -		rsv, prv
+;
+;	0C	 PROBER mode.rb, len.rw, base.ab				0 * 0 -	
+;	0D	 PROBEW mode.rb, len.rw, base.ab				0 * 0 -	
+;
+;	02	 REI {(SP)+.r*}							* * * *		rsv
+;
+;	07	 SVPCTX {(SP)+.r*, PCB.w*}					- - - -		prv
+;
+.bin
+
+.nobin
+.TOC	"	CHMx"
+
+;	These instructions initiate a change mode exception.
+;	The condition codes will eventually be zeroed in the exception processor.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	CHMK		BC	initiate change to kernel exception	fe	rr/wl	x	CHMK
+;	CHME		BD	initiate change to executive exception	fe	rr/wl	x	CHME
+;	CHMS		BE	initiate change to supervisor exception	fe	rr/wl	x	CHMS
+;	CHMU		BF	initiate change to user exception	fe	rr/wl	x	CHMU
+;
+;	Entry conditions:
+;		W0	=	first (code) operand
+;		DL	=	data type of "second" operand (longword)
+;
+;	Exit conditions:
+;		W0	=	sext(operand)
+;		W1	=	mode specified by opcode * 4
+;		W2	=	minu(W1, psl<cur_mode> * 4)
+;		W4	=	SP[W2]
+;		STATE<6> =	1, VAX.TRAP.REQUEST removed
+;		The next microstate is IE.CHM.EXCEPT..
+;
+;	Condition codes:
+;		N <-- 0		(in exception processor)
+;		Z <-- 0
+;		V <-- 0
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Use of a specialized probe subroutine, instead of CHECK.PROBE..,
+;		would save one cycle at the cost of one microword.
+;
+.bin
+
+;	CHMx operation:
+;
+;		tmp1 <-- opcode<1:0> * 4
+;		tmp2 <-- minu(tmp1, psl<cur_mode> * 4)
+;		tmp3 <-- sext(operand.rw)
+;		if {psl<is> = 1} then {chm_on_int_stack_abort}
+;		psl<cur_mode>_sp <-- SP
+;		tmp4 <-- tmp2_sp
+;		probe.write from tmp4 - 1 to tmp4 - 12. with mode = tmp2
+
+CHMK..:						; opcode = BC
+	;********** Hardware dispatch **********;
+	W[1]<--K[0.], GOTO[CHM.CONTINUE]	; tmp1 <-- kernel * 4
+
+CHME..:						; opcode = BD
+	;********** Hardware dispatch **********;
+	W[1]<--K[4.], GOTO[CHM.CONTINUE]	; tmp1 <-- executive * 4
+
+CHMS..:						; opcode = BE
+	;********** Hardware dispatch **********;
+	W[1]<--K[8.], GOTO[CHM.CONTINUE]	; tmp1 <-- supervisor * 4
+
+CHMU..:						; opcode = BF
+	;********** Hardware dispatch **********;
+	W[1]<--K[12.], GOTO[CHM.CONTINUE]	; tmp1 <-- user * 4
+
+CHM.CONTINUE:
+	;---------------------------------------;
+	W[2]<--T[PSL],				; get microcode copy of psl
+	DISABLE.IB.PREFETCH,			; turn off prefetch for probing
+	IF[NOT.INT.STACK]_[CHM.NOT.INT.STK]	; branch out if not on interrupt stack
+
+	;---------------------------------------;
+	CONSOLE.HALT[ERR.CHMFI]			; CHMx on int stack, invoke console and die
+
+;	New mode established, not on interrupt stack.
+;	Maximize privileges by using smaller of new mode, psl<cur_mode>.
+
+;	At this point,
+;		W0	=	operand
+;		W1	=	tmp1 (opcode<1:0> * 4)
+;		W2	=	microcode psl
+
+CHM.NOT.INT.STK:
+	;---------------------------------------;
+	W[2]<--W[2].AND.K[3]000			; isolate psl<cur_mode> in <25:24>
+
+	;---------------------------------------;
+	SC&, W[2]<--ZEXT.W[2].SHFR.[22.]	; tmp2 <-- psl<cur_mode> * 4
+
+	;---------------------------------------;
+	WBUS<--W[2]-W[1], SET.ALUCC		; compare psl<cur_mode> * 4:opcode<1:0> * 4
+
+	;---------------------------------------;
+	VA&, WBUS<--W[2]+T[PCBB],		; compute addr of current SP image in PCB
+	IF[ALU.N]_[CHM.CURMODE.IS.MIN]		; if alu.n, then psl<cur_mode> is already min
+
+	;---------------------------------------;
+	SC&, W[2]<--W[1]			; tmp2 <-- opcode<1:0> * 4
+
+CHM.CURMODE.IS.MIN:
+	;---------------------------------------;
+	MEM(VA).PHYS<--G[SP], LONG		; save current SP in PCB
+
+;	Privilege maximized, current SP saved.
+;	Fetch SP for new mode, sign extend operand.
+
+;	At this point,
+;		W0	=	operand
+;		W1	=	tmp1 (opcode<1:0> * 4)
+;		W2 = SC	=	tmp2 (minu(tmp1, psl<cur_mode> * 4))
+
+	;---------------------------------------;
+	VA&, WBUS<--W[2]+T[PCBB]		; compute addr of new SP image in PCB
+
+	;---------------------------------------;
+	W[4]<--MEM(VA).PHYS, LONG,		; tmp4 <-- tmp2_sp from PCB
+	CASE2[SC3-0].AT.[CHM.NEWMODE.IS.KS]	; test status of tmp2<2>
+
+;= ALIGNLIST 10***	(CHM.NEWMODE.IS.KS,	CHM.NEWMODE.IS.EU)
+;  SC<1:0> = 00 --> SC<3:0> = ??00
+
+CHM.NEWMODE.IS.KS:
+	;---------------------------------------; SC<2> = 0:
+	W[0]<--W[0].SHFL.[16.], SET.ALUCC,	; left justify operand for sext, set alu cc's
+	CASE2[SC3-0].AT.[CHM.NEWMODE.IS.KE]	; test status of tmp2<3>
+
+CHM.NEWMODE.IS.EU:
+	;---------------------------------------; SC<2> = 1:
+	W[0]<--W[0].SHFL.[16.], SET.ALUCC,	; left justify operand for sext, set alu cc's
+	STATE0<--1,				; set STATE<0>
+	CASE2[SC3-0].AT.[CHM.NEWMODE.IS.KE]	; test status of tmp2<3>
+
+;= ALIGNLIST 01***	(CHM.NEWMODE.IS.KE,	CHM.NEWMODE.IS.SU)
+;  SC<1:0> = 00 --> SC<3:0> = ??00
+
+CHM.NEWMODE.IS.KE:
+	;---------------------------------------; SC<3> = 0:
+	W[0]<--SEXT.W[0].SHFR.[16.],		; tmp3 <-- sign extended operand
+	GOTO[CHM.PROBE.STACK]			; go probe stack
+
+CHM.NEWMODE.IS.SU:
+	;---------------------------------------; SC<3> = 1:
+	W[0]<--SEXT.W[0].SHFR.[16.],		; tmp3 <-- sign extended operand
+	STATE1<--1,				; set STATE<1>
+	GOTO[CHM.PROBE.STACK]			; go probe stack
+
+;	Privilege maximized, old stack pointer saved, new stack pointer in tmp4.
+;	Probe from tmp4 - 1 to tmp4 - 12.
+;	If successful, initiate change mode exception.
+
+;	At this point,
+;		W0	=	tmp3 (sext(operand))
+;		W1	=	tmp1 (opcode<1:0> * 4)
+;		W2 = STATE<1:0>	=	tmp2 (minu(tmp1, psl<cur_mode> * 4))
+;		W4	=	tmp4 (tmp2_sp)
+
+CHM.PROBE.STACK:
+	;---------------------------------------;
+	VA<--W[4]-K[1.],			; initial probe is at tmp4 - 1
+	CALL[CHM.PROBE]				; probe write accessibility of new stack
+						; check for probe error, return if ok
+
+	;---------------------------------------;
+	VA<--W[4]-K[12.],			; final probe is at tmp4 - 12
+	CALL[CHM.PROBE]				; probe write accessibility of new stack
+						; check for probe error, return if ok
+
+;	All probes successful, all parameters set up, initiate change mode exception.
+
+	;---------------------------------------;
+	STATE6<--1&REMOVE.VAX.TRAP.REQUEST,	; set "exc in progress" flag
+	GOTO[IE.CHM.EXCEPT..]			; go initiate change mode exception
+
+;	One line subroutine to probe write accessibility of new stack, return if ok.
+
+CHM.PROBE:
+	;---------------------------------------;
+	PROBE.WRITE.STATE,			; probe write accessibility of MEM(VA)
+	GOTO[CHECK.PROBE..]			; go check for probe error, return from there
+
+.nobin
+.TOC	"	REI"
+
+;	This instruction exits from an exception or interrupt.
+;	The condition codes are restored from the PSL saved on the stack.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	REI		02	exit from exception or interrupt	e	x /qq	x	REI
+;
+;	Entry conditions:
+;		dispatched directly from IID
+;		DL	=	data type of "first" operand (quadword)
+;
+;	Exit conditions:
+;		New PC and PSL are popped from the stack.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- saved PSL<3>
+;		Z <-- saved PSL<2>
+;		V <-- saved PSL<1>
+;		C <-- saved PSL<0>
+;
+;	Size/performance tradeoffs:
+;		The rule checking code can be rewritten in numerous ways to make it somewhat
+;		faster at the cost of many more words of microcode.
+;
+
+;	For reference, the layout of the PSL is as follows:
+;
+;	 3 3 2 2 2 2 2 2 2 2 2 2       1 1
+;	 1 0 9 8 7 6 5 4 3 2 1 0       6 5             8 7 6 5 4 3 2 1 0
+;	+-+-+---+-+-+---+---+-+---------+---------------+-+-+-+-+-+-+-+-+
+;	| | |   |F| |   |   |M|         |               | | | | | | | | |
+;	|C|T|   |P|I|CUR|PRV|B|         |               |D|F|I| | | | | | :PSL
+;	|M|P|MBZ|D|S|MOD|MOD|Z|   IPL   |      MBZ      |V|U|V|T|N|Z|V|C|
+;	+-+-+---+-+-+---+---+-+---------+---------------+-+-+-+-+-+-+-+-+
+;
+;	The lengthiest part of the REI instruction is the validity checking of the PSL
+;	popped off the stack.  The new PSL is checked against the following eight rules:
+;
+;	let	tmp	=	new PSL popped off the stack
+;	let	psl	=	current PSL
+;
+;	Rule	SRM formulation			    Microcode formulation		Comment
+;	----	---------------			    ---------------------		-------
+;	1	tmp<25:24> GEQ psl<25:24>	    same				tmp<cur_mode> GEQ psl<cur_mode>
+;	2	tmp<26> LEQ psl<26>		    same				tmp<is> LEQ tmp<is>
+;	3	tmp<26> = 1 => tmp<25:24> = 0	    tmp<25:24> > 0 => tmp<26> = 0	tmp<is> = 1 => tmp<cur_mode> = kernel
+;	4	tmp<26> = 1 => tmp<20:16> > 0	    same				tmp<is> = 1 => tmp<ipl> > 0
+;	5	tmp<20:16> > 0 => tmp<25:24> = 0    tmp<25:24> > 0 => tmp<20:16> = 0	tmp<ipl> > 0 => tmp<cur_mode> = kernel
+;	6	tmp<25:24> LEQ tmp<23:22>	    same				tmp<cur_mode> LEQ tmp<prv_mode>
+;	7	tmp<20:16> LEQ psl<20:16>	    same				tmp<ipl> LEQ psl<ipl>
+;	8	tmp<31,29:28,21,15:8> = 0	    same				tmp<mbz> = 0
+;
+.bin
+
+;	REI operation:
+;
+;		tmp1 <-- (SP)+
+;		tmp2 <-- (SP)+
+;		validity check tmp2
+;		save current stack pointer
+;		PC <-- tmp1
+;		PSL <-- tmp2 or PSL<30>
+;		if PSL<26> = 0 then load new stack pointer, check for AST's
+;		check for software interrupts
+
+REI..:						; opcode = 02
+	;********** Hardware dispatch **********;
+	VA&, WBUS<--G[SP],			; set VA from top of current stack
+	CALL[READ.MEM(VA).QW.TO.W1.W0..]	; pop quadword to W0 and W1
+
+	;---------------------------------------;
+	G[SP]<--G[SP]+M[KDL],			; update SP, cant log explicit reference
+	DISABLE.IB.PREFETCH			; only fault exit is thru reserved operand!!
+
+;	Start validity checks with rule #8:	tmp<31,29:28,21,15:8> = 0.
+
+	;---------------------------------------;
+	WBUS<--W[1].AND.K[0FF]0, SET.ALUCC	; test W1<15:8>
+
+	;---------------------------------------;
+	WBUS<--W[1].AND.K[20]00, SET.ALUCC,	; test W1<21>
+	IF[NOT.ALU.Z]_[REI.RSRV.OPER]		; if W1<15:8> NEQ 0, reserved operand
+
+	;---------------------------------------;
+	W(6)<--W[1].AND.K[0B0]000, SET.ALUCC,	; test W1<31,29:28>, sneak zero into W6
+	IF[NOT.ALU.Z]_[REI.RSRV.OPER]		; if W1<21> NEQ 0, reserved operand
+
+	;---------------------------------------;
+	W[2]<--T[PSL],				; get current microcode PSL to W2
+	IF[NOT.ALU.Z]_[REI.RSRV.OPER]		; if W1<31,29:28> NEQ 0, reserved operand
+
+;	Rule #8 ok, check rule #1:	tmp<cur_mode> GEQ psl<cur_mode>.
+;	Then case on tmp<cur_mode> zero or non-zero.
+
+;	At this point,
+;		SP	=	original SP + m[kdl]
+;		W0	=	new PC
+;		W1	=	new PSL
+;		W2	=	old PSL
+;		W6	=	0
+;		alu cc's =	0100
+
+	;---------------------------------------;
+	SC<--W[1].AND.K[3]000,			; isolate tmp<cur_mode>
+	IF[KERNEL.MODE]_[REI.SKIP.CM.TEST]	; if psl<cur_mode> = 0, then rule #1 MUST work
+						; (and W6 already contains psl<cur_mode> = kernel = 0)
+
+	;---------------------------------------;
+	W(6)<--W[2].AND.K[3]000			; isolate psl<cur_mode>
+
+	;---------------------------------------;
+	WBUS<--W[SC]-W[6], SET.ALUCC		; compare tmp<cur_mode>:psl<cur_mode>
+
+REI.SKIP.CM.TEST:
+	;---------------------------------------;
+	W[3]<--ZEXT.W[6].SHFR.[22.]		; shift psl<cur_mode> to W3<3:2> for offset into PCB
+
+	;---------------------------------------;
+	W[4]<--ZEXT.W[SC].SHFR.[22.],		; shift tmp<cur_mode> to W4<3:2> for offset into PCB
+	SET.ALUCC,				; test tmp<cur_mode>
+	IF[ALU.N]_[REI.RSRV.OPER]		; if tmp<cur_mode> < psl<cur_mode>, fault
+
+;	Rule #1 ok, now test tmp<is> and case on tmp<cur_mode> zero or non-zero.
+
+	;---------------------------------------;
+	WBUS<--W[1].AND.K[4]000, SET.ALUCC,	; test tmp<is>
+	IF[NOT.ALU.Z]_[REI.NOT.TO.KERNEL.MODE]	; if tmp<cur_mode> NEQ 00, rei to non-kernel mode
+
+;	REI to kernel mode, rules #1 and 8 ok.
+
+;	At this point,
+;		SP	=	original SP + m[kdl]
+;		W0	=	new PC
+;		W1	=	new PSL
+;		W2	=	current PSL
+;		W3	=	psl<cur_mode> in <3:2>
+;		W4	=	tmp<cur_mode> in <3:2>
+;		tmp<cur_mode> =	00
+;		alu cc's =	test on tmp<is>
+
+;	Rule #3 can be skipped:		tmp<is> = 1 => tmp<cur_mode> = kernel.
+;	Rule #5 can be skipped:		tmp<ipl> > 0 => tmp<cur_mode> = kernel.
+;	Rule #6 can be skipped:		tmp<cur_mode> LEQ tmp<prv_mode>.
+
+REI.TO.KERNEL.MODE:
+	;---------------------------------------;
+	W(6)<--W[1].AND.K[1F]00, SET.ALUCC,	; isolate tmp<ipl>
+	IF[NOT.ALU.Z]_[REI.TO.KERNEL.IS]	; branch out if trying to set <is>
+
+;	REI to kernel, not trying to set interrupt stack.
+
+;	Rule #2 can be skipped:		tmp<is> LEQ psl<is>.
+;	Rule #4 can be skipped:		tmp<is> = 1 => tmp<ipl> > 0.
+;	Test rule #7:			tmp<ipl> LEQ psl<ipl>.
+
+REI.TO.KERNEL.KS:
+	;---------------------------------------;
+	SC<--W[2].AND.K[1F]00			; isolate psl<ipl>
+
+	;---------------------------------------;
+	WBUS<--W[SC]-W[6], SET.ALUCC,		; compare psl<ipl>:tmp<ipl>
+	IF[NOT.INT.STACK]_[REI.NOT.FROM.IS]	; break out whether now on interrupt stack
+
+REI.FROM.IS:
+	;---------------------------------------;
+	W[SC]<--G[SP],				; on int stack, get stack pointer
+	IF[ALU.N]_[REI.RSRV.OPER]		; if psl<ipl> < tmp<ipl>, fault (rule #7)
+
+	;---------------------------------------;
+	T[IS]<--W[SC], GOTO[REI.UPDATE.PC]	; save stack pointer in IS temp
+
+;	REI to kernel, trying to set interrupt stack.
+;	Rules #1 and 8 are satisfied, 3, 5, and 6 have been skipped.
+
+;	At this point,
+;		SP	=	original SP + m[kdl]
+;		W0	=	new PC
+;		W1	=	new PSL
+;		W2	=	current PSL
+;		W3	=	psl<cur_mode> in <3:2>
+;		W4	=	tmp<cur_mode> in <3:2>
+;		W6	=	tmp<ipl> in <20:16>
+;		tmp<cur_mode> =	00
+;		alu cc's =	test on tmp<ipl>
+
+;	Test rule #2:		tmp<is> LEQ psl<is>.
+;	Test rule #4:		tmp<is> = 1 => tmp<ipl> > 0.
+;	Test rule #7:		tmp<ipl> LEQ psl<ipl>.
+
+REI.TO.KERNEL.IS:
+	;---------------------------------------;
+	SC<--W[2].AND.K[1F]00,			; isolate psl<ipl>
+	IF[NOT.INT.STACK]_[REI.RSRV.OPER]	; if psl<is> = 0, fault (rule #2)
+
+	;---------------------------------------;
+	WBUS<--W[SC]-W[6], SET.ALUCC,		; compare psl<ipl>:tmp<ipl>
+	STATE0<--1,				; set flag marking return to IS
+	IF[NOT.ALU.Z]_[REI.FROM.IS]		; if tmp<ipl> = 0, fall thru to fault (rule #4)
+						; otherwise go test rule #7
+
+REI.RSRV.OPER:
+	;---------------------------------------;
+	G[SP]<--G[SP]-M[KDL],			; undo increment of stk ptr
+	GOTO[RSRV.OPER.FLT..]			; fault (ok to have prefetch off)
+
+;	REI to executive, supervisor, or user mode, rules #1 and 8 ok.
+
+;	At this point,
+;		SP	=	original SP + m[kdl]
+;		W0	=	new PC
+;		W1	=	new PSL
+;		W2	=	current PSL
+;		W3	=	psl<cur_mode> in <3:2>
+;		W4	=	tmp<cur_mode> in <3:2>
+;		tmp<cur_mode> > 00
+;		alu cc's =	test on tmp<is>
+
+;	Test rule #3:		tmp<cur_mode> NEQ 0 => tmp<is> = 0.
+
+REI.NOT.TO.KERNEL.MODE:
+	;---------------------------------------;
+	W(6)<--W[1].AND.K[1F]00, SET.ALUCC,	; isolate tmp<ipl>
+	IF[NOT.ALU.Z]_[REI.RSRV.OPER]		; if tmp<is> = 1, then fault (rule #3)
+
+;	Not returning to interrupt stack, therefore rules #2 and 4 may be skipped.
+;	Test rule #5:		tmp<cur_mode> NEQ 0 => tmp<ipl> = 0.
+
+	;---------------------------------------;
+	SC<--W[1].AND.K[0C0]00,			; isolate tmp<prv_mode>
+	IF[NOT.ALU.Z]_[REI.RSRV.OPER]		; if tmp<ipl> > 0, then fault (rule #5)
+
+;	Returning to IPL 0, therefore rule #7 may be skipped.
+;	Test rule #6:		tmp<cur_mode> LEQ tmp<prv_mode>.
+
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[SC].SHFR.[20.]		; align tmp<prv_mode> with saved tmp<cur_mode>
+
+	;---------------------------------------;
+	WBUS<--W[SC]-W[4], SET.ALUCC,		; compare tmp<prv_mode>:tmp<cur_mode>
+	IF[NOT.INT.STACK]_[REI.NOT.FROM.IS]	; branch out if not on interrupt stack
+
+	;---------------------------------------;
+	W[SC]<--G[SP],				; on int stack, get stack pointer
+	IF[ALU.N]_[REI.RSRV.OPER]		; if tmp<prv_mode> < tmp<cur_mode>, fault (rule #6)
+
+	;---------------------------------------;
+	T[IS]<--W[SC], GOTO[REI.UPDATE.PC]	; save stack pointer in IS temp
+
+REI.NOT.FROM.IS:
+	;---------------------------------------;
+	VA&, WBUS<--W[3]+T[PCBB],		; not on int stack, get pointer to current SP image in PCB
+	IF[ALU.N]_[REI.RSRV.OPER]		; if not kmode: if tmp<prv_mode> < tmp<cur_mode>, fault (rule #6)
+						; if kmode: if psl<ipl> < tmp<ipl>, fault (rule #7)
+
+	;---------------------------------------;
+	MEM(VA).PHYS<--G[SP], LONG		; save stack pointer in proper PCB slot
+
+;	New PSL is validated, current stack pointer has been saved.
+;	New stack pointer is secure, no more bailouts after this point.
+;	Or current TP into new PSL, update PC and PSL.
+
+;	At this point,
+;		W0	=	new PC
+;		W1	=	new PSL
+;		W4	=	tmp<cur_mode> in <3:2>
+;		W6	=	psl<ipl> in <20:16>
+;		STATE<0> =	set if returning to IS
+
+REI.UPDATE.PC:
+	;---------------------------------------;
+	SC<--P[PSL.CC..TP].AND.K[40]000		; isolate psl<tp>
+
+	;---------------------------------------;
+	W[SC]<--W[1].OR.W[SC],			; or new psl into psl<tp>
+	CALL[UPDATE.PSL.HWRE.FROM.SC..]		; broadcast complete PSL to hardware
+
+	;---------------------------------------;
+	W[1]<--W[1].ANDNOT.K[1F]		; clear psl<t,nzvc> in new microcode psl
+
+	;---------------------------------------;
+	W[1]<--W[1].ANDNOT.K[0F0]000		; clear psl<cm,tp,mbz> in new microcode psl
+
+	;---------------------------------------;
+	WBUS<--W[0],				; update PC and VIBA with new value
+	ENABLE.IB.PREFETCH,			; re enable prefetch
+	LOAD.V&PC				; flush IB
+
+	;---------------------------------------;
+	T[PSL]<--W[1],				; update microcode copy of PSL
+	CASE2[STATE3-0].AT.[REI.NOT.ON.IS]	; case on state 0 (set if returning to IS)
+
+;= ALIGNLIST ***0*	(REI.NOT.ON.IS,	REI.TEST.SISR)
+;  STATE<3:0> = 000?
+
+;	PSL updated, want to be on non interrupt stack.
+;	Get new stack pointer, check for AST's.
+
+;	At this point,
+;		W4	=	tmp<cur_mode> in <3:2>
+;		W6	=	psl<ipl> in <20:16>
+
+REI.NOT.ON.IS:
+	;---------------------------------------; STATE<0> = 0:
+	W[2]<--T[AST.TRAP]			; get ASTLVL/trap information
+
+	;---------------------------------------;
+	W[2]<--ZEXT.W[2].SHFR.[22.]		; position ASTLVL for comparison
+
+	;---------------------------------------;
+	WBUS<--W[4]-W[2], SET.ALUCC		; compare psl<cur_mode>:ASTLVL
+
+	;---------------------------------------;
+	VA&, WBUS<--W[4]+T[PCBB]		; form pointer to new SP image in PCB
+
+	;---------------------------------------;
+	G[SP]<--MEM(VA).PHYS, LONG,		; read new SP image into SP register
+	IF[ALU.N]_[REI.TEST.SISR]		; if psl<cur_mode> < ASTLVL, no AST's to deliver
+
+	;---------------------------------------;
+	SC&, T[SISR]<--T[SISR].OR.M[FOUR]	; assume AST, set SISR<2>, prepare to update max req
+
+	;---------------------------------------;
+	WBUS<--W[SC].AND.K[0F]00, SET.ALUCC	; test SISR for requests at level 2 and above
+						; (SISR<19:16> is max req-1, therefore, if no req
+						;  or only level 1, SISR<19:16> are ZERO)
+
+	;---------------------------------------;
+	IF[NOT.ALU.Z]_[REI.TEST.SISR]		; if level 15..2 request already, go to final check
+
+	;---------------------------------------;
+	T[SISR]<--T[SISR].OR.K[1]00,		; set max request level = 2 (max req-1 = 1)
+	GOTO[REI.TEST.SISR]			; go test for deliverable software interrupt
+
+;	This instruction is a continuation of MTPR src,#sisr.
+;	It is placed here because it must fall through to REI.TEST.SISR.
+
+MTPR.UPDATE.SISR:
+	;---------------------------------------;
+	W[SC]<--W[SC].ANDNOT.K[1],		; clear bit<0> in new SISR
+	CALL[UPDATE.SISR.MAX..]			; store new SISR, calculate max req-1
+
+;	Here, at last, to wind up the REI instruction.
+;	Check for deliverable software interrupts.
+;	If none, done, otherwise, deliver interrupt.
+
+;	At this point,
+;		W6	=	psl<ipl> in <20:16>
+
+;	The software interrupt test works on the following principal:
+;	SISR contains the the individual requests in bits<15:1>, and the
+;	maximum request number - 1 in bits <19:16>.  For example:
+;
+;		no requests	=	00 00 00 00
+;		level 1 only	=	00 00 00 02
+;		level 2 only	=	00 01 00 04
+;
+;	Thus, if SISR is compared against the isolated IPL, an equal comparison
+;	means that both are zero, and there is no outstanding software interrupt.
+;	If SISR > IPL, then max req-1 GEQ IPL, implying max req > IPL.
+
+REI.TEST.SISR:
+	;---------------------------------------; STATE<0> = 1:
+	WBUS<--W[6]-T[SISR], SET.ALUCC		; compare psl<ipl>:sisr
+
+	;---------------------------------------;
+	IF[ALU.N]_[IE.SWRE.INT..]		; if psl<ipl> < sisr, then software interrupt
+
+	;---------------------------------------;
+	EXECUTE.IID				; decode next inst
+
+.nobin
+.TOC	"	LDPCTX"
+
+;	This instruction restores the principal CPU registers from the current process control block.
+;	The condition codes are unchanged.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	LDPCTX		06	restore process context			e	x /qq	x	LDPCTX
+;
+;	Entry conditions:
+;		dispatched directly from IID
+;		DL	=	data type of "first" operand (quadword)
+;
+;	Exit conditions:
+;		Process context is restored from M[PCBB].
+;		New PC and PSL are pushed on the stack.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		Reserved operand checking on the memory management operands adds approximately
+;		ten words and ten microcycles.
+;
+.bin
+
+;	LDPCTX operation:
+;
+;		restore process context from M[PCBB]
+
+LDPCTX..:					; opcode = 06
+	;********** Hardware dispatch **********;
+	W[SC]<--0				; get zero for clearing reg number
+						; don't test kmode here to ease allocation
+
+	;---------------------------------------;
+	W[4]<--T[PCBB], RN<--SC,		; get current PCBB, clear RN
+	IF[KERNEL.MODE]_[LDPCTX.KMODE]		; branch out if kernel mode
+
+	;---------------------------------------;
+	GOTO[PRIV.INST.FLT..]			; not kernel mode, fault
+						; ok to have prefetching off at fault
+
+LDPCTX.KMODE:
+	;---------------------------------------;
+	VA<--W[4]+K[16.]			; set VA pointing to GPR block in PCB
+
+	;---------------------------------------;
+	G[0]<--MEM(VA).PHYS, LONG, RN<--RN+1,	; restore R0, set reg ptr to R1
+	CALL[LDPCTX.LOAD.3.GPRS]		; call subr to restore R1, R2, R3
+
+	;---------------------------------------;
+	G(RN)<--MEM(VAP).PHYS, LONG, RN<--RN+1,	; restore R4
+	CALL[LDPCTX.LOAD.3.GPRS]		; call subr to restore R5, R6, R7
+
+	;---------------------------------------;
+	ZAP.MTB,				; kill translation buffer
+	CALL[LDPCTX.LOAD.3.GPRS]		; call subr to restore R8, R9, R10
+
+	;---------------------------------------;
+	W[6]<--G[SP],				; get SP for later save
+	CALL[LDPCTX.LOAD.3.GPRS]		; call subr to restore R11, R12, R13
+						; RN = 14!!
+
+	;---------------------------------------;
+	W[0]<--MEM(VAP).PHYS, LONG		; read and save PC
+
+	;---------------------------------------;
+	W[1]<--MEM(VAP).PHYS, LONG		; read and save PSL
+
+;	General registers, PC, PSL restored.
+;	Now restore memory management registers.
+
+;	Note that ALL reserved operand checking has been omitted.
+;	Where mbz's might cause damage, they are cleared.
+;
+;	The operand checking rules are:
+;
+;	1) P0BR<31:30,1:0>	=	0	<1:0> forced to zero
+;	2) P0LR<31:27,23:22>	=	0
+;	3) P0LR<26:24> = ASTLVL < 	5
+;	4) P1BR<31:30,1:0>	=	0	<1:0> forced to zero
+;	5) P1LR<30:22>		=	0
+
+	;---------------------------------------;
+	T[P0BR]<--MEM(VAP).PHYS, LONG		; read and restore P0BR
+
+	;---------------------------------------;
+	T[P0BR]<--T[P0BR].ANDNOT.K[3]		; force P0BR<1:0> to zero, required by
+						; TB miss utrap (<31:30> are ignored)
+
+	;---------------------------------------;
+	SC&, T[AST.TRAP]<--MEM(VAP).PHYS, LONG,	; read ASTLVL/P0LR
+	CALL[LDPCTX.SHIFT.LR]			; shift P0LR into place in SC
+
+	;---------------------------------------;
+	MXPR[P0LR]<--W[SC]			; restore P0LR
+
+	;---------------------------------------;
+	T[P1BR]<--MEM(VAP).PHYS, LONG		; read and restore P1BR
+
+	;---------------------------------------;
+	T[P1BR]<--T[P1BR].ANDNOT.K[3]		; force P1BR<1:0> to zero, required by
+						; TB miss utrap (<31:30> are ignored)
+
+	;---------------------------------------;
+	T[P1BR]<--T[P1BR]-K[80]00		; precompensate P1BR for addition of
+						; VA shifted right 7 (VA<31:30> = 01)
+						; in TB miss utrap
+
+	;---------------------------------------;
+	W[SC]<--MEM(VAP).PHYS, LONG,		; read P1LR
+	CALL[LDPCTX.SHIFT.LR]			; shift P1LR into place in SC
+
+	;---------------------------------------;
+	MXPR[P1LR]<--W[SC],			; restore P1LR
+	IF[NOT.INT.STACK]_[LDPCTX.KERNEL.STK]	; if not on interrupt stack, already on kernel
+
+;	General registers and memory management restored.
+;	Switch from interrupt to kernel stack, if necessary.
+;	Load new kernel stack pointer from PCB.
+;	Push new PC, PSL on kernel stack and exit.
+
+;	At this point,
+;		W6	=	current SP
+;		AST.TRAP =	ASTLVL/P0LR
+
+	;---------------------------------------;
+	T[IS]<--W[6]				; save current SP as interrupt SP
+
+	;---------------------------------------;
+	T[PSL]<--T[PSL].ANDNOT.K[04]000,	; clear interrupt SP flag in microcode PSL
+	CALL[UPDATE.PSL.HWRE.COPY.SC..]		; update hardware PSL, copy to SC
+
+LDPCTX.KERNEL.STK:
+	;---------------------------------------;
+	T[AST.TRAP]<--T[AST.TRAP].AND.K[07]000,	; isolate new ASTLVL from memory word
+	CALL[READ.STACK.KS..]			; read kernel stack from PCB into SP
+
+	;---------------------------------------;
+	VA&, G(RN)<--G(RN)-M[KDL].RLOG,		; decrement SP by QUADWORD for PC, PSL push
+						; RN = 14 as a result of reg load loop!!
+	GOTO[WRITE.MEM(VA).QW.FROM.W1.W0..]	; go write W1 and W0 to top of stack and decode
+
+;	Local subroutines for LDPCTX.
+
+;	This routine restores three GPR's by restoring one,
+;	calling a subroutine to restore the second, and
+;	falling through to the subroutine to restore the third.
+
+LDPCTX.LOAD.3.GPRS:
+	;---------------------------------------;
+	G(RN)<--MEM(VAP).PHYS, LONG, RN<--RN+1,	; restore one GPR
+	CALL[LDPCTX.LOAD.1.GPR]			; call subr to restore second GPR
+
+LDPCTX.LOAD.1.GPR:
+	;---------------------------------------;
+	G(RN)<--MEM(VAP).PHYS, LONG, RN<--RN+1,	; restore one GPR
+	RETURN					; return to caller
+
+;	This subroutine shifts a length register into position for MXPR[PxLR].
+
+LDPCTX.SHIFT.LR:
+	;---------------------------------------;
+	W[SC]<--W[SC].SHFL.[9.], RETURN		; shift length reg into place, return
+
+;	Global subroutines for manipulating PSL, IPL, and SISR.
+
+;	This subroutine updates the hardware PSL from the microcode PSL.
+;	There are alternate entry points if the microcode PSL or complete PSL is already in SC.
+
+;	Entry conditions:
+;		T[PSL]	=	microcode PSL
+;
+;	Exit conditions:
+;		SC = PSL.HWRE =	combined PSL
+
+UPDATE.PSL.HWRE.COPY.SC..:
+	;---------------------------------------;
+	W[SC]<--T[PSL]				; get microcode PSL
+
+UPDATE.PSL.HWRE.FINISH.SC..:
+	;---------------------------------------;
+	W[SC]<--W[SC].OR.P[PSL.CC..TP]		; or in t, tp, and cc's
+
+UPDATE.PSL.HWRE.FROM.SC..:
+	;---------------------------------------;
+	MXPR[PSL.HWRE]<--W[SC], RETURN		; inform hardware of new PSL, return
+
+;	Global subroutines, continued.
+
+;	This subroutine updates the SISR register.
+
+;	Entry conditions:
+;		SC	=	new SISR in <15:1>; bit<0> = 0
+;
+;	Exit conditions:
+;		T[SISR]	=	max SISR level - 1'new SISR
+;		W6	=	psl<ipl>
+;		SC	=	trashed!!
+;		alu cc's =	set from W6
+
+UPDATE.SISR.MAX..:
+	;---------------------------------------;
+	W[SC]<--W[SC].ANDNOT.1K[0FF]00,		; force bits <31:16> in new SISR to zero
+	SET.ALUCC				; test for zero
+
+	;---------------------------------------;
+	T[SISR]<--W[SC],			; store new SISR
+	IF[ALU.Z]_[ISOLATE.PSL.IPL]		; if zero, update complete
+
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[SC].SHFR.[2], SET.ALUCC	; skip bits <1:0> (ensures req no - 1 below)
+
+UPDATE.SISR.LOOP:
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[SC].SHFR.[1], SET.ALUCC,	; shift SC right until all bits disappear
+	IF[ALU.Z]_[ISOLATE.PSL.IPL]		; if already zero, req level calc complete
+
+	;---------------------------------------;
+	T[SISR]<--T[SISR]+K[1]00,		; incr max request level by 1
+	GOTO[UPDATE.SISR.LOOP]			; continue counting loop
+
+;	This subroutine isolates the microcode IPL in W6
+;	and sets the ALU condition codes accordingly.
+
+ISOLATE.PSL.IPL:
+	;---------------------------------------;
+	W[6]<--T[PSL]				; get microcode PSL
+
+	;---------------------------------------;
+	W[6]<--W[6].AND.K[1F]00, SET.ALUCC,	; isolate IPL = PSL<20:16>, test
+	RETURN					; return
+
+.nobin
+.TOC	"	SVPCTX"
+
+;	This instruction saves the principal CPU registers in the current process control block.
+;	The condition codes are unchanged.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	SVPCTX		07	restore process context			e	x /qq	x	SVPCTX
+;
+;	Entry conditions:
+;		dispatched directly from IID
+;		DL	=	data type of "first" operand (quadword)
+;
+;	Exit conditions:
+;		Process context is saved in M[PCBB].
+;		New PC and PSL are pushed on the stack.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	SVPCTX operation:
+;
+;		save current process context in M[PCBB]
+
+SVPCTX..:					; opcode = 07
+	;********** Hardware dispatch **********;
+	W[SC]<--0				; get zero for clearing register number
+						; don't test kmode here to ease allocation
+
+	;---------------------------------------;
+	W[4]<--T[PCBB], RN<--SC,		; get current PCB address, clear RN
+	IF[KERNEL.MODE]_[SVPCTX.KMODE]		; branch out if kernel mode
+
+	;---------------------------------------;
+	GOTO[PRIV.INST.FLT..]			; not kernel mode, fault
+
+SVPCTX.KMODE:
+	;---------------------------------------;
+	VA&, WBUS<--G[SP],			; set VA to top of stack
+	CALL[READ.MEM(VA).QW.TO.W1.W0..]	; read quadword off stack to W0 and W1
+
+	;---------------------------------------;
+	G[SP]<--G[SP]+M[KDL],			; pop quadword (PC, PSL) off stack
+						; no faults beyond here, no need to RLOG
+	IF[NOT.INT.STACK]_[SVPCTX.KERNEL.STK]	; if not on interrupt stack, get there!
+
+SVPCTX.SAVE.GPRS:
+	;---------------------------------------;
+	VA<--W[4]+K[16.]			; set VA pointing to GPR block in PCB
+
+	;---------------------------------------;
+	MEM(VA).PHYS<--G[0], LONG, RN<--RN+1,	; save R0, set reg ptr to R1
+	CALL[SVPCTX.SAVE.3.GPRS]		; call subr to save R1, R2, R3
+
+	;---------------------------------------;
+	MEM(VAP).PHYS<--G(RN), LONG, RN<--RN+1,	; save R4
+	CALL[SVPCTX.SAVE.3.GPRS]		; call subr to save R5, R6, R7
+
+;	R0..R7 saved.
+;	Save R8..R13, PC, PSL.
+
+	;---------------------------------------;
+	MEM(VAP).PHYS<--G(RN), LONG, RN<--RN+1,	; save R8
+	CALL[SVPCTX.SAVE.3.GPRS]		; call subr to save R9, R10, R11
+
+	;---------------------------------------;
+	MEM(VAP).PHYS<--G(RN), LONG, RN<--RN+1,	; save R12
+	CALL[SVPCTX.SAVE.1.GPR]			; call subr to save R13
+
+	;---------------------------------------;
+	MEM(VAP).PHYS<--W[0], LONG		; save PC
+
+	;---------------------------------------;
+	MEM(VAP).PHYS<--W[1], LONG,		; save PSL
+	EXECUTE.IID				; decode next instruction
+
+;	This routine saves three GPR's by saving one,
+;	calling a subroutine to save the second, and
+;	falling through to the subroutine to save the third.
+
+SVPCTX.SAVE.3.GPRS:
+	;---------------------------------------;
+	MEM(VAP).PHYS<--G(RN), LONG, RN<--RN+1,	; save one GPR
+	CALL[SVPCTX.SAVE.1.GPR]			; call subr to save second GPR
+
+SVPCTX.SAVE.1.GPR:
+	;---------------------------------------;
+	MEM(VAP).PHYS<--G(RN), LONG, RN<--RN+1,	; save one GPR
+	RETURN					; return
+
+;	Not on interrupt stack, must be on kernel stack.
+
+;	Switch from kernel stack to interrupt stack.
+
+SVPCTX.KERNEL.STK:
+	;---------------------------------------;
+	T[PSL]<--T[PSL].OR.K[04]000,		; set int stack flag in microcode PSL
+	CALL[ISOLATE.PSL.IPL]			; get IPL, test and set alu cc's
+
+	;---------------------------------------;
+	VA<--W[4],				; set VA to point to kernel SP in PCB
+	IF[NOT.ALU.Z]_[SVPCTX.IPL.NOT.ZERO]	; if IPL > 0, hunky dory
+
+	;---------------------------------------;
+	T[PSL]<--T[PSL].OR.K[1]00		; can't run at IPL 0 on interrupt stack!!
+
+SVPCTX.IPL.NOT.ZERO:
+	;---------------------------------------;
+	MEM(VA).PHYS<--G[SP], LONG,		; save kernel SP in PCB
+	CALL[UPDATE.PSL.HWRE.COPY.SC..]		; update hardware PSL from microcode PSL
+
+	;---------------------------------------;
+	W[6]<--T[IS]				; get interrupt SP
+
+	;---------------------------------------;
+	G[SP]<--W[6],				; store as hardware SP
+	GOTO[SVPCTX.SAVE.GPRS]			; rejoin main flows
+
+.nobin
+.TOC	"	PROBEx"
+
+;	These instructions test the read or write accessibility of a given region of virtual address space.
+;	The psl.z flag reflects the result of the test (Z = 0 = accessible).
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	PROBER		0C	psl.z <-- probe.read(mode,length,base)	fse	rr/bw	iiip	PROBER
+;	PROBEW		0D	psl.z <-- probe.write(mode,length,base)	fse	rr/bw	iiip	PROBEW
+;
+;	Entry conditions:
+;		W0	=	first (mode) operand
+;		W2	=	second (length) operand
+;		DL	=	data type of second operand (word)
+;
+;	Exit conditions:
+;		The PSL condition codes reflect the result of the probe test.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0 if accessible, 1 if not
+;		V <-- 0
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	PROBEx can take a translation not valid fault.  This occurs if the system PTE
+;		mapping the process PTE for the address being probed is invalid.
+;
+.bin
+
+;	PROBEx operation:
+;
+;		if M[mode.rb, length.rw, base.ab] is accessible
+;		then psl.z = 0 else psl.z = 1
+
+PROBER..:					; opcode = 0C
+;PROBEW:					; opcode = 0D
+	;********** Hardware dispatch **********;
+	P[ATDL]<--K[ATDL.AB]			; set up AT/DL = .ab for base operand
+
+	;---------------------------------------;
+	W[4]<--W[0].SHFL.[30.],			; save mode operand, isolate low order two bits
+	CALL.CASE.SPEC[GSD..]			; parse base operand, addr in W0 and VA
+
+	;---------------------------------------;
+	W[3]<--T[PSL]				; get microcode copy of PSL
+
+	;---------------------------------------;
+	W[3]<--W[3].SHFL.[8.]			; position PSL<23:22> to W3<31:30> for comparison
+
+	;---------------------------------------;
+	W[3]<--W[3].AND.K[0C0]000,		; mask out all bits except shifted previous mode
+	CALL[PROBE.CHECK.OPERANDS]		; go probe addresses, return only if ok
+
+	;---------------------------------------;
+	WBUS<--P[ONE], SET.PSLCC, LEN(DL),	; both probes ok, force psl cc's = 000x
+	ENABLE.IB.PREFETCH,			; enable prefetching after probe
+	EXECUTE.IID				; decode next instruction
+
+;	Subroutine to check addresses for PROBEx instructions.
+
+;	Entry conditions:
+;		W3<31:30> =	psl<prev_mode>
+;		W4<31:30> =	operand mode
+;
+;	Returns only if all addresses accessible.
+
+PROBE.CHECK.OPERANDS:
+	;---------------------------------------;
+	WBUS<--W[3]-W[4], SET.ALUCC		; compare previous mode to operand specified mode
+
+	;---------------------------------------;
+	P[STATE3-0..ALUCC]<--ZEXT.W[3].SHFR.[26.],	; assume prv mode larger, set STATE<1:0> to prv mode
+	IF[ALU.C]_[PROBE.PMODE.MAX]		; if alu.c, prv mode is larger, probe in that mode
+
+	;---------------------------------------;
+	P[STATE3-0..ALUCC]<--ZEXT.W[4].SHFR.[26.]	; oper mode larger, set STATE<1:0> to oper mode
+
+PROBE.PMODE.MAX:
+	;---------------------------------------;
+	W[2]<--W[2]-1, 				; pad to let STATE settle, compute length - 1
+	DISABLE.IB.PREFETCH,			; disable prefetch to examine probe status in detail
+	CASE2[OPCODE3-0].AT.[PROBE.READ]	; case on PROBER versus PROBEW
+
+;= ALIGNLIST 11*0*	(PROBE.READ,	PROBE.WRITE)
+;  Opcodes = 0C, 0D --> opcode<3:0> = 110?
+
+PROBE.READ:
+	;---------------------------------------; PROBER:
+	PROBE.READ.STATE,			; probe initial value of VA for read access
+	CALL[CHECK.PROBE.MACRO]			; check for probe error, update VA to final value
+						; return only if ok
+
+	;---------------------------------------;
+	PROBE.READ.STATE,			; probe final value of VA for read access
+	GOTO[CHECK.PROBE.MACRO]			; go check for probe error, return from there if ok
+
+PROBE.WRITE:
+	;---------------------------------------; PROBEW:
+	PROBE.WRITE.STATE,			; probe initial value of VA for write access
+	CALL[CHECK.PROBE.MACRO]			; check for probe error, update VA to final value
+						; return only if ok
+
+	;---------------------------------------;
+	PROBE.WRITE.STATE,			; probe current value of VA for write access
+	GOTO[CHECK.PROBE.MACRO]			; go check for probe error, return from there if ok
+
+;	Here to check for probe error.
+;	On success, VA is incremented by the value in W2.
+
+;	Classification of MMGT.STATUS conditions:
+;		0x00 to 0x11	--	data or ppte ACV or length violation, no access
+;		1x00		--	data TNV, return
+;		1x01		--	TB miss, IMPOSSIBLE
+;		1x10		--	ppte TNV, fault
+;		1x11		--	reference okay, return
+
+CHECK.PROBE.MACRO:
+	;---------------------------------------;
+	CASE8[MMGT.STATUS].AT.[CHECK.PROBE.ACV]	; case on MMGT.STATUS<3,1:0>
+
+;= ALIGNLIST 0100*	(CHECK.PROBE.ACV,	CHECK.PROBE.LNV,
+;=			 CHECK.PROBE.ACV.PPTE,	CHECK.PROBE.LNV.PPTE,
+;=			 CHECK.PROBE.TNV,		,
+;=			 CHECK.PROBE.PPTE.TNV,	CHECK.PROBE.REF.OK)
+
+CHECK.PROBE.ACV:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 000:
+	WBUS<--0, SET.PSLCC, LEN(DL),		; set psl cc's to 010x
+	ENABLE.IB.PREFETCH, EXECUTE.IID		; restore prefetching, decode next
+
+CHECK.PROBE.LNV:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 001:
+	WBUS<--0, SET.PSLCC, LEN(DL),		; set psl cc's to 010x
+	ENABLE.IB.PREFETCH, EXECUTE.IID		; restore prefetching, decode next
+
+CHECK.PROBE.ACV.PPTE:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 010:
+	WBUS<--0, SET.PSLCC, LEN(DL),		; set psl cc's to 010x
+	ENABLE.IB.PREFETCH, EXECUTE.IID		; restore prefetching, decode next
+
+CHECK.PROBE.LNV.PPTE:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 011:
+	WBUS<--0, SET.PSLCC, LEN(DL),		; set psl cc's to 010x
+	ENABLE.IB.PREFETCH, EXECUTE.IID		; restore prefetching, decode next
+
+CHECK.PROBE.TNV:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 100:
+	VA<--VA+W[2], RETURN			; data TNV, update VA, return
+
+CHECK.PROBE.PPTE.TNV:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 110:
+	GOTO[MM.ACV.TNV..]			; PPTE TNV, fault
+
+CHECK.PROBE.REF.OK:
+	;---------------------------------------; MMGT.STATUS<3,1:0> = 111:
+	VA<--VA+W[2], RETURN			; data TNV, update VA, return
+
+.nobin
+.TOC	"	MxPR"
+
+;	These instructions move data to or from internal processor registers.
+;	The condition codes are set from the data stored or retrieved.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	MTPR		DA	PR[procreg.rl] <-- src.rl		fse	rr/ll	iiip	MTPR
+;	MFPR		DB	dst.wl <-- PR[procreg.rl]		fe	rr/ll	iiip	MFPR
+;
+;	Entry conditions (MTPR):
+;		W0	=	first (source) operand
+;		W2	=	second (register number) operand
+;		DL	=	data type of second operand (longword)
+;		(MFPR):
+;		W0	=	first (register number) operand
+;		DL	=	data type of second operand (longword)
+;
+;	Exit conditions (MTPR):
+;		The data item is stored in the specified processor register.
+;		The PSL condition codes are set.
+;		The next microstate is IID.
+;		(MFPR):
+;		W0 contains the specified processor register data.
+;		The next microstate is WDEST.
+;
+;	Condition codes:
+;		N <-- data LSS 0
+;		Z <-- data EQL 0
+;		V <-- 0
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+
+;	The architecturally-specified MicroVAX processor registers are:
+;
+;	Register Name				Mnemonic	Number	Type	Scope	Init?
+;	-------------				--------	------	----	-----	-----
+;
+;	Kernel Stack Pointer			KSP		0	rw	proc	--
+;	Executive Stack Pointer			ESP		1	rw	proc	--
+;	Supervisor Stack Pointer		SSP		2	rw	proc	--
+;	User Stack Pointer			USP		3	rw	proc	--
+;	Interrupt Stack Pointer			ISP		4	rw	cpu	--
+;	P0 Base Register			P0BR		8	rw	proc	--
+;	P0 Length Register			P0LR		9	rw	proc	--
+;	P1 Base Register			P1BR		10	rw	proc	--
+;	P1 Length Register			P1LR		11	rw	proc	--
+;	System Base Register			SBR		12	rw	cpu	--
+;	System Length Register			SLR		13	rw	cpu	--
+;	Process Control Block Base		PCBB		16	rw	proc	--
+;	System Control Block Base		SCBB		17	rw	cpu	--
+;	Interrupt Priority Level		IPL		18	rw	cpu	yes
+;	AST Level				ASTLVL		19	rw	proc	yes
+;	Software Interrupt Request		SIRR		20	w	cpu	--
+;	Software Interrupt Summary		SISR		21	rw	cpu	yes
+;	Memory Management Enable		MAPEN		56	rw	cpu	yes
+;	Trans. Buf. Invalidate All		TBIA		57	w	cpu	--
+;	Trans. Buf. Invalidate Single		TBIS		58	w	cpu	--
+;	System Identification			SID		62	r	cpu	no
+;	Translation Buffer Check		TBCHK		63	w	cpu	--
+;
+;	The implementation-specific MicroVAX processor registers are:
+;
+;	Register Name				Mnemonic	Number	Type	Scope	Init?
+;	-------------				--------	------	----	-----	-----
+;
+;	Interval Counter Control/Status		ICCS		24	rw	cpu	yes
+;	Console Saved ISP			SAVISP		41	r	cpu	--
+;	Console Saved PC			SAVPC		42	r	cpu	--
+;	Console Saved PSL			SAVPSL		43	r	cpu	--
+;
+;	In addition, processor registers 25:39, 48:55, and 59:61 are enabled for external
+;	implementation.  If not implemented externally, these registers read as zero and
+;	are ignored on write.
+;
+.bin
+
+;	MTPR operation:
+;
+;		PR[procreg.rl] <-- src.rl
+
+MTPR..:						; opcode = DA
+	;********** Hardware dispatch **********;
+	W[SC]<--W[2], STATE0<--1,		; move reg no to SC for case, flag MTPR
+	GOTO[MXPR.TEST]				; go join common code for validity checks
+
+;	MFPR operation:
+;
+;		dst.wl <-- PR[procreg.rl]
+
+MFPR..:						; opcode = DB
+	;********** Hardware dispatch **********;
+	W[SC]<--W[0],				; move reg no to SC for case
+	GOTO[MXPR.TEST]				; go join common code for validity checks
+
+MXPR.TEST:
+	;---------------------------------------;
+	WBUS<--ZEXT.W[SC].SHFR.[6], SET.ALUCC,	; test for register number < 64 (alu.z if ok)
+	RN<--SC,				; copy SC to RN for MFPR 41..43 case
+	IF[KERNEL.MODE]_[MXPR.KERNEL]		; if kernel mode, branch
+
+	;---------------------------------------;
+	GOTO[PRIV.INST.FLT..]			; not kernel mode, priv instruction fault
+
+MXPR.KERNEL:
+	;---------------------------------------;
+	W[4]<--W[SC].SHFL.[2],			; put reg number * 4 in W4
+	IF[NOT.ALU.Z]_[MXPR.RSRV.OPER]		; if reg number > 63, rsrv operand fault
+
+	;---------------------------------------;
+	W[3]<--KKKK[0FC],			; reg mask for 8:23 is 111111XX111111XX
+	CASE4[SC7-4].AT.[MXPR.00.15]		; case on reg num<5:4>
+
+;	Validate register numbers before detailed dispatch.
+
+;	At this point,
+;		W0	=	data (MTPR)
+;		W3	=	FCFCFCFC
+;		W4	=	register number * 4
+;		SC	=	register number
+;		STATE<0> =	0 for MFPR, 1 for MTPR
+
+;= ALIGNLIST **00*	(MXPR.00.15,	MXPR.16.31,	 MXPR.32.47,	MXPR.48.63)
+;  Reg number < 64 --> SC<7:6> = 00 --> SC<7:4> = 00??
+
+MXPR.00.15:
+	;---------------------------------------; SC<5:4> = 00:
+	W[3]<--W[3].ANDNOT.K[07]000,		; reg mask for 0:15 is 11111XXX111111XX
+	GOTO[MXPR.VALIDATE]			; go validate reg mask
+
+MXPR.16.31:
+	;---------------------------------------; SC<5:4> = 01:
+	W[3]<--W[3].ANDNOT.K[7C],		; reg mask for 16:31 is 111111XX1XXXXXXXX
+	GOTO[MXPR.VALIDATE]			; go validate reg mask
+
+MXPR.32.47:
+	;---------------------------------------; SC<5:4> = 10:
+	W[3]<--K[70]00,				; reg mask for 32:47 is XXXXXXXXX111XXXX
+	CASE2[STATE3-0].AT.[MXPR.VALIDATE]	; if MFPR, validate, if MTPR, all reg invalid
+
+MXPR.48.63:
+	;---------------------------------------; SC<5:4> = 11:
+	W[3]<--K[0E3],				; reg mask for 48:63 is XXXXXXXX111XXX11
+	GOTO[MXPR.VALIDATE]			; go validate reg mask
+
+;= ALIGNLIST ***0*	(MXPR.VALIDATE,	MXPR.REG.INVALID)
+;  STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+MXPR.VALIDATE:
+	;---------------------------------------; not MTPR 32:47:
+	WBUS<--W[3].SHFL.(SC), SET.ALUCC	; shift reg bit to alu.n
+
+	;---------------------------------------;
+	W[2]<--T[AST.TRAP],			; here to test and take rsrv flt...
+	IF[ALU.N]_[MXPR.REG.VALID]		; set W2, if alu.n, reg ok, process
+
+;	Register invalid.
+;	Determine if reserved operand or external register.
+
+;	At this point,
+;		W0	=	data (MTPR)
+;		W3	=	register mask
+;		W4	=	register number * 4
+;		SC	=	register number
+;		STATE<0> =	0 for MFPR, 1 for MTPR
+
+;	This code works on the following kaballistic principle:
+;		if SC<3> = 0, then SC<5> is the reserved/external flag
+;		if SC<3> = 1, then SC<4> is the reserved/external flag
+;
+;	SC<5>	SC<4>	SC<3>		group		treatment
+;	-----	-----	-----		-----		---------
+;	0 = R	0	0		0:7		reserved
+;	0	0 = R	1		8:15		reserved
+;	0 = R	1	0		16:23		reserved
+;	0	1 = X	1		24:31		external
+;	1 = X	0	0		32:39		external
+;	1	0 = R	1		40:47		reserved
+;	1 = X	1	0		48:55		external
+;	1	1 = X	1		56:63		external
+
+MXPR.REG.INVALID:
+	;---------------------------------------; MTPR 32:47 or invalid reg:
+	WBUS<--W[SC].AND.K[10], SET.ALUCC,	; assume SC<3> = 1, test SC<4>
+	CASE2[SC3-0].AT.[MXPR.REG.INVALID.TEST.5]	; case on SC<3> to see if right
+
+;= ALIGNLIST 0111*	(MXPR.REG.INVALID.TEST.5,	MXPR.REG.INVALID.TEST.4)
+
+MXPR.REG.INVALID.TEST.5:
+	;---------------------------------------; SC<3> = 0:
+	WBUS<--W[SC].AND.K[20], SET.ALUCC	; test SC<5>
+
+MXPR.REG.INVALID.TEST.4:
+	;---------------------------------------;
+	CASE2[ALU.NZVC].AT.[MXPR.EXTERNAL.REG]	; if alu.z set, reserved operand
+
+;= ALIGNLIST *0***	(MXPR.EXTERNAL.REG,	MXPR.RSRV.OPER)
+;  ALU.NZVC set by AND with mask<31> --> N = V = C = 0
+
+MXPR.RSRV.OPER:
+	;---------------------------------------; alu.z = 1:
+	GOTO[RSRV.OPER.FLT..]			; selected bit is zero, fault
+
+MXPR.EXTERNAL.REG:
+	;---------------------------------------; alu.z = 0:
+	W(6)<--W[SC].OR.K[80]000,		; get version of reg number with bit<31> = 1
+	CASE2[STATE3-0].AT.[MFPR.EXTERNAL.REG]	; case on MFPR vs MTPR
+
+;	External processor register protocol.
+
+;	At this point,
+;		W0	=	data (MTPR)
+;		W4	=	register number * 4
+;		W6	=	register number + 1B31
+;		SC	=	register number
+;		STATE<0> =	0 for MFPR, 1 for MTPR
+
+;= ALIGNLIST ***0*	(MFPR.EXTERNAL.REG,	MTPR.EXTERNAL.REG)
+;  STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+MTPR.EXTERNAL.REG:
+	;---------------------------------------; MTPR:
+	FPU.CMD.ALT<--W[SC],			; write to ext reg, xmit reg num + 0B31
+	DISABLE.IB.PREFETCH			; turn off prefetching
+
+	;---------------------------------------;
+	FPU.DATA<--W[0],			; send data to external logic
+	GOTO[MTPR.TEST.W0]			; go test W0, re-enable prefetching
+
+MFPR.EXTERNAL.REG:
+	;---------------------------------------; MFPR:
+	FPU.CMD.ALT<--W[6],			; read from ext reg, xmit reg num + 1B31
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	CALL[WAIT.ONE.CYCLE..]			; kill a cycle for slow read logic
+
+	;---------------------------------------;
+	W[SC]<--FPU.WAIT.NOTRAP			; try for data from external logic
+
+	;---------------------------------------;
+	W[0]<--0,				; assume no confirming signal, set up zero
+	ENABLE.IB.PREFETCH,			; turn on prefetching
+	IF[NOT.FPU.SIGNAL]_[MFPR.RETURN.ZERO].ELSE.[COPY.SC.TO.W0.WDEST..]
+						; if no signal received, go write zero
+						; else, copy SC to W0 and write result
+
+MFPR.RETURN.ZERO:
+	;---------------------------------------;
+	JMP.CASE.SPEC[WDEST..]			; go write result
+
+;	MxPR detailed breakout.
+
+;	Register number validated, dispatch.
+
+;	At this point,
+;		W0	=	data 
+;		W2	=	AST.TRAP
+;		W4	=	register number * 4
+;		SC	=	register number
+;		STATE<0> =	0 for MFPR, 1 for MTPR
+
+MXPR.REG.VALID:
+	;---------------------------------------;
+	W[1]<--MXPR[ICCS],			; set up W1 in case useful
+	CASE2[STATE3-0].AT.[MFPR.REG.VALID]	; case on MFPR vs MTPR
+
+;= ALIGNLIST ***0*	(MFPR.REG.VALID,	MTPR.REG.VALID)
+;  STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+MTPR.REG.VALID:
+	;---------------------------------------; MTPR:
+	W(6)<--W[0].ANDNOT.K[3],		; get data with bits <1:0> = 00 (useful for MTPR x,#PxBR or PCBB or SCBB)
+	CASE4[SC7-4].AT.[MTPR.00.15]		; case on reg number bits<5:4>
+
+;= ALIGNLIST **00*	(MTPR.00.15,	MTPR.16.31,	,	MTPR.48.63)
+;  Reg number < 64 --> SC<7:4> = 00??
+
+MTPR.00.15:
+	;---------------------------------------; SC<5:4> = 00:
+	W[3]<--W[0].SHFL.[9.],			; get data left shifted 9 (useful for MTPR x,#SLR or P0LR or P1LR)
+	CASE16[SC3-0].AT.[MTPR.00]		; case on register number 0..15
+
+MTPR.16.31:
+	;---------------------------------------; SC<5:4> = 01:
+	W[3]<--W[0].SHFL.[16.],			; get data left shifted 16 (useful for MTPR x,#IPL)
+	CASE16[SC3-0].AT.[MTPR.16]		; case on register number 16..31
+
+;MTPR.32.47:	eliminated by validity checks.
+
+MTPR.48.63:
+	;---------------------------------------; SC<5:4> = 11:
+	DISABLE.IB.PREFETCH,			; disable prefetch for TB registers
+	CASE16[SC3-0].AT.[MTPR.16]		; case on register number 48..63 (overlaid on 16..31)
+
+;	Dispatch, continued.
+
+;	MFPR breakout.
+
+;	At this point,
+;		W1	=	ICCS
+;		W2	=	AST.TRAP
+;		W4	=	register number * 4
+;		SC	=	register number (also in RN for [41:43])
+;		STATE<0> =	0 for MFPR, 1 for MTPR
+
+MFPR.REG.VALID:
+	;---------------------------------------; MFPR:
+	W[3]<--T[SISR],				; get SISR (useful for MFPR #SISR,x)
+	CASE4[SC7-4].AT.[MFPR.00.15]		; case on reg number bits<5:4>
+
+;= ALIGNLIST **00*	(MFPR.00.15,	MFPR.16.31,	MFPR.32.47,	MFPR.48.63)
+;  Reg number < 64 --> SC<7:4> = 00??
+
+MFPR.00.15:
+	;---------------------------------------; SC<5:4> = 00:
+	W[0]<--MXPR[SLR],			; get SLR (useful for MFPR #SLR,x)
+	CASE16[SC3-0].AT.[MFPR.00]		; case on register number 0..15
+
+MFPR.16.31:
+	;---------------------------------------; SC<5:4> = 01:
+	W[0]<--T[PSL],				; get PSL (useful for MFPR #IPL,x)
+	CASE16[SC3-0].AT.[MFPR.16]		; case on register number 16..31
+
+MFPR.32.47:
+	;---------------------------------------; SC<5:4> = 10:
+	W[0]<--T(RN),				; get console register (RN points
+						; at proper entry in T register file)
+	JMP.CASE.SPEC[WDEST..]			; go write result
+
+MFPR.48.63:
+	;---------------------------------------; SC<5:4> = 11:
+	W[0]<--MXPR[MAPEN],			; useful for MFPR #MAPEN,x
+	CASE16[SC3-0].AT.[MFPR.16]		; case on register number 48..63 (overlaid on 16..31)
+
+;	Register numbers validated.
+;	Dispatch to final destinations.
+
+;	Note that since the register number is known to be good,
+;	only real register numbers need be allocated.
+
+;= ALIGNLIST 0000*	(MTPR.00,	MTPR.01,	MTPR.02,	MTPR.03,
+;=			 MTPR.04,		,		,		,
+;=			 MTPR.08,	MTPR.09,	MTPR.10,	MTPR.11,
+;=			 MTPR.12,	MTPR.13,		,		)
+
+;= ALIGNLIST 0000*	(MTPR.16,	MTPR.17,	MTPR.18,	MTPR.19,
+;=			 MTPR.20,	MTPR.21,		,		,
+;=			 MTPR.24.56,	MTPR.57,	MTPR.58,		,
+;=				,		,	MTPR.62,	MTPR.63)
+
+;= ALIGNLIST 0000*	(MFPR.00,	MFPR.01,	MFPR.02,	MFPR.03,
+;=			 MFPR.04,		,		,		,
+;=			 MFPR.08,	MFPR.09,	MFPR.10,	MFPR.11,
+;=			 MFPR.12,	MFPR.13,		,		)
+
+;= ALIGNLIST 0000*	(MFPR.16,	MFPR.17,	MFPR.18,	MFPR.19,
+;=			 MFPR.20,	MFPR.21,		,		,
+;=			 MFPR.24.56,	MFPR.57,	MFPR.58,		,
+;=				,		,	MFPR.62,	MFPR.63)
+
+;	MTPR detailed processors [0:4]
+
+;	At this point,
+;		W0	=	data 
+;		W3	=	data left shifted 9
+;		W4	=	register number * 4
+;		W6	=	data with bits <1:0> = 00
+;		SC	=	register number
+
+MTPR.00:
+	;---------------------------------------; KSP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	IF[NOT.INT.STACK]_[MTPR.ACTIVE.SP]	; if not on int stack, then on kernel, write to G[SP]
+
+MTPR.INACTIVE.SP:
+	;---------------------------------------;
+	MEM(VA).PHYS<--W[0], SET.PSLCC, 	; write W0 into SP image 
+	LONG, EXECUTE.IID			; set psl cc's, decode next instruction
+						; (cc's are set len(dl), which is lw)
+
+MTPR.01:
+	;---------------------------------------; ESP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	GOTO[MTPR.INACTIVE.SP]			; go write SP image into PCB
+
+MTPR.02:
+	;---------------------------------------; SSP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	GOTO[MTPR.INACTIVE.SP]			; go write SP image into PCB
+
+MTPR.03:
+	;---------------------------------------; USP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	GOTO[MTPR.INACTIVE.SP]			; go write SP image into PCB
+
+MTPR.04:
+	;---------------------------------------; IS:
+	IF[NOT.INT.STACK]_[MTPR.WRITE.IS]	; if not on interrupt stack, go write to IS
+
+MTPR.ACTIVE.SP:
+	;---------------------------------------;
+	G[SP]<--W[0], SET.PSLCC, LEN(DL),	; KSP while on kernel stk, IS while on int stk
+	EXECUTE.IID				; update active SP, set psl cc's, decode next instruction
+
+MTPR.WRITE.IS:
+	;---------------------------------------;
+	T[IS]<--W[0], SET.PSLCC, LEN(DL),	; IS not on int stk
+	EXECUTE.IID				; update inactive IS, set psl cc's, decode next instruction
+
+;	MTPR detailed processors [8:13]
+
+;	At this point,
+;		W0	=	data 
+;		W3	=	data left shifted 9
+;		W4	=	register number * 4
+;		W6	=	data with bits <1:0> = 00
+;		SC	=	register number
+
+MTPR.08:
+	;---------------------------------------; P0BR:
+	T[P0BR]<--W[6], DISABLE.IB.PREFETCH,	; store longword aligned P0BR, kill prefetch
+	GOTO[MTPR.RESET.TB]			; go reset TB
+
+MTPR.09:
+	;---------------------------------------; P0LR:
+	MXPR[P0LR]<--W[3], DISABLE.IB.PREFETCH,	; store shifted P0LR, kill prefetch
+	GOTO[MTPR.RESET.TB]			; go reset TB
+
+MTPR.10:
+	;---------------------------------------; P1BR:
+	T[P1BR]<--W[6], DISABLE.IB.PREFETCH	; store longword aligned P1BR, kill prefetch
+
+	;---------------------------------------;
+	T[P1BR]<--T[P1BR]-K[80]00,		; precompensate P1BR for addition of
+						; VA shifted right 7 (VA<31:30> = 01)
+						; in TB miss utrap
+	GOTO[MTPR.RESET.TB]			; go reset TB
+
+MTPR.11:
+	;---------------------------------------; P1LR:
+	MXPR[P1LR]<--W[3], DISABLE.IB.PREFETCH,	; store shifted P1LR, kill prefetch
+	GOTO[MTPR.RESET.TB]			; go reset TB
+
+MTPR.12:
+	;---------------------------------------; SBR:
+	T[SBR]<--W[6], DISABLE.IB.PREFETCH	; store longword aligned SBR, kill prefetch
+
+	;---------------------------------------;
+	T[SBR]<--T[SBR]-K[1]000,		; precompensate SBR for addition of
+						; VA shifted right 7 (VA<31:30> = 10)
+						; in TB miss utrap
+	GOTO[MTPR.RESET.TB]			; go reset TB
+
+MTPR.13:
+	;---------------------------------------; SLR:
+	MXPR[SLR]<--W[3], DISABLE.IB.PREFETCH,	; store shifted SLR, kill prefetch
+	GOTO[MTPR.RESET.TB]			; go reset TB
+
+;	MTPR detailed processors [16:19]
+
+;	At this point,
+;		W0	=	data 
+;		W3	=	data left shifted 16
+;		W4	=	register number * 4
+;		W6	=	data with bits <1:0> = 00
+;		SC	=	register number
+
+MTPR.16:
+	;---------------------------------------; PCBB:
+	T[PCBB]<--W[6],				; store longword aligned PCBB
+	GOTO[MTPR.TEST.W0]			; set psl cc's from original value 
+
+MTPR.17:
+	;---------------------------------------; SCBB:
+	T[SCBB]<--W[6],				; store longword aligned SCBB
+	GOTO[MTPR.TEST.W0]			; set psl cc's from original value 
+
+MTPR.18:
+	;---------------------------------------; IPL: W3 contains data left shifted 16
+	T[PSL]<--T[PSL].ANDNOT.K[1F]00		; clear out old IPL in microcode PSL
+
+	;---------------------------------------;
+	W(6)<--W[3].AND.K[1F]00			; mask new IPL down to 5 bits
+
+	;---------------------------------------;
+	SC&, T[PSL]<--T[PSL].OR.W[6],		; insert new IPL into microcode PSL
+	CALL[UPDATE.PSL.HWRE.FINISH.SC..]	; go update hardware PSL
+
+	;---------------------------------------;
+	WBUS<--W[0], SET.PSLCC, LEN(DL),	; set psl cc's from original value
+	GOTO[REI.TEST.SISR]			; go test for deliverable software ints
+
+MTPR.19:
+	;---------------------------------------; ASTLVL:
+	WBUS<--W[0]-K[5.], SET.ALUCC		; test for ASTLVL value <= 4
+
+	;---------------------------------------;
+	W[6]<--W[0].SHFL.[24.],			; shift new ASTLVL into place
+	IF[ALU.C]_[MXPR.RSRV.OPER]		; if alu.c set, reserved operand
+
+	;---------------------------------------;
+	T[AST.TRAP]<--W[6],			; store new ASTLVL (clear trap info)
+	GOTO[MTPR.TEST.W0]			; go set cc's from original value
+
+;	MTPR detailed processors [20:21]
+
+;	At this point,
+;		W0	=	data 
+;		W3	=	data left shifted 16
+;		W4	=	register number * 4
+;		W6	=	data with bits <1:0> = 00
+;		SC	=	register number
+
+MTPR.20:
+	;---------------------------------------; SIRR:
+	SC<--W[0].AND.K[0F], SET.ALUCC		; cut request level to 4 bits, test for zero
+
+	;---------------------------------------;
+	W[1]<--P[ONE].SHFL.(SC),		; create mask corresponding to request level
+	IF[ALU.Z]_[MTPR.TEST.W0]		; no requests at level zero, thank you
+
+	;---------------------------------------;
+	SC&, T[SISR]<--T[SISR].OR.W[1],		; or request into SISR and get copy of updated register
+	CALL[UPDATE.SISR.MAX..]			; update SISR max request level, isolate psl<ipl>
+
+	;---------------------------------------;
+	WBUS<--W[0], SET.PSLCC, LEN(DL),	; set psl cc's from original value
+	GOTO[REI.TEST.SISR]			; go test for deliverable software interrupt
+
+MTPR.21:
+	;---------------------------------------; SISR:
+	W[SC]<--W[0], SET.PSLCC, LEN(DL),	; set psl cc's from original value
+	GOTO[MTPR.UPDATE.SISR]			; go update SISR, test for deliverable swre int
+
+;	MTPR detailed processors [24,56:58,62:63]
+
+;	At this point,
+;		W0	=	data 
+;		W3	=	data left shifted 16
+;		W4	=	register number * 4
+;		W6	=	data with bits <1:0> = 00
+;		SC	=	register number
+
+;	Prefetch is disabled for registers [56:63].
+
+MTPR.24.56:
+	;---------------------------------------; ICCS or MAPEN:
+	W[3]<--W[0].SHFL.[10.],			; position bit <6> to bit <16> for ICCS
+	CASE2[SC7-4].AT.[MTPR.24]		; case on ICCS vs MAPEN
+
+;= ALIGNLIST **01*	(MTPR.24,	MTPR.56)
+;  24 vs 56 --> 0001 1000 vs 0011 1000 --> SC<7:6> = 00
+
+MTPR.24:
+	;---------------------------------------; ICCS:
+	MXPR[ICCS]<--W[3],			; output shifted data to ICCS register
+	GOTO[MTPR.TEST.W0]			; go test result and finish instruction
+
+MTPR.56:
+	;---------------------------------------; MAPEN:
+	MXPR[MAPEN]<--W[0],			; output data to MAPEN register
+	GOTO[MTPR.RESET.TB]			; go zap translation buffer
+
+MTPR.57:
+MTPR.RESET.TB:
+	;---------------------------------------; TBIA:
+	ZAP.MTB,				; kill the translation buffer
+	GOTO[MTPR.TEST.W0]			; go test result
+
+MTPR.58:
+	;---------------------------------------; TBIS:  
+	ZAP.MTB,				; kill the translation buffer (best we can do)
+	GOTO[MTPR.TEST.W0]			; go test result
+
+MTPR.62:
+	;---------------------------------------; SID:
+	GOTO[RSRV.OPER.FLT..]			; can't write to SID!!!
+
+MTPR.63:
+MTPR.TEST.W0:
+	;---------------------------------------; TBCHK:
+	WBUS<--W[0], SET.PSLCC, LEN(DL),	; test data, set psl cc's
+	ENABLE.IB.PREFETCH, EXECUTE.IID		; re-enable prefetching, decode next instruction
+
+;	MFPR detailed processors [0:4]
+
+;	At this point,
+;		W0	=	SLR
+;		W1	=	ICCS
+;		W2	=	AST.TRAP
+;		W3	=	SISR
+;		W4	=	register number * 4
+;		SC	=	register number
+
+MFPR.00:
+	;---------------------------------------; KSP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	IF[NOT.INT.STACK]_[MFPR.ACTIVE.SP]	; if not on int stack, then on kernel, get G[SP]
+
+MFPR.INACTIVE.SP:
+	;---------------------------------------;
+	W[0]<--MEM(VA).PHYS, LONG,		; read SP image into W0
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+MFPR.01:
+	;---------------------------------------; ESP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	GOTO[MFPR.INACTIVE.SP]			; go read SP image from PCB
+
+MFPR.02:
+	;---------------------------------------; SSP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	GOTO[MFPR.INACTIVE.SP]			; go read SP image from PCB
+
+MFPR.03:
+	;---------------------------------------; USP:
+	VA&, WBUS<--W[4]+T[PCBB],		; form pointer to SP image in PCB
+	GOTO[MFPR.INACTIVE.SP]			; go read SP image from PCB
+
+MFPR.04:
+	;---------------------------------------; IS:
+	W[SC]<--T[IS],				; assume not on interrupt stack, get IS
+	IF[NOT.INT.STACK]_[COPY.SC.TO.W0.WDEST..]	; if not int stk, copy SC to W0
+						; use COPY.SC.TO.W0.WDEST.. rather
+						; than JMP.CASE.SPEC.WDEST.. to avoid
+						; impossible allocation knot!
+
+MFPR.ACTIVE.SP:
+	;---------------------------------------;
+	W[0]<--G[SP],				; KSP while on kernel stk, IS while on int stk
+	JMP.CASE.SPEC[WDEST..]			; get active SP, go write, set psl cc's
+
+;	MFPR detailed processors [8:13]
+
+;	At this point,
+;		W0	=	SLR
+;		W1	=	ICCS
+;		W2	=	AST.TRAP
+;		W3	=	SISR
+;		W4	=	register number * 4
+;		SC	=	register number
+
+MFPR.08:
+	;---------------------------------------; P0BR:
+	W[0]<--T[P0BR],				; get P0BR
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+MFPR.09:
+	;---------------------------------------; P0LR:
+	W[0]<--MXPR[P0LR],			; get P0LR
+	GOTO[MFPR.SHIFT.LR]			; go shift into place and write
+
+MFPR.10:
+	;---------------------------------------; P1BR:
+	W[0]<--T[P1BR]				; get P1BR
+
+	;---------------------------------------;
+	W[0]<--W[0]+K[80]00,			; decompensate bias put in at MTPR or LDPCTX
+	GOTO[JMP.CASE.SPEC.WDEST..]		; go write and set psl cc's
+
+MFPR.11:
+	;---------------------------------------; P1LR:
+	W[0]<--MXPR[P1LR],			; get P1LR
+	GOTO[MFPR.SHIFT.LR]			; go shift into place and write
+
+MFPR.12:
+	;---------------------------------------; SBR:
+	W[0]<--T[SBR]				; get SBR
+
+	;---------------------------------------;
+	W[0]<--W[0]+K[1]000,			; decompensate bias put in at MTPR
+	GOTO[JMP.CASE.SPEC.WDEST..]		; go write and set psl cc's
+
+MFPR.13:
+MFPR.SHIFT.LR:
+	;---------------------------------------; SLR:  MXPR[SLR] already in W0
+	W[0]<--ZEXT.W[0].SHFR.[9.],		; right justify length register
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+;	MFPR detailed processors [16:21]
+
+;	At this point,
+;		W0	=	PSL
+;		W1	=	ICCS
+;		W2	=	AST.TRAP
+;		W3	=	SISR
+;		W4	=	register number * 4
+;		SC	=	register number
+
+MFPR.16:
+	;---------------------------------------; PCBB:
+	W[0]<--T[PCBB],				; get PCBB
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+MFPR.17:
+	;---------------------------------------; SCBB:
+	W[0]<--T[SCBB],				; get SCBB
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+MFPR.18:
+	;---------------------------------------; IPL:  T[PSL] already in W0
+	W[0]<--W[0].AND.K[1F]00			; isolate PSL<20:16> = IPL
+
+MFPR.SHIFT.RIGHT.16:
+	;---------------------------------------;
+	W[0]<--ZEXT.W[0].SHFR.[16.],		; position IPL to bits <4:0>
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+MFPR.19:
+	;---------------------------------------; ASTLVL:  T[AST.TRAP] already in W2
+	W[0]<--ZEXT.W[2].SHFR.[24.],		; move ASTLVL to W0<2:0>
+	JMP.CASE.SPEC[WDEST..]			; go write and set psl cc's
+
+MFPR.20:
+	;---------------------------------------; SIRR:
+	GOTO[RSRV.OPER.FLT..]			; can't read SIRR!!!
+
+MFPR.21:
+	;---------------------------------------; SISR:  T[SISR] already in W3
+	W[0]<--W[3].SHFL.[16.],			; left justify to clear out bits <31:16>
+	GOTO[MFPR.SHIFT.RIGHT.16]		; go shift right and write out
+
+;	MFPR detailed processors [24,56:58,62:63]
+
+;	At this point,
+;		W0	=	SLR (for 24), MAPEN (for 56,62)
+;		W1	=	ICCS
+;		W2	=	AST.TRAP
+;		W3	=	SISR
+;		W4	=	register number * 4
+;		SC	=	register number
+
+MFPR.24.56:
+	;---------------------------------------; ICCS or MAPEN:  MXPR[ICCS] already in W1
+	W[1]<--W[1].AND.K[1]00,			; mask ICCS down to interrupt enable bit
+	CASE2[SC7-4].AT.[MFPR.24]		; case on ICCS vs MAPEN
+
+;= ALIGNLIST **01*	(MFPR.24,	MFPR.56)
+;  24 vs 56 --> 0001 1000 vs 0011 1000 --> SC<7:6> = 00
+
+MFPR.24:
+	;---------------------------------------; ICCS:
+	W[0]<--ZEXT.W[1].SHFR.[10.],		; shift interrupt enable bit into place
+	JMP.CASE.SPEC[WDEST..]			; go write result, decode next instruction
+
+MFPR.56:
+	;---------------------------------------; MAPEN:  MXPR[MAPEN] already in W0
+	W[0]<--W[0].AND.K[1],			; mask MAPEN down to one bit
+	GOTO[JMP.CASE.SPEC.WDEST..]		; go write result and set psl cc's
+
+MFPR.57:
+	;---------------------------------------; TBIA:
+	GOTO[RSRV.OPER.FLT..]			; can't read TBIA!!!
+
+MFPR.58:
+	;---------------------------------------; TBIS:
+	GOTO[RSRV.OPER.FLT..]			; can't read TBIS!!!
+
+MFPR.62:
+	;---------------------------------------; SID:
+	W[0]<--P[ONE].SHFL.[SID.UVAX.SHIFT],	; put system id in byte 3
+	JMP.CASE.SPEC[WDEST..]			; go write result and set psl cc's
+
+MFPR.63:
+	;---------------------------------------; TBCHK:
+	GOTO[RSRV.OPER.FLT..]			; can't read TBCHK!!!
+
+;= END OPSYS

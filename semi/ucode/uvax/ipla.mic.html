@@ -1,0 +1,424 @@
+.TOC	"IPLA.MIC -- IPLA Definitions for MicroVAX"
+.TOC	"Revision 8.0"
+
+;	Bob Supnik
+
+.nobin
+.ICODE
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 08	12-Apr-84	[RMS]	Editorial changes for pass 2
+;	3-Jan-84	[RMS]	Fixed INSQxx CC map, MFPR AT code
+;	21-Nov-83	[RMS]	Revised dispatch for CHMx
+;	7-Oct-83	[RMS]	Changed fork code for AOBLSS, AOBLEQ to fre
+;	20-Sep-83	[RMS]	Changed ADDf2, SUBf2, MULf2, DIVf2 AT codes
+; 07	15-Sep-83	[RMS]	Revised for memory management changes
+;	31-Aug-83	[RMS]	Changed MULX2 CC map
+;	29-Aug-83	[RMS]	Changed INDEX CC map
+;	10-Aug-83	[RMS]	Changed TSTf AT/DL codes
+; 06	31-May-83	[RMS]	Removed third AT/DL field
+;	12-May-83	[RMS]	Changed REMQxI CC map
+;	5-May-83	[RMS]	Revised for separate POLYD dispatch
+;	3-May-83	[ED]	Fixed FPD setting on FD opcodes
+; 05	1-Apr-83	[RMS]	Fixed spurious usage of AT = m
+;	23-Mar-83	[RMS]	Fixed REMQxx interchanged AT codes
+;	21-Mar-83	[RMS]	Changed MOVC3 CC map
+;	18-Mar-83	[RMS]	Changed AOBLSS, AOBLEQ DL codes
+;	17-Mar-83	[RMS]	Changed CALLx DL codes
+;	16-Mar-83	[RMS]	Changed RET DL codes
+;	15-Mar-83	[RMS]	Changed POLYf CC map
+;	3-Mar-83	[RMS]	Fixed MOVC3 CC map (ED test)
+;	6-Jan-83	[RMS]	Removed SOBGEQ, SOBGTR conditional branch support
+;	5-Jan-83	[RMS]	Changed EDIV, REMQUE access for probe problem
+;	10-Dec-82	[RMS]	Fixed MNEGB dispatch (EVKAQ)
+;	1-Dec-82	[RMS]	Fixed EDIV CC map (EVKAA)
+;	29-Nov-82	[RMS]	Fixed REMQUE CC map
+;	22-Nov-82	[RMS]	Added EMODf, POLYf
+; 04	3-Nov-82	[RMS]	Added d_floating instructions
+;	14-Oct-82	[RMS]	Added ACBf
+;				Consolidated F,G instructions
+; 03	13-Oct-82	[RMS]	Added emulated instructions
+;				Fixed EMUL dispatch problem
+; 02	22-Sep-82	[RMS]	Revised floating point dispatches
+;	20-Sep-82	[RMS]	Fixed EMUL CC map
+;	6-Sep-82	[RMS]	Editorial changes
+;	5-Sep-82	[RMS]	Revised dispatch for REMQUE, REMQHI, REMQTI
+;	2-Sep-82	[RMS]	Revised condition codes for PROBEx
+;	30-Aug-82	[RMS]	Revised dispatch for DIVx2
+;	29-Aug-82	[RMS]	Revised dispatch, condition codes for MULx2, MULx3
+;	23-Aug-82	[RMS]	Revised ASHL dispatch
+;	20-Aug-82	[RMS]	Revised BLBC dispatch
+;	19-Aug-82	[RMS]	Revised dispatches for complex branches
+;	18-Aug-82	[RMS]	Fixed errors in SUBx3, ACBG, CVTRGL
+;	17-Aug-82	[RMS]	Removed optimized dispatch for BBxx
+;	16-Aug-82	[RMS]	Revised dispatch, CC map for EXTV, EXTZV
+;	13-Aug-82	[RMS]	Revised dispatch for PUSHX, CVTFG, CVTGF
+;	12-Aug-82	[RMS]	Changed data type for BSBx to longword
+;	11-Aug-82	[RMS]	Changed fork code for AOBLSS, AOBLEQ to fre
+;	10-Aug-82	[RMS]	Changed fork code for ROTL to fre
+;				Added third specifier length where needed
+;	8-Aug-82	[RMS]	Changed fork code for ADAWI to fre
+;	6-Aug-82	[RMS]	Fixed dispatch points for CLRx
+;				Revised CC map to add back "SET PSLCC" in WDEST
+;	5-Aug-82	[RMS]	Fixed access code, dispatch points for ACBx
+;				Changed fork code for MCOMx, MNEGx to fre
+;	3-Aug-82	[RMS]	Revised CC map for removal of "SET PSLCC" from WDEST
+;				Revised FP ops for mandatory fe dispatch
+;				Added comments on subsequent specifier parsing
+; 01	31-Jul-82	[RMS]	First edit for MicroVAX
+;
+.bin
+
+.TOC	"	VAX opcodes"
+
+1000:		;Guarantee 4 digits of micro2 address.
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[ACBB  ][bb ][rr ][fse][ACBB  ][VINT][IIIP][EBOX][1][X     ]	;gsd
+ IPLA[ACBD  ][dd ][rr ][fse][ACBG  ][X   ][AAAP][FBOX][1][X     ]	;gsd
+ IPLA[ACBF  ][ff ][rr ][fse][ACBF  ][X   ][AAAP][FBOX][1][X     ]	;gsd
+ IPLA[ACBG  ][gg ][rr ][fse][ACBG  ][X   ][AAAP][FBOX][1][X     ]	;gsd
+ IPLA[ACBL  ][ll ][rr ][fse][ACBL  ][VINT][IIIP][EBOX][1][X     ]	;gsd
+ IPLA[ACBW  ][ww ][rr ][fse][ACBW  ][VINT][IIIP][EBOX][1][X     ]	;gsd
+ IPLA[ADAWI ][ww ][rv ][fre][ADAWI ][VINT][IIII][EBOX][1][X     ]
+ IPLA[ADDB2 ][bb ][rm ][fre][ADDB2 ][VINT][IIII][EBOX][1][X     ]
+ IPLA[ADDB3 ][bb ][rr ][fre][ADDB3 ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[ADDD2 ][dd ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[ADDD3 ][dd ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[ADDF2 ][ff ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[ADDF3 ][ff ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[ADDG2 ][gg ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[ADDG3 ][gg ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[ADDL2 ][ll ][rm ][fre][ADDB2 ][VINT][IIII][EBOX][1][X     ]
+ IPLA[ADDL3 ][ll ][rr ][fre][ADDB3 ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[ADDP4 ][wb ][ra ][fse][ADDP4 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[ADDP6 ][wb ][ra ][fse][ADDP6 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[ADDW2 ][ww ][rm ][fre][ADDB2 ][VINT][IIII][EBOX][1][X     ]
+ IPLA[ADDW3 ][ww ][rr ][fre][ADDB3 ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[ADWC  ][ll ][rm ][fre][ADWC  ][VINT][IIII][EBOX][1][X     ]
+ IPLA[AOBLEQ][ll ][rm ][fre][AOBLSS][VINT][IIIP][EBOX][1][X     ]
+ IPLA[AOBLSS][ll ][rm ][fre][AOBLSS][VINT][IIIP][EBOX][1][X     ]
+ IPLA[ASHL  ][bl ][rr ][fse][ASHLX ][VINT][AAAA][EBOX][1][X     ]	;wdest				;ASHLX is 18
+ IPLA[ASHP  ][bw ][rr ][fse][ASHP  ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[ASHQ  ][bq ][rr ][fse][ASHQ  ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[BBC   ][lb ][rv ][fre][BBC   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBCC  ][lb ][rv ][fre][BBC   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBCCI ][lb ][rv ][fre][BBC   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBCS  ][lb ][rv ][fre][BBC   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBS   ][lb ][rv ][fre][BBS   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBSC  ][lb ][rv ][fre][BBS   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBSS  ][lb ][rv ][fre][BBS   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BBSSI ][lb ][rv ][fre][BBS   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BCC   ][bb ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][P*C   ]
+ IPLA[BCS   ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][PC    ]
+ IPLA[BEQL  ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][PZ    ]
+ IPLA[BGEQ  ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][P*N   ]
+ IPLA[BGTR  ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][P*NZ  ]
+ IPLA[BGTRU ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][P*CZ  ]
+
+;	More VAX opcodes
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[BICB2 ][bb ][rm ][fre][BICB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BICB3 ][bb ][rr ][fre][BICB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[BICL2 ][ll ][rm ][fre][BICB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BICL3 ][ll ][rr ][fre][BICB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[BICPSW][ww ][rr ][fe ][BISPSW][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BICW2 ][ww ][rm ][fre][BICB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BICW3 ][ww ][rr ][fre][BICB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[BISB2 ][bb ][rm ][fre][BISB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BISB3 ][bb ][rr ][fre][BISB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[BISL2 ][ll ][rm ][fre][BISB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BISL3 ][ll ][rr ][fre][BISB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[BISPSW][ww ][rr ][fe ][BISPSW][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BISW2 ][ww ][rm ][fre][BISB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BISW3 ][ww ][rr ][fre][BISB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[BITB  ][bb ][rr ][fre][BITB  ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BITL  ][ll ][rr ][fre][BITB  ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BITW  ][ww ][rr ][fre][BITB  ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[BLBC  ][lb ][rr ][fe ][BLBC  ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BLBS  ][lb ][rr ][fe ][BLBS  ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BLEQ  ][bb ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][PNZ   ]
+ IPLA[BLEQU ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][PCZ   ]
+ IPLA[BLSS  ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][PN    ]
+ IPLA[BNEQ  ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][P*Z   ]
+ IPLA[BPT   ][X  ][X  ][e  ][X	   ][X   ][IIII][EBOX][1][X     ]
+ IPLA[BRB   ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][T     ]
+ IPLA[BRW   ][ww ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][T     ]
+ IPLA[BSBB  ][ll ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BSBW  ][ll ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[BVC   ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][P*V   ]
+ IPLA[BVS   ][bb ][X  ][e  ][X	   ][X   ][AAAA][EBOX][1][PV    ]
+ IPLA[CALLG ][bb ][aa ][fse][CALLG ][X   ][IIII][EBOX][1][X     ]
+ IPLA[CALLS ][lb ][ra ][fse][CALLG ][X   ][IIII][EBOX][1][X     ]
+ IPLA[CASEB ][bb ][rr ][fse][CASEB ][X   ][JIZJ][EBOX][1][X     ]	;gsd
+ IPLA[CASEL ][ll ][rr ][fse][CASEB ][X   ][JIZJ][EBOX][1][X     ]	;gsd
+ IPLA[CASEW ][ww ][rr ][fse][CASEB ][X   ][JIZJ][EBOX][1][X     ]	;gsd
+ IPLA[CHME  ][wl ][rr ][fe ][CHME  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[CHMK  ][wl ][rr ][fe ][CHMK  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[CHMS  ][wl ][rr ][fe ][CHMS  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[CHMU  ][wl ][rr ][fe ][CHMU  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[CLRB  ][bb ][vr ][fe ][CLRX  ][X   ][IIIP][EBOX][1][X     ]	;				;CLRX is 14
+ IPLA[CLRL  ][ll ][vr ][fe ][CLRX  ][X   ][IIIP][EBOX][1][X     ]	;				;CLRX is 14
+ IPLA[CLRQ  ][qq ][vr ][fe ][CLRX  ][X   ][IIIP][EBOX][1][X     ]	;				;CLRX is 14
+ IPLA[CLRW  ][ww ][vr ][fe ][CLRX  ][X   ][IIIP][EBOX][1][X     ]	;				;CLRX is 14
+ IPLA[CMPB  ][bb ][rr ][fre][CMPB  ][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[CMPC3 ][wb ][ra ][fse][CMPC3 ][X   ][AAAA][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[CMPC5 ][wb ][ra ][fse][CMPC5 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd		;emulation
+
+;	More VAX opcodes
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[CMPD  ][dd ][rr ][fse][CMPF  ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[CMPF  ][ff ][rr ][fse][CMPF  ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[CMPG  ][gg ][rr ][fse][CMPF  ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[CMPL  ][ll ][rr ][fre][CMPB  ][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[CMPP3 ][wb ][ra ][fse][MOVP  ][X   ][AAAA][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[CMPP4 ][wb ][ra ][fse][CMPP4 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[CMPV  ][lb ][rr ][fse][CMPV  ][X   ][JIZJ][EBOX][1][X     ]	;gsd	gsd
+ IPLA[CMPW  ][ww ][rr ][fre][CMPB  ][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[CMPZV ][lb ][rr ][fse][CMPV  ][X   ][JIZJ][EBOX][1][X     ]	;gsd	gsd
+ IPLA[CRC   ][bl ][ar ][fse][CVTPS ][X   ][AAAA][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[CVTBD ][bd ][rr ][fe ][CVTBG ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTBF ][bf ][rr ][fe ][CVTBF ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTBG ][bg ][rr ][fe ][CVTBG ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTBL ][bl ][rr ][fe ][CVTBL ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTBW ][bw ][rr ][fe ][CVTBL ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTDB ][db ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTDF ][df ][rr ][fe ][CVTDF ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTDL ][dl ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTDW ][dw ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTFB ][fb ][rr ][fe ][CVTFB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTFD ][fd ][rr ][fe ][CVTFD ][X   ][AAAA][FBOX][1][X	]	;wdest
+ IPLA[CVTFG ][fg ][rr ][fe ][CVTFG ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTFL ][fl ][rr ][fe ][CVTFB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTFW ][fw ][rr ][fe ][CVTFB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTGB ][gb ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTGF ][gf ][rr ][fe ][CVTGFX][X   ][AAAA][FBOX][1][X     ]	;wdest				;CVTGFX is 30
+ IPLA[CVTGL ][gl ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTGW ][gw ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTLB ][lb ][rr ][fe ][CVTLB ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTLD ][ld ][rr ][fe ][CVTBG ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTLF ][lf ][rr ][fe ][CVTBF ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTLG ][lg ][rr ][fe ][CVTBG ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTLP ][lw ][rr ][fse][CVTLP ][X   ][AAAA][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[CVTLW ][lw ][rr ][fe ][CVTLW ][VINT][AAAA][EBOX][1][X     ]	;wdest
+
+;	More VAX opcodes
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[CVTPL ][wb ][ra ][fse][CVTPL ][VINT][AAAA][EBOX][0][X     ]	;wdest				;emulation
+ IPLA[CVTPS ][wb ][ra ][fse][CVTPS ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[CVTPT ][wb ][ra ][fse][CVTPT ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd		;emulation
+ IPLA[CVTRDL][dl ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTRFL][fl ][rr ][fe ][CVTFB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTRGL][gl ][rr ][fe ][CVTGB ][VINT][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[CVTSP ][wb ][ra ][fse][CVTPS ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[CVTTP ][wb ][ra ][fse][CVTPT ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd		;emulation
+ IPLA[CVTWB ][wb ][rr ][fe ][CVTWB ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTWD ][wd ][rr ][fe ][CVTBG ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTWF ][wf ][rr ][fe ][CVTBF ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTWG ][wg ][rr ][fe ][CVTBG ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[CVTWL ][wl ][rr ][fe ][CVTWL ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[DECB  ][bb ][mr ][fe ][DECB  ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[DECL  ][ll ][mr ][fe ][DECB  ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[DECW  ][ww ][mr ][fe ][DECB  ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[DIVB2 ][bb ][rm ][fre][DIVB2 ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[DIVB3 ][bb ][rr ][fse][DIVB3 ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[DIVD2 ][dd ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[DIVD3 ][dd ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[DIVF2 ][ff ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[DIVF3 ][ff ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[DIVG2 ][gg ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[DIVG3 ][gg ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[DIVL2 ][ll ][rm ][fre][DIVB2 ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[DIVL3 ][ll ][rr ][fse][DIVB3 ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[DIVP  ][wb ][ra ][fse][ADDP6 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[DIVW2 ][ww ][rm ][fre][DIVB2 ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[DIVW3 ][ww ][rr ][fse][DIVB3 ][X   ][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[EDITPC][wb ][ra ][fse][EDITPC][X   ][AAAP][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[EDIV  ][lq ][rr ][fse][EDIV  ][X   ][AAAA][EBOX][1][X     ]	;gsd	gsd
+ IPLA[EMODD ][db ][rr ][fse][EMODG ][VINT][AAAA][FBOX][1][X     ]	;gsd	gsd	gsd
+ IPLA[EMODF ][fb ][rr ][fse][EMODF ][VINT][AAAA][FBOX][1][X     ]	;gsd	gsd	gsd
+ IPLA[EMODG ][gw ][rr ][fse][EMODG ][VINT][AAAA][FBOX][1][X     ]	;gsd	gsd	gsd
+ IPLA[EMUL  ][ll ][rr ][fse][EMULX ][X   ][IIII][EBOX][1][X     ]	;gsd	wdest			;EMULX is 1A
+ IPLA[EXTV  ][lb ][rr ][fse][CMPV  ][X   ][IIIP][EBOX][1][X     ]	;gsd	wdest
+ IPLA[EXTZV ][lb ][rr ][fse][CMPV  ][X   ][IIIP][EBOX][1][X     ]	;gsd	wdest
+ IPLA[FFC   ][lb ][rr ][fse][FFS   ][X   ][AAAA][EBOX][1][X     ]	;gsd	wdest
+ IPLA[FFS   ][lb ][rr ][fse][FFS   ][X   ][AAAA][EBOX][1][X     ]	;gsd	wdest
+
+;	More VAX opcodes
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[HALT  ][X  ][X  ][e  ][X     ][X   ][IIII][EBOX][1][X     ]
+ IPLA[INCB  ][bb ][mr ][fe ][INCB  ][VINT][IIII][EBOX][1][X     ]
+ IPLA[INCL  ][ll ][mr ][fe ][INCB  ][VINT][IIII][EBOX][1][X     ]
+ IPLA[INCW  ][ww ][mr ][fe ][INCB  ][VINT][IIII][EBOX][1][X     ]
+ IPLA[INDEX ][ll ][rr ][fse][INDEX ][X   ][IIII][EBOX][1][X     ]	;gsd	gsd	gsd	wdest
+ IPLA[INSQHI][bq ][aa ][fse][INSQHI][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[INSQTI][bq ][aa ][fse][INSQHI][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[INSQUE][bb ][aa ][fse][INSQUE][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[INSV  ][ll ][rr ][fse][INSV  ][X   ][AAAA][EBOX][1][X     ]	;gsd	gsd
+ IPLA[JMP   ][bb ][ar ][fe ][JMP   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[JSB   ][bl ][ar ][fe ][JSB   ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[LDPCTX][qq ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[LOCC  ][bw ][rr ][fse][LOCC  ][X   ][AAAA][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[MATCHC][wb ][ra ][fse][MATCHC][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[MCOMB ][bb ][ra ][fre][MCOMB ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[MCOML ][ll ][ra ][fre][MCOMB ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[MCOMW ][ww ][ra ][fre][MCOMB ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[MFPR  ][ll ][rr ][fe ][MFPR  ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[MNEGB ][bb ][ra ][fre][MNEGB ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[MNEGD ][dd ][rr ][fe ][MOVF  ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[MNEGF ][ff ][rr ][fe ][MOVF  ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[MNEGG ][gg ][rr ][fe ][MOVG  ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[MNEGL ][ll ][ra ][fre][MNEGB ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[MNEGW ][ww ][ra ][fre][MNEGB ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[MOVAB ][bl ][aa ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVAL ][ll ][aa ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVAQ ][ql ][aa ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVAW ][wl ][aa ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVB  ][bb ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVC3 ][wb ][ra ][fse][MOVC3 ][X   ][JIZJ][EBOX][0][X     ]	;gsd
+ IPLA[MOVC5 ][wb ][ra ][fse][MOVC5 ][X   ][JIZJ][EBOX][0][X     ]	;gsd	gsd	gsd
+ IPLA[MOVD  ][dd ][rr ][fe ][MOVF  ][X   ][AAAP][FBOX][1][X     ]	;wdest
+ IPLA[MOVF  ][ff ][rr ][fe ][MOVF  ][X   ][AAAP][FBOX][1][X     ]	;wdest
+ IPLA[MOVG  ][gg ][rr ][fe ][MOVG  ][X   ][AAAP][FBOX][1][X     ]	;wdest
+ IPLA[MOVL  ][ll ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVP  ][wb ][ra ][fse][MOVP  ][X   ][AAAP][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[MOVPSL][ll ][vr ][fe ][MOVPSL][X   ][AAAA][EBOX][1][X     ]
+ IPLA[MOVQ  ][qq ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+
+;	More VAX opcodes
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[MOVTC ][wb ][ra ][fse][MOVTC ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[MOVTUC][wb ][ra ][fse][MOVTC ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[MOVW  ][ww ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVZBL][bl ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVZBW][bw ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MOVZWL][wl ][ra ][fre][MOVX  ][X   ][IIIP][EBOX][1][X     ]	;				;MOVX is 10
+ IPLA[MTPR  ][ll ][rr ][fse][MTPR  ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[MULB2 ][bb ][rm ][fse][MULB2 ][VINT][IIII][EBOX][1][X     ]
+ IPLA[MULB3 ][bb ][rr ][fse][MULB2 ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[MULD2 ][dd ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[MULD3 ][dd ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[MULF2 ][ff ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[MULF3 ][ff ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[MULG2 ][gg ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[MULG3 ][gg ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[MULL2 ][ll ][rm ][fse][MULL2 ][VINT][IIII][EBOX][1][X     ]
+ IPLA[MULL3 ][ll ][rr ][fse][MULL2 ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[MULP  ][wb ][ra ][fse][ADDP6 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[MULW2 ][ww ][rm ][fse][MULW2 ][VINT][IIII][EBOX][1][X     ]
+ IPLA[MULW3 ][ww ][rr ][fse][MULW2 ][VINT][AAAA][EBOX][1][X     ]	;wdest
+ IPLA[NOP   ][X  ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[POLYD ][dw ][rr ][fse][POLYDX][X   ][AAAA][FBOX][0][X	]	;gsd			POLYDX is 71
+ IPLA[POLYF ][fw ][rr ][fse][POLYF ][X   ][AAAA][FBOX][0][X     ]	;gsd
+ IPLA[POLYG ][gw ][rr ][fse][POLYG ][X   ][AAAA][FBOX][0][X     ]	;gsd
+ IPLA[POPR  ][wl ][rr ][fe ][POPR  ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[PROBER][bw ][rr ][fse][PROBER][X   ][IIIP][EBOX][1][X     ]
+ IPLA[PROBEW][bw ][rr ][fse][PROBER][X   ][IIIP][EBOX][1][X     ]
+ IPLA[PUSHAB][bl ][ar ][fe ][PUSHX ][X   ][IIIP][EBOX][1][X     ]	;			PUSHX is 15
+ IPLA[PUSHAL][ll ][ar ][fe ][PUSHX ][X   ][IIIP][EBOX][1][X     ]	;			PUSHX is 15
+ IPLA[PUSHAQ][ql ][ar ][fe ][PUSHX ][X   ][IIIP][EBOX][1][X     ]	;			PUSHX is 15
+ IPLA[PUSHAW][wl ][ar ][fe ][PUSHX ][X   ][IIIP][EBOX][1][X     ]	;			PUSHX is 15
+ IPLA[PUSHL ][ll ][rr ][fe ][PUSHX ][X   ][IIIP][EBOX][1][X     ]	;			PUSHX is 15
+ IPLA[PUSHR ][wl ][rr ][fe ][PUSHR ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[REI   ][qq ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[REMQHI][ql ][av ][fre][REMQHI][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[REMQTI][ql ][av ][fre][REMQHI][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[REMQUE][bl ][av ][fse][REMQUE][X   ][JIZJ][EBOX][1][X     ]
+ IPLA[RET   ][bb ][X  ][e  ][X     ][X   ][IIII][EBOX][1][X     ]
+ IPLA[ROTL  ][bl ][rr ][fse][ROTL  ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[RSB   ][X  ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][X     ]
+
+;	More VAX opcodes
+
+;   mnemonic  DL   AT  fork  disptch int  PSLCC  E/F  FPD? br cond
+;                      code  address if V
+;             --specifier--
+;             123  123  123
+
+ IPLA[SBWC  ][ll ][rm ][fre][SBWC  ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[SCANC ][wb ][ra ][fse][SCANC ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[SKPC  ][bw ][rr ][fse][LOCC  ][X   ][AAAA][EBOX][0][X     ]	;gsd				;emulation
+ IPLA[SOBGEQ][lb ][mr ][fe ][SOBGEQ][VINT][AAAP][EBOX][1][X     ]
+ IPLA[SOBGTR][lb ][mr ][fe ][SOBGEQ][VINT][AAAP][EBOX][1][X     ]
+ IPLA[SPANC ][wb ][ra ][fse][SCANC ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[SUBB2 ][bb ][rm ][fre][SUBB2 ][VINT][IIIJ][EBOX][1][X     ] 
+ IPLA[SUBB3 ][bb ][rr ][fre][SUBB3 ][VINT][AAAB][EBOX][1][X     ]	;wdest
+ IPLA[SUBD2 ][dd ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[SUBD3 ][dd ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[SUBF2 ][ff ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[SUBF3 ][ff ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[SUBG2 ][gg ][rm ][fre][ADDF2 ][X   ][AAAA][FBOX][1][X     ]
+ IPLA[SUBG3 ][gg ][rr ][fre][ADDF3 ][X   ][AAAA][FBOX][1][X     ]	;wdest
+ IPLA[SUBL2 ][ll ][rm ][fre][SUBB2 ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[SUBL3 ][ll ][rr ][fre][SUBB3 ][VINT][AAAB][EBOX][1][X     ]	;wdest
+ IPLA[SUBP4 ][wb ][ra ][fse][ADDP4 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd			;emulation
+ IPLA[SUBP6 ][wb ][ra ][fse][ADDP6 ][X   ][AAAA][EBOX][0][X     ]	;gsd	gsd	gsd	gsd	;emulation
+ IPLA[SUBW2 ][ww ][rm ][fre][SUBB2 ][VINT][IIIJ][EBOX][1][X     ]
+ IPLA[SUBW3 ][ww ][rr ][fre][SUBB3 ][VINT][AAAB][EBOX][1][X     ]	;wdest
+ IPLA[SVPCTX][qq ][X  ][e  ][X     ][X   ][AAAA][EBOX][1][X     ]
+ IPLA[TSTB  ][bb ][rr ][fe ][TSTB  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[TSTD  ][dw ][rr ][fe ][TSTD  ][X   ][IIII][FBOX][1][X     ]
+ IPLA[TSTF  ][fw ][rr ][fe ][MOVF  ][X   ][IIII][FBOX][1][X     ]
+ IPLA[TSTG  ][gw ][rr ][fe ][MOVG  ][X   ][IIII][FBOX][1][X     ]
+ IPLA[TSTL  ][ll ][rr ][fe ][TSTB  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[TSTW  ][ww ][rr ][fe ][TSTB  ][X   ][IIII][EBOX][1][X     ]
+ IPLA[XFC   ][X  ][X  ][e  ][X     ][X   ][IIII][EBOX][1][X     ]
+ IPLA[XORB2 ][bb ][rm ][fre][XORB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[XORB3 ][bb ][rr ][fre][XORB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[XORL2 ][ll ][rm ][fre][XORB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[XORL3 ][ll ][rr ][fre][XORB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[XORW2 ][ww ][rm ][fre][XORB2 ][X   ][IIIP][EBOX][1][X     ]
+ IPLA[XORW3 ][ww ][rr ][fre][XORB3 ][X   ][AAAP][EBOX][1][X     ]	;wdest
+ IPLA[0FD   ][ll ][rr ][fre][0FD   ][X   ][X   ][EBOX][0][X     ]
+.ucode

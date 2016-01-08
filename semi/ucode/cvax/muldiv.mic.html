@@ -1,0 +1,1189 @@
+.TOC	"MULDIV.MIC -- Multiply and Divide Instructions"
+.TOC	"Revision 5.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+;	28-Sep-86	[RMS]	Editorial changes
+; 05	5-Jul-86	[RMS]	Optimized EMUL, EDIV startup, editorial changes, pass 1 code freeze
+;	16-Apr-86	[RMS]	Editorial changes
+;	25-Feb-86	[RMS]	Optimized EDIV cleanup
+;	24-Feb-86	[RMS]	Relaxed alignment constraints
+;	19-Feb-86	[RMS]	Relaxed alignment constraints
+;	16-Feb-86	[RMS]	Restored SPEC.RN (ECO rescinded)
+;	31-Jan-86	[RMS]	Documented additional PSL restriction (ECO 6JAN31DWA.3)
+;	31-Jan-86	[RMS]	Changed SPEC.RN (ECO 6JAN31DWA.2)
+;	8-Jan-86	[RMS]	Changed SWAP.RN to LOAD.OLD.RN (ECO 6JAN08DWA.1)
+;	29-Dec-85	[RMS]	Removed FPA.DATA restriction, separated ASTLVL and TRAP
+;	17-Dec-85	[RMS]	Added diagnostic dispatches, documented FPA.DATA restriction
+; 04	4-Nov-85	[RMS]	Saved two cycles in integer divide
+;	1-Nov-85	[RMS]	Fixed EDIV remainder fixup (HCORE)
+;	14-Oct-85	[RMS]	Revised for new floating point flows
+;	2-Oct-85	[RMS]	Revised for modified UDIV.STEP function (ECO 5OCT02PEG.1)
+;	19-Sep-85	[RMS]	Removed PASS.A/B.ZEXT.DL functions (ECO 5SEP19FF.1)
+;	5-Sep-85	[RMS]	Editorial changes
+; 03	2-Sep-85	[RMS]	Revised multiply dispatches
+; 02	29-Jul-85	[RMS]	Editorial changes
+;	26-Jul-85	[RMS]	Documented additional PSL restrictions
+;	17-Jul-85	[RMS]	Fixed register ordering in SMULS macro (HCORE)
+;	8-Jul-85	[RMS]	Revised to save word in divide trap flows
+; 01	20-Mar-85	[RMS]	Revised for second pass model
+; 00	10-Jan-83	[RMS]	Initial edit for CVAX
+
+.bin
+;= BEGIN MULDIV
+
+.nobin
+;	This module implements integer multiply and divide.
+;	The instructions implemented here are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	86	 DIVB2 divr.rb, quo.mb						* * * 0		iov, idvz
+;	C6	 DIVL2 divr.rl, quo.ml						* * * 0		iov, idvz
+;	A6	 DIVW2 divr.rw, quo.mw						* * * 0		iov, idvz
+;
+;	87	 DIVB3 divr.rb, divd.rb, quo.wb					* * * 0		iov, idvz
+;	C7	 DIVL3 divr.rl, divd.rl, quo.wl					* * * 0		iov, idvz
+;	A7	 DIVW3 divr.rw, divd.rw, quo.ww					* * * 0		iov, idvz
+;
+;	7B	 EDIV divr.rl, divd.rq, quo.wl, rem.wl				* * * 0		iov, idvz
+;
+;	7A	 EMUL mulr.rl, muld.rl, add.rl, prod.wq				* * 0 0
+;
+;	84	 MULB2 mulr.rb, prod.mb						* * * 0		iov
+;	C4	 MULL2 mulr.rl, prod.ml						* * * 0		iov
+;	A4	 MULW2 mulr.rw, prod.mw						* * * 0		iov
+;
+;	85	 MULB3 mulr.rb, muld.rb, prod.wb				* * * 0		iov
+;	C5	 MULL3 mulr.rl, muld.rl, prod.wl				* * * 0		iov
+;	A5	 MULW3 mulr.rw, muld.rw, prod.ww				* * * 0		iov
+;
+
+.TOC	"	MULx2, MULx3, EMUL"
+
+;	These instructions multiply two integers.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MULB2		84	prod.mb <-- mulr.rb * prod.mb		2	rm/bb	iiii	MULX2		--
+;	MULW2		A4	prod.mw <-- mulr.rw * prod.mw		2	rm/ww	iiii	MULX2		--
+;	MULL2		C4	prod.ml <-- mulr.rl * prod.ml		2	rm/ll	iiii	MULX2		--
+;
+;	MULB3		85	prod.wb <-- mulr.rb * muld.rb		3	rrv/bbb	iiii	MULX3		--
+;	MULW3		A5	prod.ww <-- mulr.rw * muld.rw		3	rrv/www	iiii	MULX3		--
+;	MULL3		C5	prod.wl <-- mulr.rl * muld.rl		3	rrv/lll	iiii	MULX3		--
+;
+;	EMUL		7A	prod.wq <-- mulr.rl * muld.rl +		4	rrrv/lllq iiii	MULX3		--
+;					    + sext(add.rl)
+;
+;	MULx2 -- entry conditions from specifier flows:
+;		W0	=	first (multiplier) operand
+;		W2	=	second (product) operand, unless register mode
+;		VA	=	address of second (product) operand, unless register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand
+;
+;	MULx3 -- entry conditions from specifier flows:
+;		W0	=	first (multiplier) operand
+;		W2	=	second (multiplicand) operand
+;		W4 = VA	=	address of third (product) operand, unless register mode
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand
+;
+;	EMUL -- entry conditions from specifier flows:
+;		W0	=	first (multiplier) operand
+;		W2	=	second (multiplicand) operand
+;		W4	=	third (add) operand
+;		SC = VA	=	address of fourth (product) operand, unless register mode
+;		RN	=	register number of fourth specifier
+;		DL	=	data type of fourth operand (quadword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;
+;	Condition codes:
+;		(MULX2, MULX3)			(EMUL)
+;		N <-- product LSS 0		N <-- product LSS 0
+;		Z <-- product EQL 0		Z <-- product EQL 0
+;		V <-- overflow			V <-- 0
+;		C <-- 0				C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	MULx3 and EMUL clobber the PSL condition codes before establishing the write
+;		accessibility of the destination operand.
+;
+.bin
+
+;	MULx2 operation:
+;
+;		prod.mx <-- mulr.rx * prod.mx
+
+;	MULx3 operation:
+;
+;		prod.wx <-- mulr.rx * muld.rx
+
+;	EMUL operation:
+;
+;		prod.wq <-- mulr.rl * muld.rl + sext(add.rl)
+
+;	mulx2 x,r --
+
+MULX2.RMODE:
+	;********** Hardware dispatch **********;
+	[W2]<--[GRN.BR], LEN(DL)		; get oper, zero ext, broadcast to FPA
+
+;	mulx2 x,m --
+
+MULX2:
+	;********** Hardware dispatch **********;
+	[Q]<--B.[W2],				; Q<x:0> <-- multiplier, test sign
+						; >>Q write, not read in next cycle
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	CASE8[FPA.DL].AT.[MULBX.WARM]		; case on warm vs hot, data length
+
+;	mulx3 x,x,r --
+;	emul x,x,x,r --
+
+MULX3.RMODE:
+	;********** Hardware dispatch **********;
+	[Q]<--B.[W2],				; Q<x:0> <-- multiplier, test sign
+						; >>Q write, not read in next cycle
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	CASE8[FPA.DL].AT.[MULBX.WARM]		; case on warm vs hot, data length
+
+;	mulx3 x,x,m --
+;	emul x,x,x,m --
+
+MULX3:
+	;********** Hardware dispatch **********;
+	[Q]<--B.[W2],				; Q<x:0> <-- multiplier, test sign
+						; >>Q write, not read in next cycle
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	CASE8[FPA.DL].AT.[MULBX.WARM]		; case on warm vs hot, data length
+
+;	MULBx, continued.
+
+;	At this point,
+;		W0<7:0>	=	multiplicand
+;		Q<7:0>	=	multiplier
+;		alu cc's =	set from multiplier
+
+;= ALIGNLIST 000*	(MULBX.WARM,	MULWX.WARM,
+;=			 MULLX.WARM,	EMUL.WARM,
+;=			 MULBX.HOT,	MULWX.HOT,
+;=			 MULLX.HOT,	EMUL.HOT)
+
+MULBX.WARM:
+	;---------------------------------------; dl = byte, FPA not present:
+	[W1]<--K[0],				; clear high order result
+	GOTO[MULBX]				; join common code
+
+MULBX.HOT:
+	;---------------------------------------; dl = byte, FPA present:
+	[W1]<--K[0],				; clear high order result
+	GOTO[MULBX]				; join common code
+
+MULBX:
+	;---------------------------------------;
+	[W0]<--[W0].SHFL.[24.],			; left justify multiplicand in W0
+	CALL[INT.MULT.BYTE]			; W1<31:16> <-- W0<31:24> * Q<7:0>
+
+	;---------------------------------------;
+	[W0]<--ZEXT.[W1].SHFR.[16.]		; W0<7:0> <-- result
+
+	;---------------------------------------;
+	[W1]<--ZEXT.[W1].SHFR.[24.]		; W1<7:0> <-- extended result
+
+	;---------------------------------------;
+	[WBUS]<--[W0],				; test sign of result
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII,	; set alu/psl cc's, psl map is iiii
+	GOTO[MULX.CONTINUE]			; join common post processing
+
+;	MULWx, continued.
+
+;	At this point,
+;		W0<15:0> =	multiplicand
+;		Q<15:0>	=	multiplier
+;		alu cc's =	set from multiplier
+
+MULWX.WARM:
+	;---------------------------------------; dl = word, FPA not present:
+	[W1]<--K[0],				; clear high order result
+	GOTO[MULWX]				; join common code
+
+MULWX.HOT:
+	;---------------------------------------; dl = word, FPA present:
+	[W1]<--K[0],				; clear high order result
+	GOTO[MULWX]				; join common code
+
+MULWX:
+	;---------------------------------------;
+	[W0]<--[W0].SHFL.[16.],			; left justify multiplicand in W0
+	CALL[INT.MULT.WORD]			; W1<31:0> <-- W0<31:16> * Q<15:0>
+
+	;---------------------------------------;
+	[W0]<--[W1],				; W0<31:0> <-- zext(result<15:0>)
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII	; set alu/psl cc's, psl map is iiii
+
+	;---------------------------------------;
+	[W1]<--ZEXT.[W1].SHFR.[16.],		; W1<15:0> <-- extended result
+	GOTO[MULX.CONTINUE]			; join common post processing
+
+;	MULLx, continued.
+
+;	At this point,
+;		W0	=	multiplicand
+;		Q	=	multiplier
+;		alu cc's =	set from multiplier
+
+MULLX.HOT:
+	;---------------------------------------; dl = long, FPA present:
+	MAP.IIII,				; psl map is iiii
+	CASE2[INT.RM].AT.[FP.LW.MEM]		; case on memory vs register
+
+MULLX.WARM:
+	;---------------------------------------; dl = long, FPA not present:
+	[W1]<--K[0],				; clear high order result
+	CALL[INT.MULT.LONG]			; W1'Q <-- W0 * Q
+
+	;---------------------------------------;
+	[W0]<--[Q],				; retrieve result
+						; >>Q read, not written in prev cycle
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII	; set alu/psl cc's, psl map is iiii
+
+MULX.CONTINUE:
+	;---------------------------------------;
+	[WBUS]<--[SEXTN].XOR.[W1],		; check that extended result = extended sign
+	SET.ALUCC, LEN(DL),			; set alu.z if no overflow
+	CASE2[INT.RM].AT.[WRITE.MEM.TEST.OVERFLOW]	; case on memory vs register
+
+;	EMUL, continued.
+
+;	At this point,
+;		W0	=	multiplicand
+;		W4	=	addend
+;		Q	=	multiplier
+;		alu cc's =	set from multiplier
+
+EMUL.HOT:
+	;---------------------------------------; dl = quad, FPA present:
+	MAP.IIII,				; psl map is iiii
+	CASE2[INT.RM].AT.[FP.QW.MEM]		; case on memory vs register
+
+EMUL.WARM:
+	;---------------------------------------; dl = quad, FPA not present:
+	[W1]<--[W4],				; copy adder to high order result
+	MAP.IIII,				; set psl map to iiii
+	CALL[INT.MULT.LONG]			; W1'Q <-- W0 * Q + W1
+
+	;---------------------------------------;
+	[W0]<--[Q],				; retrieve low order result
+						; >>Q read, not written in prev cycle
+	CASE2[INT.RM].AT.[EMUL.WARM.MEM]	; case on register vs memory
+
+;	Can't case directly to MOVX.MEM due to allocation constraints.
+
+;= ALIGNLIST 110*	(EMUL.WARM.MEM,	EMUL.WARM.RMODE)
+
+EMUL.WARM.RMODE:
+	;---------------------------------------; rmode:
+	[GRN]<--B.[W0],				; copy low order result to destination
+	SET.PSLCC, LEN(DL),			; set psl cc's, psl map is iiii
+	RN<--RN+1,				; point to next register
+						; >>RN+1, no recoverable utrap this cycle
+	GOTO[WRITE.RMODE.SET.PSLCC.QW]		; go copy high order result, set psl cc's
+
+EMUL.WARM.MEM:
+	;---------------------------------------; ~rmode:
+	MEM(VA)<--[W0],				; write low order result to destination
+	SET.PSLCC, LEN(DL),			; set psl cc's, psl map is iiii
+	GOTO[WRITE.MEM.SET.PSLCC.QW]		; go write high order result, set psl cc's
+
+.nobin
+.TOC	"	Integer Multiply Subroutines"
+
+;	These subroutines multiply the left-justified byte/word/longword in W0
+;	by the byte/word/longword in Q to produce a double length result in W1'Q.
+;
+;	They are used by MULx2, MULx3, EMUL, and INDEX.
+;
+;	Entry conditions:
+;		W0	=	multiplicand
+;		W1	=	adder or 0
+;		Q	=	multiplier
+;		alu cc's =	set from multiplier
+;
+;	Exit conditions:
+;		W1'Q	=	product
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	Integer multiply subroutine operation:
+;
+;		emul -- W1'Q z-- W0 * Q + W1
+;		long --	W1'Q <-- W0 * Q
+;		word --	W1<31:0> <-- W0<31:16> * Q<15:0>
+;		byte --	W1<31:16> <-- W0<31:24> * Q<7:0>
+
+;	>>Q not written in prev cycle.
+
+INT.MULT.LONG:
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.7.STEPS]			; call subroutine to do 7 steps
+
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.7.STEPS]			; call subroutine to do 7 steps
+
+INT.MULT.WORD:
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.7.STEPS]			; call subroutine to do 7 steps
+
+INT.MULT.BYTE:
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.3.STEPS]			; call subroutine to do 3 steps
+
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.1.STEP]			; call subroutine to do 1 step
+
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0]			; do signed multiply step
+
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CASE2[ALU.NZV].AT.[INT.MULT.POS]	; case on pos vs neg multiplier
+
+;= ALIGNLIST 01**	(INT.MULT.POS,	INT.MULT.NEG)
+;  ALU.NZVC set by MOV --> V = C = 0
+
+INT.MULT.POS:
+WAIT.ONE.CYCLE:
+	;---------------------------------------; alu.n = 0:
+	RETURN					; return to caller
+						; >>Q not readable this cycle
+
+INT.MULT.NEG:
+	;---------------------------------------; alu.n = 1:
+	[W1]<--[W1]-[W0],			; compensate for negative sign
+	RETURN					; return to caller
+						; >>Q not readable this cycle
+
+;	These subroutines perform 7, 3, or 1 multiply step(s),
+;	by nesting.
+
+;= AT 2A8
+
+INT.MULT.7.STEPS:
+	;********* Diagnostic dispatch *********;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.3.STEPS]			; call subroutine to do 3 steps
+						; fall through to do 3 steps
+
+INT.MULT.3.STEPS:
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	CALL[INT.MULT.1.STEP]			; call subroutine to do 1 step
+						; fall through to do 1 step
+
+INT.MULT.1.STEP:
+	;---------------------------------------;
+	[W1]<--[W1].SMULS.[W0],			; do signed multiply step
+	RETURN					; return
+
+.nobin
+.TOC	"	DIVx2, DIVx3"
+
+;	These instructions divide two integers and return the quotient.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	DIVB2		86	quo.mb <-- quo.mb / divr.rb		2	rm/bb	iiii	DIVX2		--
+;	DIVW2		A6	quo.mw <-- quo.mw / divr.rw		2	rm/ww	iiii	DIVX2		--
+;	DIVL2		C6	quo.ml <-- quo.ml / divr.rl		2	rm/ll	iiii	DIVX2		--
+;
+;	DIVB3		87	quo.wb <-- divd.rb / divr.rb		3	rrv/bbb	iiii	DIVX3		--
+;	DIVW3		A7	quo.ww <-- divd.rw / divr.rw		3	rrv/www	iiii	DIVX3		--
+;	DIVL3		C7	quo.wl <-- divd.rl / divr.rl		3	rrv/lll	iiii	DIVX3		--
+;
+;	DIVx2 -- entry conditions from specifier flows:
+;		W0	=	first (divisor) operand
+;		W2	=	second (quotient) operand, unless register mode
+;		VA	=	address of second (quotient) operand, unless register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand 
+;
+;	DIVx3 -- entry conditions from specifier flows:
+;		W0	=	first (divisor) operand
+;		W2	=	second (dividend) operand
+;		W4 = VA	=	address of third (quotient) operand, unless register mode
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand 
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow or divide by zero
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	DIVx3 clobbers the PSL condition codes before establishing the write
+;		accessibility of the destination operand.
+;
+.bin
+
+;	DIVx2 operation:
+;
+;		quo.mx <-- quo.mx / divr.rx
+
+;	divx2 x,r --
+
+DIVX2.RMODE:
+	;********** Hardware dispatch **********;
+	[W2]<--[GRN.BR],			; test divd, zero ext, broadcast to FPA
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII,	; set alu/psl cc's, psl map is iiii
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	[GRN]<--B.[W3], LEN(DL),		; write result to register
+	DEC.NEXT				; decode next instruction
+
+;	divx2 x,m --
+
+DIVX2:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W2],				; test sign of dividend
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII,	; set alu/psl cc's, psl map is iiii
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	MEM(VA)<--[W3], LEN(DL),		; write result to memory
+	DEC.NEXT				; decode next instruction
+
+;	DIVx3 operation:
+;
+;		quo.wx <-- divd.rx / divr.rx
+
+;	divx3 x,x,r --
+
+DIVX3.RMODE:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W2],				; test sign of dividend
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII,	; set alu/psl cc's, psl map is iiii
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	[GRN]<--B.[W3], LEN(DL),		; write result to register
+	DEC.NEXT				; decode next instruction
+
+;	divx3 x,x,m --
+
+DIVX3:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W2],				; test sign of dividend
+	SET.ALUCC&PSLCC, LEN(DL), MAP.IIII,	; set alu/psl cc's, psl map is iiii
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	MEM(VA)<--[W3], LEN(DL),		; write result to memory
+	DEC.NEXT				; decode next instruction
+
+.nobin
+.TOC	"	EDIV"
+
+;	This instruction divides two integers and returns both the quotient
+;	and the remainder.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----		--	--------	-----
+;	EDIV		7B	quo.wl <-- divd.rq / divr.rl		4	rrvv/lqll	iiii	EDIV		--
+;				rem.wl <-- rem(divd.rq,divr.rl)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (divisor) operand
+;		W3'W2	=	second (dividend) operand
+;		W4	=	address of third (quotient) operand, unless register mode
+;		SC = VA	=	address of fourth (remainder) operand, unless register mode
+;		RN.OLD	=	register number of third specifier
+;		RN	=	register number of fourth specifier
+;		DL	=	data type of fourth operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory locations or registers.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow or divide by zero
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	EDIV has two destination operands and must assure the accessibility of both before
+;		writing either.
+;	Note:	EDIV shares common code with EMODf for writing two destination operands.
+;	Note:	EDIV clobbers the PSL condition codes before establishing the write
+;		accessibility of the destination operand.
+;
+.bin
+
+;	EDIV operation:
+;
+;		quo.wl <-- divd.rq / divr.rl
+;		rem.wl <-- rem(divd.rq, divr.rl)
+
+;	ediv x,x,x,r --
+
+EDIV.RMODE:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0],				; test sign/zero of divisor
+	SET.ALUCC, LONG, MAP.IIII,		; set alu cc's, set psl map to iiii
+	CALL[EXTENDED.DIVIDE]			; perform extended divide
+
+;	At this point,
+;		W0 (W1'W0) =	second result
+;		W3	=	first result
+;		W4	=	address of first result, unless register mode
+;		RN.OLD	=	register number of first result
+;		RN	=	register number of second result
+;		psl cc's =	properly set
+
+;= ALIGNLIST 110*	(EDIV.EMOD,	EDIV.EMOD.RMODE)
+
+EDIV.EMOD.RMODE:
+	;---------------------------------------; rmode:
+	[VA]<--[W4],				; addr of first result to VA
+	CASE2[INT.RM].AT.[EDIV.RMODE.THIRD.MEM]	; case on first result memory vs register
+
+;= ALIGNLIST 101*	(EDIV.RMODE.THIRD.MEM,	EDIV.RMODE.THIRD.RMODE)
+
+EDIV.RMODE.THIRD.RMODE:
+	;---------------------------------------; rmode:
+	[W2]<--MXPS0[SPEC.RN],			; save register number of second result
+						; >>spur read, previous dst was VA
+	RN<--RN.OLD				; restore register number of first result
+
+	;---------------------------------------;
+	MXPS0[RN]<--[W2]			; start restore of reg num of second result
+						; not effective in next cycle
+
+	;---------------------------------------;
+	[GRN]<--B.[W3], LONG,			; store first result in register
+						; uses RN from PREVIOUS cycle
+	GOTO[WRITE.RMODE]			; go write second result to register
+						; RN will be restored from W2
+
+EDIV.RMODE.THIRD.MEM:
+	;---------------------------------------; ~rmode:
+	MEM(VA)<--[W3], LONG,			; write first result to memory
+						; if this succeeds, instruction can complete
+	GOTO[WRITE.RMODE]			; go write second result to register
+
+;	EDIV, continued.
+
+;	ediv x,x,x,m --
+
+EDIV:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0],				; test sign/zero of divisor
+	SET.ALUCC, LONG, MAP.IIII,		; set alu cc's, psl map is iiii
+	CALL[EXTENDED.DIVIDE]			; perform extended divide
+
+;	At this point,
+;		W0 (W1'W0) =	second result
+;		W3	=	first result
+;		W4	=	address of first result, unless register mode
+;		RN.OLD	=	register number of first result
+;		SC = VA	=	address of second result
+;		psl cc's =	properly set
+
+EDIV.EMOD:
+	;---------------------------------------; ~rmode:
+	[WBUS]<--MEM(VA).WCHECK, LEN(DL),	; read, check writeability of second result
+	RN<--RN.OLD,				; restore register number of first result
+	CASE2[INT.RM].AT.[EDIV.THIRD.MEM]	; case on first result memory vs register
+
+;= ALIGNLIST 10**	(EDIV.THIRD.MEM,	EDIV.THIRD.RMODE)
+;  Last specifier = memory --> INT.RM = ??0
+
+EDIV.THIRD.RMODE:
+	;---------------------------------------; rmode:
+	[GRN]<--B.[W3], LONG,			; store first result in register
+	GOTO[WRITE.MEM]				; go write second result to memory
+
+EDIV.THIRD.MEM:
+	;---------------------------------------; ~rmode:
+	VA&, [WBUS]<--[W4]			; set VA to address of first result
+
+	;---------------------------------------;
+	MEM(VA)<--[W3], LONG			; write first result to memory
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[SC],			; restore VA to address of second result
+	GOTO[WRITE.MEM]				; go write second result to memory
+
+.nobin
+.TOC	"	Integer Divide Subroutine"
+
+;	The integer divide subroutine divides the byte/word/longword in W2 by the
+;	byte/word/longword in W0.
+;
+;	The routine uses a non-restoring divide which executes at the rate of one
+;	bit for every microcycle.  
+;
+;	Entry conditions:
+;		W0	=	divisor
+;		W2	=	dividend
+;		DL	=	data type of operands
+;		alu cc's = psl cc's =	set from dividend via MOVE
+;		psl map	=	iiii
+;
+;	Exit conditions:
+;		W0	=	remainder
+;		W2	=	dividend
+;		W3	=	result (quotient if no trap, dividend if trap)
+;		Q, W5	=	trashed
+;		psl cc's =	set from quotient, including psl.v
+;		STATE<2:0> =	000
+;
+.bin
+
+;	Integer divide subroutine operation:
+;
+;		W0	=	W2 / W0
+;		W3	=	remainder (W2, W0)
+
+INTEGER.DIVIDE:
+	;---------------------------------------;
+	[WBUS]<--[W0],				; test sign/zero of divisor
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	STATE3-0<--0,				; clear STATE flags
+	CASE2[ALU.NZV].AT.[INTDIV.DIVD.POS]	; case on sign of dividend in W2
+
+;= ALIGNLIST 01**	(INTDIV.DIVD.POS,	INTDIV.DIVD.NEG)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+INTDIV.DIVD.NEG:
+	;---------------------------------------; alu.n = 1:
+	[Q]<--NEG.[W2],				; negate dividend to Q
+						; >>Q write, not read in next cycle
+	STATE0<--1,				; flag negative dividend
+	CASE4[ALU.NZV].AT.[INTDIV.DIVR.POS]	; case on sign of divisor
+
+INTDIV.DIVD.POS:
+	;---------------------------------------; alu.n = 0:
+	[Q]<--B.[W2],				; copy dividend to Q
+						; >>Q write, not read in next cycle
+	CASE4[ALU.NZV].AT.[INTDIV.DIVR.POS]	; case on sign of divisor
+
+;= ALIGNLIST 00**	(INTDIV.DIVR.POS,	INTDIV.DIVR.ZERO,
+;=			 INTDIV.DIVR.NEG,			)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+INTDIV.DIVR.ZERO:
+	;---------------------------------------; alu.n = 0, alu.z = 1:
+	[TRAP]<--K[2],				; divisor is zero, set trap parameter
+	GOTO[DIVIDE.BY.ZERO]			; join common error flows
+
+INTDIV.DIVR.NEG:
+	;---------------------------------------; alu.n = 1, alu.z = 0:
+	[W0]<--NEG.[W0], LEN(DL),		; divisor negative, negate it, zero ext
+	STATE1<--1				; flag negative divisor
+
+INTDIV.DIVR.POS:
+	;---------------------------------------; alu.n = 0, alu.z = 0:
+	[W3]<--[W3]-[W3],			; clear high order dividend
+	SET.ALUCC, LONG,			; set alu cc's = 0101
+	CASE4[FPA.DL].AT.[INTDIV.BYTE]		; case on byte/word/longword divide
+
+;	Integer divide, continued.
+;	Start integer divide.
+
+;	At this point,
+;		W0	=	!divisor!
+;		W2	=	dividend<31:0>
+;		W3'Q	=	!0'dividend!
+;		STATE<2:0> =	0'sign of divisor, dividend
+;		alu.c	=	1 (guarantees initial subtraction)
+
+;= ALIGNLIST 100*	(INTDIV.BYTE,	INTDIV.WORD,	INTDIV.LONG)
+
+INTDIV.BYTE:
+	;---------------------------------------; dl = byte:
+	[Q]<--[Q]!![MKDL].SHFL.[24.]		; shift dividend left 24 bits
+						; >>Q write, next cycle is UDIVS
+						; [mkdl] has 24 leading zeros
+
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	GOTO[INTDIV.8.STEPS]			; go do 8 bit divide
+
+INTDIV.WORD:
+	;---------------------------------------; dl = word:
+	[Q]<--[Q]!![MKDL].SHFL.[16.]		; shift dividend left 16 bits
+						; >>Q write, next cycle is UDIVS
+						; [mkdl] has 16 leading zeros
+
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	GOTO[INTDIV.16.STEPS]			; go do 16 bit divide
+
+INTDIV.LONG:
+	;---------------------------------------; dl = long:
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE2[FPA.DL].AT.[INTDIV.32.STEPS]	; case on FPA absent vs present
+
+;= ALIGNLIST 01**	(INTDIV.32.STEPS,	INTDIV.LONG.HOT)
+;  DL = long --> FPA.DL = ?10
+
+INTDIV.LONG.HOT:
+	;---------------------------------------; FPA present:
+	[W3]<--FPA.DATA,			; read quotient from FPA
+	SET.PSLCC, LONG,			; set psl cc's
+	STATE3-0<--0,				; clear state flags
+	RETURN					; return to caller
+
+;	Integer divide, continued.
+;	One divide step (out of n+1) has been executed.
+
+;	At this point,
+;		W0	=	!divisor!
+;		W2	=	dividend<31:0>
+;		W3'Q	=	!0'dividend!
+;		STATE<2:0> =	0'sign of divisor, dividend
+;		alu cc's =	set from first divide step
+
+INTDIV.32.STEPS:
+	;---------------------------------------; FPA not present:
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.15.STEPS]			; do next fifteen divide steps
+
+INTDIV.16.STEPS:
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.7.STEPS]			; do next seven divide steps
+
+INTDIV.8.STEPS:
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.7.STEPS]			; do next seven divide steps
+
+;	Integer divide, continued.
+;	Cleanup for integer divide.
+
+;	At this point,
+;		Q	=	quotient
+;		STATE<2:0> =	0'sign of divisor, dividend
+
+;	Q cannot be read this cycle.
+
+	;---------------------------------------;
+	[W5]<--K[0],				; set up to negate Q to W5 if required
+	CASE4[STATE2-0].AT.[INTDIV.STATE.00]	; case on integer vs extended, signs
+
+;= ALIGNLIST *00*	(INTDIV.STATE.00,	INTDIV.STATE.01,
+;=			 INTDIV.STATE.10,	INTDIV.STATE.11)
+;  STATE<2> = 0 --> STATE<2:0> = ?00
+
+INTDIV.STATE.00:
+	;---------------------------------------; divisor +, dividend +:
+	[W3]<--[Q],				; store quotient, zero extend
+						; >>Q read, not written in prev cycle
+	SET.PSLCC, LEN(DL),			; set psl cc's
+	STATE3-0<--0,				; clear STATE<2:0>
+	RETURN					; exit to caller
+
+INTDIV.STATE.01:
+	;---------------------------------------; divisor +, dividend -:
+	[W5]<--(-[Q]+[W5]),			; negate quotient
+						; >>Q read, not written in prev cycle
+	GOTO[EXTDIV.NEG.NZ.10]			; go set psl cc's and exit
+
+INTDIV.STATE.10:
+	;---------------------------------------; divisor -, dividend +:
+	[W5]<--(-[Q]+[W5]),			; negate quotient
+						; >>Q read, not written in prev cycle
+	GOTO[EXTDIV.NEG.NZ.10]			; go set psl cc's and exit
+
+INTDIV.STATE.11:
+	;---------------------------------------; divisor -, dividend -:
+	[W5]<--(-[Q]+[W5]),			; negate quotient
+						; >>Q read, not written in prev cycle
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	GOTO[EXTDIV.STATE.11]			; go test for overflow
+
+.nobin
+.TOC	"	Extended Divide Subroutine"
+
+;	The extended divide subroutine divides the quadword in W3'W2 by the
+;	longword in W0.
+;
+;	The routine uses a non-restoring divide which executes at the rate of one
+;	bit for every microcycle.  
+;
+;	Entry conditions:
+;		W0	=	divisor
+;		W3'W2	=	dividend
+;		alu cc's =	set from divisor via MOVE
+;		DL	=	longword
+;		psl map	=	iiii
+;
+;	Exit conditions:
+;		W0	=	remainder
+;		W2	=	dividend<31:0>
+;		W3	=	result (quotient if no trap, dividend<31:0> if trap)
+;		Q, W5	=	trashed
+;		psl cc's =	set from quotient, including psl.v
+;		STATE<2:0> =	000
+;
+.bin
+
+;	Extended divide subroutine operation:
+;
+;		W0	=	W3'W2 / W0
+;		W3	=	rem (W3'W2, W0)
+
+EXTENDED.DIVIDE:
+	;---------------------------------------;
+	[WBUS]<--[W3],				; test sign of high order dividend
+	SET.ALUCC, LONG,			; set alu cc's
+	STATE3-0<--0,				; clear state flags
+	CASE4[ALU.NZV].AT.[EXTDIV.DIVR.POS]	; case on sign/zero of divisor
+
+;= ALIGNLIST 00**	(EXTDIV.DIVR.POS,	EXTDIV.DIVR.ZERO,
+;=			 EXTDIV.DIVR.NEG,			)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+EXTDIV.DIVR.ZERO:
+	;---------------------------------------; alu.nz = 01:
+	[WBUS]<--[W2],				; test low order dividend
+	SET.PSLCC, LONG,			; set psl cc's, psl map is iiii
+	GOTO[INTDIV.DIVR.ZERO]			; go set up divide by zero trap
+
+EXTDIV.DIVR.NEG:
+	;---------------------------------------; alu.nz = 10:
+	[W0]<--NEG.[W0],			; negate divisor
+	STATE1<--1				; flag negative divisor
+
+EXTDIV.DIVR.POS:
+	;---------------------------------------; alu.nz = 00:
+	[Q]<--B.[W2],				; output low order dividend to Q register
+						; >>Q write, not read in next cycle
+	SET.ALUCC&PSLCC, LONG,			; set alu/psl cc's, psl map is iiii
+	CASE2[ALU.NZV].AT.[EXTDIV.DIVD.POS]	; case on sign of high order dividend
+
+;	Extended divide setup, continued.
+
+;	At this point,
+;		W0	=	!divisor!
+;		W3'W2	=	dividend
+;		Q	=	dividend<31:0>
+;		alu cc's = psl cc's = set from W2
+;		STATE<1> =	sign of divisor
+
+;= ALIGNLIST 01**	(EXTDIV.DIVD.POS,	EXTDIV.DIVD.NEG)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+EXTDIV.DIVD.NEG:
+	;---------------------------------------; alu.n = 1:
+	[Q]<--NEG.[W2],				; start negate of W3'W2
+						; >>Q write, not read in next cycle
+	STATE0<--1,				; flag negative dividend
+	CASE2[ALU.NZV].AT.[EXTDIV.DIVD.NEG.NZERO]	; case on low order dividend zero
+
+;= ALIGNLIST 10**	(EXTDIV.DIVD.NEG.NZERO, EXTDIV.DIVD.NEG.ZERO)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+EXTDIV.DIVD.NEG.NZERO:
+	;---------------------------------------; alu.z = 0:
+	[W3]<--NOT.[W3],			; finish negate of W3'W2 with complement
+	GOTO[EXTDIV.DIVD.POS]			; go test divisor
+
+EXTDIV.DIVD.NEG.ZERO:
+	;---------------------------------------; alu.z = 1:
+	[W3]<--NEG.[W3]				; finish negate of W3'W2 with negate
+
+EXTDIV.DIVD.POS:
+	;---------------------------------------; alu.n = 0:
+	[WBUS]<--[W3]-[W0],			; try first subtraction step of divd - divr
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	[W5]<--[W5]-[W5],			; create zero for cleanup phase
+	SET.ALUCC, LONG,			; set alu cc's = 0101
+	CASE2[ALU.NZV].AT.[DIVIDE.OVERFLOW]	; if initial sub is negative, can do divide
+
+;	Here if the divide has failed (overflow or divide by zero).
+
+;	At this point,
+;		W2	=	low order dividend
+;		TRAP	=	2 if divide by zero
+;		psl cc's =	set from W2
+
+;	Divide by zero.  Change condition code map to disable integer overflow trap.
+
+DIVIDE.BY.ZERO:
+	;---------------------------------------;
+	SET.VAX.TRAP.REQUEST,			; set trap request
+	MAP.JIZJ				; disable int ovflo trap with jizj map
+
+;	Overflow.  PSL map is set to iiii, enabling overflow trap.
+
+;= ALIGNLIST 011*	(DIVIDE.OVERFLOW,	EXTDIV.QUAD)
+
+DIVIDE.OVERFLOW:
+	;---------------------------------------; alu.n = 0:
+	[W3]<--[W2]				; return low order dividend as quotient
+
+	;---------------------------------------;
+	SET.PSL.V,				; set psl.v
+						; >>PSL read, not written in prev cycle
+						; >>CC update, no decode in this cycle
+	STATE3-0<--0				; clear state flags
+
+;	One line subroutine to clear W0.
+
+CLEAR.W0:
+	;---------------------------------------;
+	[W0]<--K[0],				; return zero as remainder
+	RETURN					; return to caller
+
+;	Extended divide, continued.
+;	Perform extended divide.
+
+;	At this point,
+;		W0	=	!divisor!
+;		W2	=	dividend<31:0>
+;		W3'Q	=	!dividend!
+;		W5	=	0
+;		STATE<2:0> =	0'signs of divisor, dividend
+;		alu.c	=	1 (guarantees initial subtraction)
+
+EXTDIV.QUAD:
+	;---------------------------------------; alu.n = 1:
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.15.STEPS]			; do next fifteen divide steps
+
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.15.STEPS]			; do next fifteen divide steps
+
+	;---------------------------------------;
+	[W3]<--ZEXT.[W3].SHFR.[1],		; undo last shift of remainder
+	CASE2[ALU.NZC].AT.[EXTDIV.REM.FIX]	; if last quo bit = 0, adjust remainder
+
+;= ALIGNLIST 110*	(EXTDIV.REM.FIX,	EXTDIV.REM.OK)
+
+EXTDIV.REM.FIX:
+	;---------------------------------------; alu.c = 0:
+	[W3]<--[W3].OR.K[80]000			; restore sign bit of remainder
+
+	;---------------------------------------;
+	[W3]<--[W3]+[W0]			; add back divisor to remainder
+
+;	Extended divide, continued.
+;	Cleanup for extended divide.
+
+;	At this point,
+;		W3	=	remainder
+;		W5	=	0
+;		Q	=	quotient
+;		STATE<2:0> =	0'signs of divisor, dividend
+
+EXTDIV.REM.OK:
+	;---------------------------------------; alu.c = 1:
+	[W5]<--(-[Q]+[W5]),			; negate quotient and test
+						; >>Q read, not written in prev cycle
+	SET.ALUCC, LEN(DL),			; set alu cc's
+	CASE4[STATE2-0].AT.[EXTDIV.STATE.00]	; case on integer vs extended, signs
+
+;= ALIGNLIST *00*	(EXTDIV.STATE.00,	EXTDIV.STATE.01,
+;=			 EXTDIV.STATE.10,	EXTDIV.STATE.11)
+;  STATE<2> = 0 --> STATE<2:0> = ?00
+
+EXTDIV.STATE.00:
+	;---------------------------------------; divisor +, dividend +:
+	[W0]<--[W3],				; return remainder in W0
+	CASE8[ALU.NZV].AT.[EXTDIV.POS.NZV.000]	; case on divisor geq 0
+
+EXTDIV.STATE.01:
+	;---------------------------------------; divisor +, dividend -:
+	[W0]<--NEG.[W3],			; remainder gets sign of dividend
+	CASE4[ALU.NZV].AT.[EXTDIV.NEG.NZ.00]	; case on quotient leq 0
+
+EXTDIV.STATE.10:
+	;---------------------------------------; divisor -, dividend +:
+	[W0]<--[W3],				; return remainder in W0
+	CASE4[ALU.NZV].AT.[EXTDIV.NEG.NZ.00]	; case on quotient leq 0
+
+EXTDIV.STATE.11:
+	;---------------------------------------; divisor -, dividend -:
+	[W0]<--NEG.[W3],			; remainder gets sign of dividend
+	CASE8[ALU.NZV].AT.[EXTDIV.POS.NZV.000]	; case on divisor geq 0
+
+;	Overflow test cases.
+
+;	Quotient SHOULD BE positive (divisor and dividend had same sign).
+
+;	For DIV, +/+ cannot generate overflow.
+;	For DIV, -/- CAN generate overflow if dividend = largest neg num, divisor = -1.
+;	For EDIV, either case can generate overflow.
+;	In any case, a negative quotient represents OVERFLOW.
+
+;	At this point,
+;		W0	=	remainder, sign adjusted, if extended divide
+;		W5	=	negated quotient
+;		Q	=	quotient
+
+;	Note that the quotient was tested by negating it.  To test for quotient geq 0:
+;
+;		quotient was +	-->	negated quotient is - with no overflow
+;		quotient was 0	-->	negated quotient is 0
+;		quotient was -	-->	negated quotient is + OR
+;					negated quotient is - with overflow
+
+;= ALIGNLIST 000*	(EXTDIV.POS.NZV.000,	,	EXTDIV.POS.NZV.010,	,
+;=			 EXTDIV.POS.NZV.100,	EXTDIV.POS.NZV.101,	,	)
+;  ALU.NZVC set by NEGATE --> NZV = 001, 011, 110, 111 impossible
+
+EXTDIV.POS.NZV.000:
+	;---------------------------------------; same signs, alu.nzv = 000:
+	GOTO[DIVIDE.OVERFLOW]			; overflow, go process
+
+EXTDIV.POS.NZV.010:
+	;---------------------------------------; same signs, alu.nzv = 010:
+	[W3]<--[Q],				; store quotient, zero extend
+	SET.PSLCC, LEN(DL),			; set psl cc's
+	STATE3-0<--0,				; clear STATE<2:0>
+	RETURN					; exit to caller
+
+EXTDIV.POS.NZV.100:
+	;---------------------------------------; same signs, alu.nzv = 100:
+	[W3]<--[Q],				; store quotient, zero extend
+	SET.PSLCC, LEN(DL),			; set psl cc's
+	STATE3-0<--0,				; clear STATE<2:0>
+	RETURN					; exit to caller
+
+EXTDIV.POS.NZV.101:
+	;---------------------------------------; same signs, alu.nzv = 101:
+	GOTO[DIVIDE.OVERFLOW]			; overflow, go process
+
+;	Overflow test cases, continued.
+
+;	Quotient SHOULD BE negative (divisor and dividend had opposite signs).
+
+;	For DIV, -/+ and +/- cannot generate overflow.
+;	For EDIV, either case can generate overflow.
+;	In any case, a positive non-zero quotient represents OVERFLOW.
+
+;	At this point,
+;		W0	=	remainder, sign adjusted
+;		W5	=	negated quotient
+;		Q	=	quotient
+
+;= ALIGNLIST 001*	(EXTDIV.NEG.NZ.00,	EXTDIV.NEG.NZ.01,
+;=			 EXTDIV.NEG.NZ.10,		)
+
+EXTDIV.NEG.NZ.00:
+	;---------------------------------------; diff signs, alu.nz = 00:
+	GOTO[DIVIDE.OVERFLOW]			; overflow, go process
+
+EXTDIV.NEG.NZ.01:
+	;---------------------------------------; diff signs, alu.nz = 01:
+	[W3]<--[W5],				; store quotient, zero extend
+	SET.PSLCC, LEN(DL),			; set psl cc's
+	STATE3-0<--0,				; clear STATE<2:0>
+	RETURN					; exit to caller
+
+EXTDIV.NEG.NZ.10:
+	;---------------------------------------; diff signs, quotient lss 0:
+	[W3]<--[W5],				; store quotient, zero extend
+	SET.PSLCC, LEN(DL),			; set psl cc's
+	STATE3-0<--0,				; clear STATE<2:0>
+	RETURN					; exit to caller
+
+;	Subroutine to perform fifteen divide steps.
+
+;= AT 552
+
+DIVIDE.15.STEPS:
+	;********* Diagnostic dispatch *********;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.7.STEPS]			; do next seven divide steps
+
+DIVIDE.7.STEPS:
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.3.STEPS]			; do next three divide steps
+
+DIVIDE.3.STEPS:
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	CALL[DIVIDE.1.STEP]			; do next divide step
+
+DIVIDE.1.STEP:
+	;---------------------------------------;
+	[W3]<--[W3].UDIVS.[W0],			; do unsigned divide step
+	SET.ALUCC, LONG,			; set alu cc's
+	RETURN					; return to caller
+
+;= END MULDIV

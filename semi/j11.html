@@ -1,0 +1,197 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>J-11</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  J-11 (1983)
+</H1>
+<P>
+The J-11 (code name Jaws, which the design team never used) was DEC's fourth
+and last PDP-11 microprocessor design, and the first to be done in CMOS.
+The project was co-developed with Harris Semiconductor. Bob Supnik was the
+project leader through 1981, then Dan Casaletto. Paul Rubinfeld was lead
+engineer on the Data chip, Gil Wolrich on the Control chip and the FPA. Keith
+Henry wrote the microcode. Circuit design and layout were done by Harris
+Semiconductor.
+<P>
+The J-11 was intended to put a "capstone" on the PDP-11 family by providing
+the full functionality and performance of the PDP-11/70 in a microprocessor.
+Accordingly, the J-11 incorporated most of the architectural ornamentation
+from the 11/70 -- dual register sets, data space, supervisor mode -- as well
+as more modern inventions such as SMP support. Microcode-based floating point
+was standard, with accelerated floating point available as an option. CIS
+microcode was also intended to be an option.
+<P>
+The J-11 was a chip set consisting of three designs, one of which could be
+replicated: the Control chip (up to three supported), the Data chip, and
+the optional FPA chip. The Control and Data chips were implemented in Harris
+double-poly 4u P-well CMOS. The FPA was implemented in DEC's double-metal
+3u NMOS process (ZMOS). Bin points of 3.75Mhz and 4.5Mhz were supported
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/j11_d.jpg">Data</A></TD>
+    <TD>DC334</TD>
+    <TD>334x280</TD>
+    <TD>40,000</TD>
+    <TD>The Data chip implements the instruction execution and memory management
+      data paths of the J-11 chip set. It shares with the Control chip responsibility
+      for the external interface and for instruction prefetching. The data chip
+      operates under the control of microwords fetched from the Control chip(s). Its
+      key features are:
+      <UL>
+	<LI>
+	  Execution unit
+	  <UL>
+	    <LI>
+	      PDP-11 architectural general registers (16b): dual register set, three stack
+	      pointers
+	    <LI>
+	      Processor status word (PSW)
+	    <LI>
+	      Microcode temporary registers (32b)
+	    <LI>
+	      Full function arithmetic/logic unit (32b)
+	    <LI>
+	      Single bit shifter
+	    <LI>
+	      Byte swapper
+	    <LI>
+	      Conditional branch logic
+	  </UL>
+	<LI>
+	  Memory management unit
+	  <UL>
+	    <LI>
+	      PDP-11 memory management registers: kernel, supervisor, user; instruction
+	      and data spaces
+	    <LI>
+	      Address translation logic (22b)
+	    <LI>
+	      Protection logic
+	  </UL>
+	<LI>
+	  External interface sequencer
+	<LI>
+	  Instruction prefetch logic
+      </UL>
+      <P>
+      Power: 0.5W</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/j11_c.jpg">Control</A></TD>
+    <TD>DC335</TD>
+    <TD>252x270</TD>
+    <TD>80,000 sites</TD>
+    <TD>The Control chip implements the microword access and sequencing functions
+      of the J-11 chip set. Its key features are:
+      <UL>
+	<LI>
+	  ROM/PLA control store (512 x 25b PLA terms, 768 ROM terms)
+	<LI>
+	  Chip set microsequencer
+	  <UL>
+	    <LI>
+	      Next address logic
+	    <LI>
+	      Microsubroutine stack
+	    <LI>
+	      Interrupt logic
+	    <LI>
+	      Abort logic
+	    <LI>
+	      Initial decode PLA (Q logic)
+	  </UL>
+	<LI>
+	  External interface sequencer
+	<LI>
+	  Instruction prefetch logic
+      </UL>
+      <P>
+      Power: 0.5W</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/j11_f.jpg">FPA</A></TD>
+    <TD>DC321</TD>
+    <TD>290x260</TD>
+    <TD>34,000</TD>
+    <TD>The J-11 FPA is a high performance, single chip, floating point accelerator
+      for the J-11 chip set. Its key features are:
+      <UL>
+	<LI>
+	  High performance: accelerates floating point execution by 5X
+	<LI>
+	  f_ and d_floating point format support
+	<LI>
+	  Full PDP-11 floating point instruction set, including MODf
+	<LI>
+	  Arithmetic error checking and reporting
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 2.5W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+The J-11 was introduced late in 1983 at 3.75Mhz; subsequent tweaks pushed
+the performance to 4.5Mhz. The FPA was introduced in 1984. The FPA was
+used as the basis for the MicroVAX Floating Point Unit and the V-11 F chip.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+Most of DEC's limited chip design resources were focused on building a VLSI
+VAX (V-11). J-11 had to be built with an external partner. Based on the favorable
+results with Harris Semiconductor's 6120 PDP-8 microprocessor project, J-11
+was set up as a co-development with Harris. DEC did the architecture and
+logic design, Harris the circuit design and layout.
+<P>
+With its ambitious speed and functional goals, geographically split team
+(DEC was in Maynard, Massachusetts, and Harris was in Melbourne, Florida),
+and primitive CAD tools, J-11 was in every sense a "chip too far". The
+complexity, size, and speed requirements of the chips overwhelmed Harris.
+The schedule slipped badly, and the Data chip grew much larger than
+anticipated. Due to circuit design problems, the first pass parts barely ran at
+1.25Mhz. It required many passes, and many fixes, to get the chip set
+to function at 3.75Mhz and then 4.5Mhz. It never reached the original
+goal of 5Mhz. Harris had recurring problems yielding the chip, and
+attempts to second source the process at DEC didn't work out (DEC's CMOS
+processes were N-well rather than P-well).
+<P>
+The FPA also proved to be an ill-starred chip, with latent bugs requiring
+its recall from the field on two separate occasions. These problems did not
+show up in the derived designs for MicroVAX and V-11.
+<P>
+J-11 included some notable firsts. In particular, it was the first DEC
+design to use computer-based interconnect verification. Because the schematics
+were hand-drawn, an army of coops and volunteers manually created a netlist
+for the chip. This was then checked against the Calma layout database
+<P>
+J-11 was my first experience in managing a chip, and I didn't get to see
+the middle-game. In 1981, with design still going on, I was asked to
+run the Advanced Development team of the newly formed Semiconductor Engineering
+Group. I turned the project over to Dan Casaletto (I don't think he's
+forgiven me since). When I became manager of the Microprocessor Group in
+October, 1984, J-11 again fell into my bailiwick. It appears as a theme in
+the Group's monthly reports (always with problems attached) until mid1986.
+<P>
+Over the years, there have been numerous attempts to recast J-11 in more
+modern technologies, from gate arrays to FPGA's. The paper schematics, and
+the idiosynchratic circuit design, have defeated all efforts.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

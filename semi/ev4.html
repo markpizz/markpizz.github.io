@@ -1,0 +1,146 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>EV-4</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  EV-4 (1992)
+</H1>
+<P>
+EV-4 (no code name) was the first public Alpha microprocessor. Dan Dobberpuhl
+was the project manager; Rich Witek was the chip architect and wrote the
+PALcode; Dick Sites was the overall Alpha architect; Jim Montano led the
+implementation team. EV-4, at 200Mhz, was the fastest microprocessor of its
+day, outstripping competitive designs by more than 2X.
+<P>
+EV-4 was implemented in DEC's 0.75u triple-metal CMOS4 process. EV-4 operated
+over a frequency range of 150Mhz to 200Mhz: the fastest microprocessor in
+the world.
+<P>
+EV-4 was shrunk into DEC's 0.5u CMOS5 process as EV-45. This version operated
+at frequencies up to 250Mhz and was also the fastest RISC processor of its
+day.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/ev4.jpg">EV-4</A></TD>
+    <TD></TD>
+    <TD>660x546</TD>
+    <TD>1,681,999</TD>
+    <TD>EV-4 is the first Alpha microprocessor. It implements a complete 64b
+      RISC processor on a single chip at unprecedented performance levels. Key
+      features include:
+      <UL>
+	<LI>
+	  Very high performance (200Mhz)
+	<LI>
+	  Fully-pipelined integer unit
+	<LI>
+	  Fully pipelined floating-point unit
+	<LI>
+	  Dual instruction issue (integer/floating point + load/store, integer + floating
+	  point)
+	<LI>
+	  8KB on-chip instruction cache
+	<LI>
+	  8KB on-chip data cache
+	<LI>
+	  64 entry instruction TLB
+	<LI>
+	  64 entry data TLB
+	<LI>
+	  Read-and-run, write-and-run, hit-under-miss memory operations
+      </UL>
+      <P>
+      Power dissipation: 30W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+EV-4 shipped in late 1992 and supported the Alpha product line from workstations
+to mainframes. EV-45 shipped in 1994.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+At end of the infamous Executive Committee meeting where Prism was cancelled,
+Ken Olsen turned to me and asked, very casually, if I would look into how
+to make VMS systems more competitive against RISC-based UNIX systems. This
+informal authorization became the basis of the Alpha Program.
+<P>
+Starting in July, 1988, a task team from DEC's chips, systems, and software
+groups met to discuss alternatives for faster VMS systems. The team was known
+as the Extended VAX, or EVAX, task force. Initial thinking focused on subsetting
+the VAX architecture further, to produce a "RISC-like" processor. Detailed
+analysis showed that this would not help performance on existing binaries,
+nor would it alleviate some of the principal performance bottlenecks of VAXen.
+Thereafter, the team focused on the question of whether VMS could be ported
+to a true RISC system in a reasonable amount of time, with some degree of
+binary compatibility.
+<P>
+Key breakthroughs came from Dick Sites and Nancy Kronenberg. Dick set out
+to "prove" that translating VAX binaries to RISC, with acceptable performance,
+was impossible. Instead, he demonstrated that it could be done, with very
+little hardware support. This allowed the nascent RISC architecture to dispense
+with a VAX compatibility mode. Nancy Kronenberg investigated the assumption
+that VMS, which was mostly written in VAX assembler, was too heavily tied
+to the VAX architecture and couldn't be ported. She concluded that VMS was
+actually reasonably well layered, that its dependencies on VAX architectural
+idiosynchosies were relatively few, and that VAX macrocode could be "compiled"
+to RISC code. This allowed VMS to be ported to a "hospitable" RISC architecture.
+<P>
+With these breakthroughs, the task team decided to recommend building a new
+family of 64b RISC systems that would run VMS and would achieve binary
+compatibility through translation. At the same time, the entire program was
+renamed Alpha, to "conceal" its focus on VMS. (Extended VAX lived on in the
+EV-xy naming of the Alpha chips, although the public explanation was that
+EV stood for "Electric Vlasic," honoring the Western Research Lab's famous
+<A HREF="docs/WRL-TN-13.pdf">Electric Pickle experiment</A>.) Dick Sites
+and Rich Witek wrote the first draft (and all subsequent) drafts of the Alpha
+SRM in March, 1989. Dan Dobberpuhl's team started on chip development in
+June, 1989. Coordinated by Peter Conklin and other members of the Alpha Program
+Office, work also started in VMS, the languages group, software, and systems.
+<P>
+The Alpha chip team faced enormous challenges. Silicon was needed as quickly
+as possible to support the software development effort. At the same time,
+Alpha had to achieve breakthrough performance. Dan Dobberpuhl broke development
+into two phases. The first would create a "bare-bones" CPU chip and would
+be fabricated in CMOS-3. This internal chip, known as EV-3, threw everything
+deemed inessential overboard to achieve fast design time; for example, the
+first-level caches were implemented externally (in ECL!), and there was no
+floating point. The product chip, EV-4, would be fabricated in CMOS-4 and
+would include on-chip caches, the Rigel/NVAX floating point unit (with IEEE
+extensions), and a "friendly" pin interface. A team from DEC's Research Group,
+led by Chuck Thacker, signed up to design an EV-3-based system, known as
+the Alpha Development Unit (ADU). All the system groups focused on EV-4.
+<P>
+Despite a shortage of resources, the EV-3 chip team taped out in October,
+1990 - just sixteen months after the project started. First wafers came back
+in 6 weeks (thanks to heroic efforts in Semiconductor Manufacturing) and
+were functional at probe. By the end of January, 1991, Ultrix (DEC's BSD-derived
+UNIX) was running on the ADU, and VMS had booted. EV-4 taped out in July,
+1991, less than nine months after EV-3. It too was functional on first pass.
+<P>
+DEC showed both NVAX and EV-4 at the 1992 International Solid State Circuits
+Conference in February 1992. EV-4, with its unprecedented performance, new
+architecture, and novel circuit techniques, created a sensation. Following
+his presentation, Dan Dobberpuhl was mobbed like a rock star by excited,
+credulous, or awestruck chip designers from every company in the world. EV-4
+single-handledly ignited the "megahertz wars" that would consume mainstream
+microprocessor development for the next decade. Alpha systems were shown
+publicly at DECWorld in the spring of 1992 and shipped for revenue in November,
+1992.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

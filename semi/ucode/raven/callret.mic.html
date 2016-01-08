@@ -1,0 +1,1461 @@
+.TOC	"CALLRET.MIC -- Procedure Call Instructions"
+.TOC	"Revision 2.1"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    1 15-Feb-90 RMS	Documented PSL write restriction.
+; (2)0 15-Nov-89 RMS	Revised for simplified decoder.
+;    8 13-Nov-89 RMS	Editorial changes.
+;    7 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    6 06-Oct-89 RMS	Editorial changes.
+;    5 15-Sep-89 RMS	Fixed bug in CALLx detailed probe.
+;    4 06-Jul-89 RMS	Fixed bug in CALLS.
+;    3 05-Jul-89 RMS	Moved state flag clears out of harms way.
+;    2 02-Jul-89 RMS	Revised detailed probe routine.
+;    1 30-Jun-89 RMS	Revised for probe, TB invalidate restrictions.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 07-Apr-89 RMS	Revised to zero unused branch recipe bits.
+;    2 02-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 15-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 07-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN CALLRET
+.nobin
+
+;	This module implements the procedure call class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	FA	 CALLG arglist.ab, dst.ab, {-(SP).w*}				0 0 0 0		rsv
+;
+;	FB	 CALLS numarg.rl, dst.ab, {-(SP).w*}				0 0 0 0		rsv
+;
+;	04	 RET {(SP)+.r*}							* * * *		rsv
+;
+
+;	These instructions implement a generalized procedure call and return facility.
+;	The principal data structure involved is the stack frame.
+;	CALLS and CALLG build a stack frame in the following format:
+;
+;	+---------------------------------------------------------------+
+;	|		  condition handler (initially 0)		|  +0	<-- SP,FP on exit
+;	+---+-+-+-----------------------+--------------------+----------+	
+;	|SPA|S|0|   entry mask<11:0>	|   saved PSW<15:5>  | 0 0 0 0 0|  +4	SPA = # bytes to force stack alignment
+;	+---+-+-+-----------------------+--------------------+----------+	S   = 0 for CALLG, 1 for CALLS
+;	|			    saved AP				|  +8	
+;	+---------------------------------------------------------------+	
+;	|			    saved FP				|  +12	
+;	+---------------------------------------------------------------+	
+;	|			    saved PC				|  +16	
+;	+---------------------------------------------------------------+	
+;	|			    saved R0 (...)			|  +20	
+;	+---------------------------------------------------------------+	
+;		.						.		
+;		.	(according to entry mask<11:0>)		.		
+;		.						.		
+;	+---------------------------------------------------------------+	
+;	|		      (...) saved R11				|	
+;	+---------------+-----------------------------------------------+	
+;	| #args (CALLS)	|	(0-3 bytes needed to align stack)	|	
+;	+---------------+-----------------------------------------------+	
+;	|		|	0	0	0	(CALLS)		|	
+;	+---------------+-----------------------------------------------+
+;
+;	RET expects to find this structure based at the frame pointer (FP).
+;
+;	For CALLG and CALLS, the entry mask specifies the new settings of DV and IV,
+;	and also which registers are to be saved on entry:
+;
+;	 15 14 13 12 11                               0
+;	+--+--+-----+----------------------------------+
+;	|DV|IV| MBZ |		register mask	       |
+;	+--+--+-----+----------------------------------+
+;
+.TOC	"	CALLG, CALLS"
+
+;	These instructions invoke a procedure with a general (a stack based) argument list.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	CALLG		FA	call procedure with general arg list	2	aa/bb	--	CALLG	   --
+;	CALLS		FB	call procedure with stack arg list	2	ra/lb	--	CALLS	   --
+;
+;	Entry conditions:
+;		W0	=	first (argument) operand
+;		W2 = VA	=	address of second (procedure entry) operand
+;		DL	=	data length of second operand (byte)
+;
+;	Exit conditions:
+;		The procedure stack frame has been created.
+;		SP, FP point to the new top of stack.
+;		AP points to the argument list.
+;		PC points to the first instruction of the procedure (entry+2).
+;		PSW<7,5> are equal to mask<15,14>.
+;		PSW<6,3:0> are clear.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0			[Integer overflow trap disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		CALLx is not presently coded to use "probeless" calling.
+;
+;	Notes:
+;		1) Because the last specifier is address mode, register references are trapped
+;		   by the I Box, and a register mode entry point is not required.
+;		2) SP can be used in the first cycle as a ADR operand because the specifier flows 
+;		   do not write any GPR in the last cycle of a flow.
+;
+.bin
+
+;	CALLG/CALLS operation:
+;
+;		Read the procedure entry mask.
+;		Calculate the new SP (longword aligned).
+;		Make sure that the stack frame will be accessible.
+;		If CALLS, push the number of arguments onto the stack.
+;		The call frame is pushed onto the stack in reverse order (condition
+;		handler first, etc.) to take advantage of optimized, consecutive writes.
+;		Push condition handler, saved SPA/S0/mask/PSW, AP, FP, PC.
+;		Push the registers specified by the procedure entry mask.
+;		Update PSW traps, clear condition codes.
+;		Update PC, AP, FP, SP.
+
+CALLG:
+	;********** Hardware dispatch **********;
+	VA <-- [SP] - 000000[68.],		; [1] worst case stack = 17 lw + 3 bytes
+						; >> SP not written in prev (specifier) cycle
+	[WDR] <-- [SP] - 000000[68.],		; save probe address (crq causes lw write)
+	PROBE WRITE (VA), BYTE,			; probe limit of stack
+						; >> microprobe dst, if any, must be WDR
+						; >> no DECODE NEXT in next three cycles
+	GOTO [CALLX.READ.MASK]			; join common code
+
+CALLS:
+	;********** Hardware dispatch **********;
+	VA <-- [SP] - 000000[72.],		; [1] worst case stack = 18 lw + 3 bytes
+						; >> SP not written in prev (specifier) cycle
+	[WDR] <-- [SP] - 000000[72.],		; save probe address (crq causes lw write)
+	PROBE WRITE (VA), BYTE,			; probe limit of stack
+						; >> microprobe dst, if any, must be WDR
+						; >> no DECODE NEXT in next three cycles
+	GOTO [CALLX.READ.MASK]			; join common code
+
+CALLX.READ.MASK:
+	;---------------------------------------;
+	VA <-- [W2],				; [2] get address of mask
+						; >> W2 not written in prev cycle
+	[W5] <-- MEM (VA), WORD			; read entry mask
+
+	;---------------------------------------;
+	SC&, [W5] <-- [W5] RROT (VA), WORD,	; [3] load mask into SC, test n,z
+	SELECT [MMGT.STATUS]			; prepare to case on probe status
+
+CALLX.PROBE.CASE:
+	;---------------------------------------;
+	VA <-- [WDR],				; [4] restore address of probe
+						; >> WDR not written in prev cycle
+	[WBUS] <-- [WDR]!![W5] RSH [12.], LONG,	; test mask<15:12>
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [CALLX.PROBE.OK]		; case on result of probe from [1]
+
+;	CALLx, continued.
+;	Breakout on probe, dv, load new PC.
+
+;	At this point,
+;		W0	=	argument list (CALLG), number of arguments (CALLS)
+;		W2	=	procedure address
+;		W5	=	mask
+;		SC	=	mask<7:0>
+
+;= ALIGNLIST 0011*	(CALLX.PROBE.OK,	CALLX.ACV,
+;=			 CALLX.TNV,		CALLX.ACV.TNV)
+
+CALLX.PROBE.OK:
+	;---------------------------------------; mmgt.status = 00xx:
+	[W6] <-- [PC], LONG,			; [5] save current PC
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	CASE AT [CALLX.DV.CLEAR]		; case on mask test from [3]
+
+;= ALIGNLIST 00***	(CALLX.DV.CLEAR,	CALLX.ZERO,	CALLX.DV.SET)
+;  WBUS.NZVC set by shift --> V = C = 0
+
+CALLX.DV.CLEAR:
+	;---------------------------------------; wbus.nz = 00:
+	VA <-- [W2] + 000000[02], LONG,		; [6] get start of procedure
+						; >> W2 not written in prev cycle
+	NEW PC,					; load new PC
+						; >> no DECODE NEXT in next two cycles
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode
+	CASE AT [CALLX.IV.MBZ.000]		; case on Wbus<2:0> = iv.mbz from [4]
+
+CALLX.DV.SET:
+	;---------------------------------------; wbus.nz = 10:
+	VA <-- [W2] + 000000[02], LONG,		; [6] get start of procedure
+						; >> W2 not written in prev cycle
+	NEW PC,					; load new PC
+						; >> no DECODE NEXT in next two cycles
+	STATE.1 <-- 1,				; flag dv set in new PSW
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode
+	CASE AT [CALLX.IV.MBZ.000]		; case on Wbus<2:0> = iv.mbz from [4]
+
+;	CALLx, continued.
+;	Breakout on iv, mbz.
+
+;	At this point,
+;		W0	=	argument list (CALLG), number of arguments (CALLS)
+;		W5	=	mask
+;		W6	=	saved PC
+;		SC	=	mask<7:0>
+;		STATE<1> =	new PSW<7>
+
+;= ALIGNLIST 1000*	(CALLX.IV.MBZ.000,	CALLX.IV.MBZ.001,
+;=			 CALLX.IV.MBZ.010,	CALLX.IV.MBZ.011,
+;=			 CALLX.IV.MBZ.100,	CALLX.IV.MBZ.101,
+;=			 CALLX.IV.MBZ.110,	CALLX.IV.MBZ.111)
+
+CALLX.IV.MBZ.000:
+	;---------------------------------------; wbus<2:0> = 000:
+	VA <-- [SP] - 4,			; [7] decrement stack pointer for CALLS
+						; >> SP not written in prev cycle
+	[W3] <-- [SP] ANDNOT 000000[03], LONG,	; align, save stack pointer
+	CASE AT [CALLG.CONT]			; case on CALLG vs CALLS
+
+CALLX.IV.MBZ.001:
+	;---------------------------------------; wbus<2:0> = 001:
+	RESERVED OPERAND FAULT			; [7] fault
+
+CALLX.IV.MBZ.010:
+	;---------------------------------------; wbus<2:0> = 010:
+	RESERVED OPERAND FAULT			; [7] fault
+
+CALLX.IV.MBZ.011:
+	;---------------------------------------; wbus<2:0> = 011:
+	RESERVED OPERAND FAULT			; [7] fault
+
+CALLX.IV.MBZ.100:
+	;---------------------------------------; wbus<2:0> = 100:
+	VA <-- [SP] - 4,			; [7] decrement stack pointer for CALLS
+						; >> SP not written in prev cycle
+	[W3] <-- [SP] ANDNOT 000000[03], LONG,	; align, save stack pointer
+	STATE.0 <-- 1,				; flag iv set in new PSW
+	CASE AT [CALLG.CONT]			; case on CALLG vs CALLS
+
+CALLX.IV.MBZ.101:
+	;---------------------------------------; wbus<2:0> = 101:
+	RESERVED OPERAND FAULT			; [7] fault
+
+CALLX.IV.MBZ.110:
+	;---------------------------------------; wbus<2:0> = 110:
+	RESERVED OPERAND FAULT			; [7] fault
+
+CALLX.IV.MBZ.111:
+	;---------------------------------------; wbus<2:0> = 111:
+	RESERVED OPERAND FAULT			; [7] fault
+
+;	CALLx, continued.
+;	Do final setup for CALLx.
+
+;	At this point,
+;		W0	=	argument list (CALLG), number of arguments (CALLS)
+;		W3	=	aligned stack pointer
+;		W5	=	mask
+;		W6	=	saved PC
+;		SC	=	mask<7:0>
+;		VA	=	SP - 4
+;		STATE<1:0> =	new PSW<7,5>
+
+;= ALIGNLIST 1*10*	(CALLG.CONT,	CALLS.CONT)
+;  Opcodes = FA, FB --> opcode<2:0> = 01?
+
+CALLG.CONT:
+	;---------------------------------------; opcode<0> = 0:
+	[WBUS] <-- ZEXT [W5] RSH [8.], LONG	; [8] test mask<11:8>
+
+	;---------------------------------------;
+	VA <-- B [W3],				; [9] load aligned stack pointer
+						; >> W3 not written in prev cycle
+	[W1] <-- [W5]!![W3] LSH [18.], LONG,	; left justify s/mask/xx
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [CALLX.CONT]			; join common code
+
+CALLS.CONT:
+	;---------------------------------------; opcode<0> = 1:
+	MEM (VA)&, [WDR] <-- [W0] AND 000000[0FF], ; [8] write number of arguments to stack
+	LONG,					;
+	SET NORETRY				; set disable retry flag
+
+	;---------------------------------------;
+	[W5] <-- [W5] OR 0000[20]00, LONG	; [9] set <s> flag in mask
+
+	;---------------------------------------;
+	VA <-- [W3] - 4,			; [10] decrement and load aligned stack ptr
+						; >> W3 not written in prev cycle
+	[WBUS] <-- [W3]!![W5] RSH [8.], LONG	; test mask<11:8>
+
+	;---------------------------------------;
+	[W1] <-- [W5] LSH [18.], LONG,		; [11] left justify s/mask/xx
+	SELECT [WBUS.3-0]			; prepare to case on Wbus<3:0>
+
+CALLX.CONT:
+	;---------------------------------------;
+	[W1] <-- [SP]!![W1] RSH [2.], LONG,	; [10,12] create spa/s/mask/xx
+	SET NORETRY,				; set disable retry flag
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [CALL.11.8.0000]		; case on Wbus<3:0> from [8,10]
+
+;	CALLx, continued.
+;	Mask = 0, bypass dv.iv.mbz and register processing.
+
+;	At this point,
+;		W0	=	argument list (CALLG), number of arguments (CALLS)
+;		W2	=	procedure address
+;		W6	=	saved PC
+
+CALLX.ZERO:
+	;---------------------------------------; wbus.nz = 01:
+	VA <-- [W2] + 000000[02], LONG,		; [6] get start of procedure
+						; >> W2 not written in prev cycle
+	NEW PC,					; load new PC
+						; >> no DECODE NEXT in next two cycles
+	SELECT [INT.OPCODE.2-0]			; prepare to case on opcode
+
+	;---------------------------------------;
+	VA <-- [SP] - 4,			; [7] decrement stack pointer for CALLS
+						; >> SP not written in prev cycle
+	[W3] <-- [SP] ANDNOT 000000[03], LONG,	; align, save stack pointer
+	CASE AT [CALLG.ZERO]			; case on CALLG vs CALLS
+
+;= ALIGNLIST 1*10*	(CALLG.ZERO,	CALLS.ZERO)
+;  Opcodes = FA, FB --> opcode<2:0> = 01?
+
+CALLG.ZERO:
+	;---------------------------------------; opcode<0> = 0:
+	[W1] <-- [SP]!![K0] RSH [2.], LONG	; [8] create spa/0/0/xx
+
+	;---------------------------------------;
+	[W1] <-- [PSL] AND 000000[0E0], WORD	; insert psw<7:5> into spa/s/0/xx
+
+	;---------------------------------------;
+	VA <-- [W3] - 4,			; decrement aligned stack for a push
+						; >> W3 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W6], LONG,	; write saved PC
+	SET NORETRY,				; set disable retry flag
+	GOTO [CALLG.ZERO.MERGE]			; join common code
+
+CALLS.ZERO:
+	;---------------------------------------; opcode<0> = 1:
+	MEM (VA)&, [WDR] <-- [W0] AND 000000[0FF], ; [8] write number of arguments to stack
+	LONG,					;
+	SET NORETRY				; set disable retry flag
+
+	;---------------------------------------;
+	VA <-- [W3] - 4,			; [9] decrement aligned stack ptr for a push
+						; >> W3 not written in prev cycle
+	[W1] <-- [80]000000, LONG		; get constant for <s> flag
+
+	;---------------------------------------;
+	[W1] <-- [SP]!![W1] RSH [2.], LONG,	; [10] create spa/s/0/xx
+	SELECT [TP.Z.DL],			; prepare to case on data length
+	GOTO [CALL.3.0.0000]			; rejoin main flows
+
+;	CALLx, continued.
+;	Process mask bits<11:8>.
+
+;	At this point,
+;		W0	=	argument list (CALLG)
+;		W1	=	spa/s/mask/xx
+;		W6	=	saved PC
+;		SC	=	mask<7:0>
+;		VA	=	running stack pointer
+;		STATE<1:0> =	new PSW<7,5>
+
+;= ALIGNLIST 0000*     (CALL.11.8.0000,	CALL.11.8.0001,	CALL.11.8.0010,	CALL.11.8.0011,
+;=			CALL.11.8.0100,	CALL.11.8.0101,	CALL.11.8.0110,	CALL.11.8.0111,
+;=			CALL.11.8.1000,	CALL.11.8.1001,	CALL.11.8.1010,	CALL.11.8.1011,
+;=			CALL.11.8.1100,	CALL.11.8.1101,	CALL.11.8.1110,	CALL.11.8.1111)
+
+CALL.11.8.0000:
+	;---------------------------------------; wbus<3:0> = 0000:
+	NOP,					; nothing to do...
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [CALL.7.4.0000]			; case on mask<7:4>
+
+CALL.11.8.0001:
+	;---------------------------------------; wbus<3:0> = 0001:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R8], LONG,	; write R8
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [CALL.7.4.0000]			; case on mask<7:4>
+
+CALL.11.8.0010:
+	;---------------------------------------; wbus<3:0> = 0010:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R9], LONG,	; write R9
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [CALL.7.4.0000]			; case on mask<7:4>
+
+CALL.11.8.0011:
+	;---------------------------------------; wbus<3:0> = 0011:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R9], LONG,	; write R9
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [CALL.11.8.0001]			; go write R8
+
+CALL.11.8.0100:
+	;---------------------------------------; wbus<3:0> = 0100:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R10], LONG,	; write R10
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [CALL.7.4.0000]			; case on mask<7:4>
+
+CALL.11.8.0101:
+	;---------------------------------------; wbus<3:0> = 0101:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R10], LONG,	; write R10
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [CALL.11.8.0001]			; go write R8
+
+CALL.11.8.0110:
+	;---------------------------------------; wbus<3:0> = 0110:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R10], LONG,	; write R10
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [CALL.11.8.0010]			; go write R9
+
+CALL.11.8.0111:
+	;---------------------------------------; wbus<3:0> = 0111:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R10], LONG,	; write R10
+	GOTO [CALL.11.8.0011]			; go write R9, R8
+
+CALL.11.8.1000:
+	;---------------------------------------; wbus<3:0> = 1000:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [CALL.7.4.0000]			; case on mask<7:4>
+
+CALL.11.8.1001:
+	;---------------------------------------; wbus<3:0> = 1001:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [CALL.11.8.0001]			; go write R8
+
+CALL.11.8.1010:
+	;---------------------------------------; wbus<3:0> = 1010:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [CALL.11.8.0010]			; go write R9
+
+CALL.11.8.1011:
+	;---------------------------------------; wbus<3:0> = 1011:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	GOTO [CALL.11.8.0011]			; go write R9, R8
+
+CALL.11.8.1100:
+	;---------------------------------------; wbus<3:0> = 1100:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [CALL.11.8.0100]			; go write R10
+
+CALL.11.8.1101:
+	;---------------------------------------; wbus<3:0> = 1101:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	GOTO [CALL.11.8.0101]			; go write R10, R8
+
+CALL.11.8.1110:
+	;---------------------------------------; wbus<3:0> = 1110:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	GOTO [CALL.11.8.0110]			; go write R10, R9
+
+CALL.11.8.1111:
+	;---------------------------------------; wbus<3:0> = 1111:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R11], LONG,	; write R11
+	GOTO [CALL.11.8.0111]			; go write R10, R9, R8
+
+;	CALLx, continued.
+;	Process mask bits<7:4>.
+
+;	At this point,
+;		W0	=	argument list (CALLG)
+;		W1	=	spa/s/mask/xx
+;		W6	=	saved PC
+;		VA	=	running stack pointer
+;		STATE<1:0> =	new PSW<7,5>
+
+;= ALIGNLIST 0000*     (CALL.7.4.0000,	CALL.7.4.0001,	CALL.7.4.0010,	CALL.7.4.0011,
+;=			CALL.7.4.0100,	CALL.7.4.0101,	CALL.7.4.0110,	CALL.7.4.0111,
+;=			CALL.7.4.1000,	CALL.7.4.1001,	CALL.7.4.1010,	CALL.7.4.1011,
+;=			CALL.7.4.1100,	CALL.7.4.1101,	CALL.7.4.1110,	CALL.7.4.1111)
+
+CALL.7.4.0000:
+	;---------------------------------------; sc<7:4> = 0000:
+	NOP,					; nothing to do...
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	CASE AT [CALL.3.0.0000]			; case on mask<3:0>
+
+CALL.7.4.0001:
+	;---------------------------------------; sc<7:4> = 0001:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R4], LONG,	; write R4
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	CASE AT [CALL.3.0.0000]			; case on mask<3:0>
+
+CALL.7.4.0010:
+	;---------------------------------------; sc<7:4> = 0010:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R5], LONG,	; write R5
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	CASE AT [CALL.3.0.0000]			; case on mask<3:0>
+
+CALL.7.4.0011:
+	;---------------------------------------; sc<7:4> = 0011:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R5], LONG,	; write R5
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [CALL.7.4.0001]			; go write R4
+
+CALL.7.4.0100:
+	;---------------------------------------; sc<7:4> = 0100:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R6], LONG,	; write R6
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	CASE AT [CALL.3.0.0000]			; case on mask<3:0>
+
+CALL.7.4.0101:
+	;---------------------------------------; sc<7:4> = 0101:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R6], LONG,	; write R6
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [CALL.7.4.0001]			; go write R4
+
+CALL.7.4.0110:
+	;---------------------------------------; sc<7:4> = 0110:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R6], LONG,	; write R6
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [CALL.7.4.0010]			; go write R5
+
+CALL.7.4.0111:
+	;---------------------------------------; sc<7:4> = 0111:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R6], LONG,	; write R6
+	GOTO [CALL.7.4.0011]			; go write R5, R4
+
+CALL.7.4.1000:
+	;---------------------------------------; sc<7:4> = 1000:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	CASE AT [CALL.3.0.0000]			; case on mask<3:0>
+
+CALL.7.4.1001:
+	;---------------------------------------; sc<7:4> = 1001:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [CALL.7.4.0001]			; go write R4
+
+CALL.7.4.1010:
+	;---------------------------------------; sc<7:4> = 1010:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [CALL.7.4.0010]			; go write R5
+
+CALL.7.4.1011:
+	;---------------------------------------; sc<7:4> = 1011:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	GOTO [CALL.7.4.0011]			; go write R5, R4
+
+CALL.7.4.1100:
+	;---------------------------------------; sc<7:4> = 1100:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [CALL.7.4.0100]			; go write R6
+
+CALL.7.4.1101:
+	;---------------------------------------; sc<7:4> = 1101:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	GOTO [CALL.7.4.0101]			; go write R6, R4
+
+CALL.7.4.1110:
+	;---------------------------------------; sc<7:4> = 1110:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	GOTO [CALL.7.4.0110]			; go write R6, R5
+
+CALL.7.4.1111:
+	;---------------------------------------; sc<7:4> = 1111:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R7], LONG,	; write R7
+	GOTO [CALL.7.4.0111]			; go write R6, R5, R4
+
+;	CALLx, continued.
+;	Process mask bits<3:0>.
+
+;	At this point,
+;		W0	=	argument list (CALLG)
+;		W1	=	spa/s/mask/xx
+;		W6	=	saved PC
+;		VA	=	running stack pointer
+;		STATE<1:0> =	new PSW<7,5>
+
+;= ALIGNLIST 0000*     (CALL.3.0.0000,	CALL.3.0.0001,	CALL.3.0.0010,	CALL.3.0.0011,
+;=			CALL.3.0.0100,	CALL.3.0.0101,	CALL.3.0.0110,	CALL.3.0.0111,
+;=			CALL.3.0.1000,	CALL.3.0.1001,	CALL.3.0.1010,	CALL.3.0.1011,
+;=			CALL.3.0.1100,	CALL.3.0.1101,	CALL.3.0.1110,	CALL.3.0.1111)
+
+CALL.3.0.0001:
+	;---------------------------------------; sc<3:0> = 0001:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R0], LONG,	; write R0
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	GOTO [CALL.3.0.0000]			; go finish stack frame
+
+CALL.3.0.0010:
+	;---------------------------------------; sc<3:0> = 0010:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R1], LONG,	; write R1
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	GOTO [CALL.3.0.0000]			; go finish stack frame
+
+CALL.3.0.0011:
+	;---------------------------------------; sc<3:0> = 0011:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R1], LONG,	; write R1
+	GOTO [CALL.3.0.0001]			; go write R0
+
+CALL.3.0.0100:
+	;---------------------------------------; sc<3:0> = 0100:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R2], LONG,	; write R2
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	GOTO [CALL.3.0.0000]			; go finish stack frame
+
+CALL.3.0.0101:
+	;---------------------------------------; sc<3:0> = 0101:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R2], LONG,	; write R2
+	GOTO [CALL.3.0.0001]			; go write R0
+
+CALL.3.0.0110:
+	;---------------------------------------; sc<3:0> = 0110:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R2], LONG,	; write R2
+	GOTO [CALL.3.0.0010]			; go write R1
+
+CALL.3.0.0111:
+	;---------------------------------------; sc<3:0> = 0111:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R2], LONG,	; write R2
+	GOTO [CALL.3.0.0011]			; go write R1, R0
+
+CALL.3.0.1000:
+	;---------------------------------------; sc<3:0> = 1000:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	SELECT [TP.Z.DL],			; prepare to case on dl
+	GOTO [CALL.3.0.0000]			; go finish stack frame
+
+CALL.3.0.1001:
+	;---------------------------------------; sc<3:0> = 1001:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0001]			; go write R0
+
+CALL.3.0.1010:
+	;---------------------------------------; sc<3:0> = 1010:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0010]			; go write R1
+
+CALL.3.0.1011:
+	;---------------------------------------; sc<3:0> = 1011:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0011]			; go write R1, R0
+
+CALL.3.0.1100:
+	;---------------------------------------; sc<3:0> = 1100:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0100]			; go write R2
+
+CALL.3.0.1101:
+	;---------------------------------------; sc<3:0> = 1101:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0101]			; go write R2, R0
+
+CALL.3.0.1110:
+	;---------------------------------------; sc<3:0> = 1110:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0110]			; go write R2, R1
+
+CALL.3.0.1111:
+	;---------------------------------------; sc<3:0> = 1111:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [R3], LONG,	; write R3
+	GOTO [CALL.3.0.0111]			; go write R2, R1, R0
+
+;	CALLx, continued.
+;	Registers pushed, push remainder of stack frame.
+
+;	At this point,
+;		W0	=	argument list (CALLG)
+;		W1	=	spa/s/mask/xx
+;		W6	=	saved PC
+;		VA	=	running stack pointer
+;		STATE<1:0> =	new PSW<7,5>
+
+CALL.3.0.0000:
+	;---------------------------------------; sc<3:0> = 0000:
+	[W1] <-- [PSL] AND 000000[0E0], WORD,	; insert psw<7:5> into spa/s/mask/xx
+	CASE AT [CALL.CONT]			; case on dl (CALLx is byte, PUSHR is word)
+
+;= ALIGNLIST 1**0*	(CALL.CONT,	PUSHR.DONE)
+;  z = 0; dl = byte, word --> dl = 0?
+
+CALL.CONT:
+	;---------------------------------------; dl = byte:
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [W6], LONG	; write saved PC
+
+CALLG.ZERO.MERGE:
+	;---------------------------------------;
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [FP], LONG	; write FP
+
+	;---------------------------------------;
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [AP], LONG	; write AP
+
+	;---------------------------------------;
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- B [W1], LONG	; write spa/s/mask/psw
+
+	;---------------------------------------;
+	VA <-- [VA] - 4,			; decrement stack pointer
+	MEM (VA)&, [WDR] <-- 000000[00], LONG,	; write condition handler
+	SELECT [STATE.3-0]			; prepare to case on state flags
+
+	;---------------------------------------;
+	[PSL] <-- [PSL] ANDNOT 000000[0EF],	; mask out PSW except for <t>
+	LONG,					;
+	NEW PSW,				; inform hardware
+						; >> no DECODE NEXT in next two cycles
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode
+	CASE AT [CALL.PSW.00]			; case on state flags
+
+;	CALLx, continued.
+;	Stack frame complete, set new PSW.
+
+;	At this point,
+;		W0	=	argument list (CALLG)
+;		VA	=	running stack pointer
+
+;= ALIGNLIST **00*	(CALL.PSW.00,	CALL.PSW.01,	CALL.PSW.10,	CALL.PSW.11)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+CALL.PSW.01:
+	;---------------------------------------; state<1:0> = 01:
+	[PSL] <-- [PSL] OR 000000[20], LONG,	; insert new dv.iv flags into psw
+	NEW PSW,				; inform hardware
+						; >> no DECODE NEXT in next two cycles
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode
+	GOTO [CALL.PSW.00]			; go update fp
+
+CALL.PSW.10:
+	;---------------------------------------; state<1:0> = 10:
+	[PSL] <-- [PSL] OR 000000[80], LONG,	; insert new dv.iv flags into psw
+	NEW PSW,				; inform hardware
+						; >> no DECODE NEXT in next two cycles
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode
+	GOTO [CALL.PSW.00]			; go update fp
+
+CALL.PSW.11:
+	;---------------------------------------; state<1:0> = 11:
+	[PSL] <-- [PSL] OR 000000[0A0], LONG,	; insert new dv.iv flags into psw
+	NEW PSW,				; inform hardware
+						; >> no DECODE NEXT in next two cycles
+	SELECT [INT.OPCODE.2-0],		; prepare to case on opcode
+	GOTO [CALL.PSW.00]			; go update fp
+
+CALL.PSW.00:
+	;---------------------------------------; state<1:0> = 00:
+	[FP] <-- [VA], LONG,			; set fp to top of stack
+	CASE AT [CALLG.SET.AP]			; case on opcode
+
+;= ALIGNLIST 1*10*	(CALLG.SET.AP,	CALLS.SET.AP)
+;  Opcodes = FA, FB --> opcode<2:0> = 01?
+
+CALLG.SET.AP:
+	;---------------------------------------; opcode<0> = 0:
+	[AP] <-- [W0], LONG,			; load argument list into AP
+	GOTO [CALL.EXIT]			; join common exit flows
+
+CALLS.SET.AP:
+	;---------------------------------------; opcode<0> = 1:
+	[AP] <-- [SP] - 000000[04], LONG,	; load argument pointer into AP
+	GOTO [CALL.EXIT]			; join common exit flows
+
+CALL.EXIT:
+	;---------------------------------------;
+	[SP] <-- [FP], LONG,			; set sp to top of stack
+	LAST CYCLE				; decode next instruction
+
+;	CALLx, continued.
+;	Here if approximate probe failed.
+;	Count bits in mask, reprobe at exact spot.
+
+;	At this point,
+;		W0	=	argument list (CALLG), number of arguments (CALLS)
+;		W2	=	procedure entry address
+;		W5	=	mask
+;		W6	=	saved PC
+;		VA	=	probe address
+;		STATE<3:0> =	0000
+;		SC	=	mask<7:0>
+
+;	Note that if the exact probe causes a memory management fault,
+;	reserved operand fault is never checked (same as Nautilus).
+
+CALLX.TNV:
+	;---------------------------------------; mmgt.status = 01xx:
+	TB INVALIDATE, LONG,			; zap TB entry in case PTE was invalid
+						; >> no ADR or CRQ in next cycle
+	GOTO [CALLX.ACV]			; join common code
+
+CALLX.ACV.TNV:
+	;---------------------------------------; mmgt.status = 11xx:
+	TB INVALIDATE, LONG,			; zap TB entry in case PTE was invalid
+						; >> no ADR or CRQ in next cycle
+	GOTO [CALLX.ACV]			; join common code
+
+CALLX.ACV:
+	;---------------------------------------; mmgt.status = 10xx:
+	[W1] <-- [W5] ANDNOT 0000[0F0]00, WORD	; clear mask<15:12>
+
+;= ALIGNLIST 10***	(CALLX.MMGT.WAIT,	CALLX.MMGT.DONE)
+;  WBUS.NZVC set by ANDNOT --> V = C = 0
+
+CALLX.MMGT.WAIT:
+	;---------------------------------------; wbus.z = 0:
+	VA <-- [VA] - 4,			; [n+1] decrement running stack pointer
+	[WDR] <-- -B [W1], LONG,		; negate remaining mask
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- [W1] ANDNOT [WDR], WORD,	; [n+2] reset rightmost bit of mask
+	CASE AT [CALLX.MMGT.WAIT]		; case on PREVIOUS mask from [n]
+
+CALLX.MMGT.DONE:
+	;---------------------------------------; wbus.z = 1:
+	VA <-- [VA] + 000000[52.],		; compensate for extra decrement + 12 lw
+	[WDR] <-- MEM.WCHK (VA), BYTE		; write check top of stack, fault on error
+
+	;---------------------------------------;
+	[WBUS] <-- [W5], WORD,			; [3] test mask for n,z
+	SELECT [STATE.3-0],			; force case to 0000 (ok) path
+	GOTO [CALLX.PROBE.CASE]			; rejoin main flows
+
+.nobin
+.TOC	"	RET"
+
+;	This instruction returns from a procedure called by CALLG or CALLS.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	RET		04	return from procedure			0	--	--	RET	   --
+;
+;	Entry conditions from initial decode:
+;		FP	=	base of stack frame
+;
+;	Exit conditions:
+;		The procedure stack frame has been removed from the stack.
+;		SP points to the new top of stack.
+;		PSW<7:0>, PC, FP, AP are restored from the stack frame.
+;		R0...R11 are restored from the stack frame, if specified by the mask.
+;
+;	Condition codes:
+;		N <-- saved PSW<3>
+;		Z <-- saved PSW<2>
+;		V <-- saved PSW<1>		[Integer overflow trap disabled.]
+;		C <-- saved PSW<0>
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) RET uses the "probeless RET" algorithm first deployed on the 11/780.
+;		   If a memory management error occurs, only FP and SP are guaranteed to
+;		   be in their initial state.  In particular, R0-R13 may have been changed.
+;		2) To support DEBUG's "trap on RET" feature, RET does not alter any
+;		   processor state until the new PSW<mbz> field has been checked.
+;
+.bin
+
+;	RET operation:
+;
+;		Pop the SPA/S0/mask/PSW longword from the stack.
+;		Check the stack for read access.
+;		Calculate new SP.
+;		Pop AP, FP, and PC.
+;		Pop R0...R11 as specified by the mask.
+;		Adjust the PSW traps, update PC and SP, exit.
+
+RET:
+	;********** Hardware dispatch **********;
+	NOP					; wait for ADR data forwarding on FP
+
+	;---------------------------------------;
+	VA <-- [FP] + 4,			; [1] point at saved spa/s/mask/psw
+						; >> FP not written in prev cycle
+	[W0] <-- MEM (VA), LONG			; read saved spa/s/mask/psw
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; [2] point at saved AP
+	IntWBUS <-- [VA]!![W0] RSH [8.],	; test mbz byte
+	[W1] <-- MEM (VA), BYTE			; read saved AP, force aligned
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; [3] point at saved FP
+	IntWBUS <-- [VA]!![W0] RSH [22.],	; test <s> as byte sign
+	[W2] <-- MEM (VA), BYTE,		; read saved FP, force aligned
+	STATE.3-0 <-- 0,			; clear state flags
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; [4] point at saved PC
+	SC&, IntWBUS <-- [VA]!![W0] RSH [20.],	; load mask<11:4> into SC for testing
+	[W3] <-- MEM (VA), BYTE,		; read saved PC, force aligned
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [RET.RSRV.OPER]			; case on new psw<mbz> test from [2]
+
+;= ALIGNLIST 10***	(RET.RSRV.OPER,	RET.CONT)
+;  WBUS.NZVC set by shift --> V = C = 0
+
+RET.RSRV.OPER:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; [5] new psw<mbz> ne 0, fault
+
+;	RET, continued.
+;	MBZ tested, S tested, SC loaded.
+;	Test mask<3:0>, load PC (wait to avoid stall).
+
+;	At this point,
+;		W0	=	spa/s/mask/psw
+;		W1	=	new AP
+;		W2	=	new FP
+;		W3	=	new PC
+;		SC	=	mask<11:4>
+
+RET.CONT:
+	;---------------------------------------; wbus.z = 1:
+	[WBUS] <-- ZEXT [W0] RSH [16.], LONG,	; [5] test mask<3:0>
+	CASE AT [RET.SET.G]			; case on <s> test from [3]
+
+;= ALIGNLIST 01***	(RET.SET.G,	RET.SET.S)
+;  WBUS.NZVC set by shift --> V = C = 0
+
+RET.SET.G:
+	;---------------------------------------; wbus.n = 0:
+	VA <-- [W3],				; [6] get new PC
+						; >> W3 not written in prev cycle
+	[AP] <-- B [W1], LONG,			; update AP
+	NEW PC,					; load new PC
+						; >> no DECODE NEXT in next two cycles
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [RET.CASE]				; go case on mask
+
+RET.SET.S:
+	;---------------------------------------; wbus.n = 1:
+	VA <-- [W3],				; [6] get new PC
+						; >> W3 not written in prev cycle
+	[AP] <-- B [W1], LONG,			; update AP
+	NEW PC,					; load new PC
+						; >> no DECODE NEXT in next two cycles
+	STATE.0 <-- 1,				; flag return from CALLS
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [RET.CASE]				; go case on mask
+
+RET.CASE:
+	;---------------------------------------;
+	VA <-- [FP] + 000000[16.],		; [7] VA <-- FP + 16
+						; >> FP not written in prev cycle
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	CASE AT [RET.0.3.0000]			; case on Wbus<3:0> from [5]
+
+;	RET, continued.
+;	Process mask bits<3:0>.
+
+;	At this point,
+;		W0	=	spa/s/mask/psw
+;		W2	=	new FP
+;		SC	=	mask<11:4>
+;		VA	=	FP+16
+;		STATE<1:0> =	<POPR vs RET><RET.G vs RET.S>
+
+;= ALIGNLIST 0000*	(RET.0.3.0000,	RET.0.3.0001,	RET.0.3.0010,	RET.0.3.0011,
+;=			 RET.0.3.0100,	RET.0.3.0101,	RET.0.3.0110,	RET.0.3.0111,
+;=			 RET.0.3.1000,	RET.0.3.1001,	RET.0.3.1010,	RET.0.3.1011,
+;=			 RET.0.3.1100,	RET.0.3.1101,	RET.0.3.1110,	RET.0.3.1111)
+
+RET.0.3.0000:
+	;---------------------------------------; wbus<3:0> = 0000:
+	NOP,					; nothing to do...
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [RET.4.7.0000]			; case on mask<7:4>
+
+RET.0.3.0001:
+	;---------------------------------------; wbus<3:0> = 0001:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [RET.4.7.0000]			; case on mask<7:4>
+
+RET.0.3.0010:
+	;---------------------------------------; wbus<3:0> = 0010:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R1] <-- MEM (VA), LONG,		; restore R1
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [RET.4.7.0000]			; case on mask<7:4>
+
+RET.0.3.0011:
+	;---------------------------------------; wbus<3:0> = 0011:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [RET.0.3.0010]			; go restore R1
+
+RET.0.3.0100:
+	;---------------------------------------; wbus<3:0> = 0100:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R2] <-- MEM (VA), LONG,		; restore R2
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [RET.4.7.0000]			; case on mask<7:4>
+
+RET.0.3.0101:
+	;---------------------------------------; wbus<3:0> = 0101:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [RET.0.3.0100]			; go restore R2
+
+RET.0.3.0110:
+	;---------------------------------------; wbus<3:0> = 0110:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R1] <-- MEM (VA), LONG,		; restore R1
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [RET.0.3.0100]			; go restore R2
+
+RET.0.3.0111:
+	;---------------------------------------; wbus<3:0> = 0111:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	GOTO [RET.0.3.0110]			; go restore R1, R2
+
+RET.0.3.1000:
+	;---------------------------------------; wbus<3:0> = 1000:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R3] <-- MEM (VA), LONG,		; restore R3
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	CASE AT [RET.4.7.0000]			; case on mask<7:4>
+
+RET.0.3.1001:
+	;---------------------------------------; wbus<3:0> = 1001:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [RET.0.3.1000]			; go restore R3
+
+RET.0.3.1010:
+	;---------------------------------------; wbus<3:0> = 1010:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R1] <-- MEM (VA), LONG,		; restore R1
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [RET.0.3.1000]			; go restore R3
+
+RET.0.3.1011:
+	;---------------------------------------; wbus<3:0> = 1011:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	GOTO [RET.0.3.1010]			; go restore R1, R3
+
+RET.0.3.1100:
+	;---------------------------------------; wbus<3:0> = 1100:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R2] <-- MEM (VA), LONG,		; restore R2
+	SELECT [SC.3-0],			; prepare to case on SC<3:0>
+	GOTO [RET.0.3.1000]			; go restore R3
+
+RET.0.3.1101:
+	;---------------------------------------; wbus<3:0> = 1101:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	GOTO [RET.0.3.1100]			; go restore R2, R3
+
+RET.0.3.1110:
+	;---------------------------------------; wbus<3:0> = 1110:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R1] <-- MEM (VA), LONG,		; restore R1
+	GOTO [RET.0.3.1100]			; go restore R2, R3
+
+RET.0.3.1111:
+	;---------------------------------------; wbus<3:0> = 1111:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R0] <-- MEM (VA), LONG,		; restore R0
+	GOTO [RET.0.3.1110]			; go restore R1, R2, R3
+
+;	RET, continued.
+;	Process mask bits<7:4>.
+
+;	At this point,
+;		W0	=	spa/s/mask/psw
+;		W2	=	new FP
+;		SC	=	mask<11:4>
+;		VA	=	running stack pointer
+;		STATE<1:0> =	<POPR vs RET><RET.G vs RET.S>
+
+;= ALIGNLIST 0000*	(RET.4.7.0000,	RET.4.7.0001,	RET.4.7.0010,	RET.4.7.0011,
+;=			 RET.4.7.0100,	RET.4.7.0101,	RET.4.7.0110,	RET.4.7.0111,
+;=			 RET.4.7.1000,	RET.4.7.1001,	RET.4.7.1010,	RET.4.7.1011,
+;=			 RET.4.7.1100,	RET.4.7.1101,	RET.4.7.1110,	RET.4.7.1111)
+
+RET.4.7.0000:
+	;---------------------------------------; sc<3:0> = 0000:
+	[WBUS] <-- ZEXT [W0] RSH [12.], LONG,	; test mask<15:12> for POPR
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [RET.8.11.0000]			; case on mask<11:8>
+
+RET.4.7.0001:
+	;---------------------------------------; sc<3:0> = 0001:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [RET.8.11.0000]			; case on mask<11:8>
+
+RET.4.7.0010:
+	;---------------------------------------; sc<3:0> = 0010:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R5] <-- MEM (VA), LONG,		; restore R5
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [RET.8.11.0000]			; case on mask<11:8>
+
+RET.4.7.0011:
+	;---------------------------------------; sc<3:0> = 0011:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [RET.4.7.0010]			; go restore R5
+
+RET.4.7.0100:
+	;---------------------------------------; sc<3:0> = 0100:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R6] <-- MEM (VA), LONG,		; restore R6
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [RET.8.11.0000]			; case on mask<11:8>
+
+RET.4.7.0101:
+	;---------------------------------------; sc<3:0> = 0101:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [RET.4.7.0100]			; go restore R6
+
+RET.4.7.0110:
+	;---------------------------------------; sc<3:0> = 0110:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R5] <-- MEM (VA), LONG,		; restore R5
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [RET.4.7.0100]			; go restore R6
+
+RET.4.7.0111:
+	;---------------------------------------; sc<3:0> = 0111:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	GOTO [RET.4.7.0110]			; go restore R5, R6
+
+RET.4.7.1000:
+	;---------------------------------------; sc<3:0> = 1000:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R7] <-- MEM (VA), LONG,		; restore R7
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [RET.8.11.0000]			; case on mask<11:8>
+
+RET.4.7.1001:
+	;---------------------------------------; sc<3:0> = 1001:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [RET.4.7.1000]			; go restore R7
+
+RET.4.7.1010:
+	;---------------------------------------; sc<3:0> = 1010:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R5] <-- MEM (VA), LONG,		; restore R5
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [RET.4.7.1000]			; go restore R7
+
+RET.4.7.1011:
+	;---------------------------------------; sc<3:0> = 1011:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	GOTO [RET.4.7.1010]			; go restore R5, R7
+
+RET.4.7.1100:
+	;---------------------------------------; sc<3:0> = 1100:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R6] <-- MEM (VA), LONG,		; restore R6
+	SELECT [SC.7-4],			; prepare to case on SC<7:4>
+	GOTO [RET.4.7.1000]			; go restore R7
+
+RET.4.7.1101:
+	;---------------------------------------; sc<3:0> = 1101:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	GOTO [RET.4.7.1100]			; go restore R6, R7
+
+RET.4.7.1110:
+	;---------------------------------------; sc<3:0> = 1110:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R5] <-- MEM (VA), LONG,		; restore R5
+	GOTO [RET.4.7.1100]			; go restore R6, R7
+
+RET.4.7.1111:
+	;---------------------------------------; sc<3:0> = 1111:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R4] <-- MEM (VA), LONG,		; restore R4
+	GOTO [RET.4.7.1110]			; go restore R5, R6, R7
+
+;	RET, continued.
+;	Process mask bits<11:8>.
+
+;	At this point,
+;		W0	=	spa/s/mask/psw
+;		W2	=	new FP
+;		VA	=	running stack pointer
+;		STATE<1:0> =	<POPR vs RET><RET.G vs RET.S>
+
+;= ALIGNLIST 0000*	(RET.8.11.0000,	RET.8.11.0001,	RET.8.11.0010,	RET.8.11.0011,
+;=			 RET.8.11.0100,	RET.8.11.0101,	RET.8.11.0110,	RET.8.11.0111,
+;=			 RET.8.11.1000,	RET.8.11.1001,	RET.8.11.1010,	RET.8.11.1011,
+;=			 RET.8.11.1100,	RET.8.11.1101,	RET.8.11.1110,	RET.8.11.1111)
+
+RET.8.11.0001:
+	;---------------------------------------; sc<7:4> = 0001:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [RET.8.11.0000]			; done with restoring registers
+
+RET.8.11.0010:
+	;---------------------------------------; sc<7:4> = 0010:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R9] <-- MEM (VA), LONG,		; restore R9
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [RET.8.11.0000]			; done with restoring registers
+
+RET.8.11.0011:
+	;---------------------------------------; sc<7:4> = 0011:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.0010]			; go restore R9
+
+RET.8.11.0100:
+	;---------------------------------------; sc<7:4> = 0100:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R10] <-- MEM (VA), LONG,		; restore R10
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [RET.8.11.0000]			; done with restoring registers
+
+RET.8.11.0101:
+	;---------------------------------------; sc<7:4> = 0101:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.0100]			; go restore R10
+
+RET.8.11.0110:
+	;---------------------------------------; sc<7:4> = 0110:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R9] <-- MEM (VA), LONG,		; restore R9
+	GOTO [RET.8.11.0100]			; go restore R10
+
+RET.8.11.0111:
+	;---------------------------------------; sc<7:4> = 0111:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.0110]			; go restore R9, R10
+
+RET.8.11.1000:
+	;---------------------------------------; sc<7:4> = 1000:
+	VA <-- [VA] + 4,			; point at next saved register
+	IntWBUS <-- [VA]!![W0] RSH [12.],	; test mask<15:12> for POPR
+	[R11] <-- MEM (VA), LONG,		; restore R11
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [RET.8.11.0000]			; done with restoring registers
+
+RET.8.11.1001:
+	;---------------------------------------; sc<7:4> = 1001:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.1000]			; go restore R11
+
+RET.8.11.1010:
+	;---------------------------------------; sc<7:4> = 1010:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R9] <-- MEM (VA), LONG,		; restore R9
+	GOTO [RET.8.11.1000]			; go restore R11
+
+RET.8.11.1011:
+	;---------------------------------------; sc<7:4> = 1011:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.1010]			; go restore R9, R11
+
+RET.8.11.1100:
+	;---------------------------------------; sc<7:4> = 1100:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R10] <-- MEM (VA), LONG,		; restore R10
+	GOTO [RET.8.11.1000]			; go restore R11
+
+RET.8.11.1101:
+	;---------------------------------------; sc<7:4> = 1101:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.1100]			; go restore R10, R11
+
+RET.8.11.1110:
+	;---------------------------------------; sc<7:4> = 1110:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R9] <-- MEM (VA), LONG,		; restore R9
+	GOTO [RET.8.11.1100]			; go restore R10, R11
+
+RET.8.11.1111:
+	;---------------------------------------; sc<7:4> = 1111:
+	VA <-- [VA] + 4,			; point at next saved register
+	[R8] <-- MEM (VA), LONG,		; restore R8
+	GOTO [RET.8.11.1110]			; go restore R9, R10, R11
+
+;	RET, continued.
+;	All stack reads complete, PC updated.
+
+;	At this point,
+;		W0	=	spa/s/mask/psw
+;		W2	=	new FP
+;		VA	=	running stack pointer (points at location read)
+;		STATE<1:0> =	<POPR vs RET><RET.G vs RET.S>
+;		WBUS<3:0> =	mask<15:12> for POPR
+
+RET.8.11.0000:
+	;---------------------------------------; sc<11:8> = 0000:
+	[W4] <-- [K1]!![W0] RSH [30.], LONG,	; isolate 1'spa = spa + 4
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0> for POPR
+	CASE AT [RET.G]				; case on return from CALLG vs CALLS
+
+;= ALIGNLIST **00*	(RET.G,	RET.S,	POPR.DONE)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+RET.G:
+	;---------------------------------------; state<1:0> = 00:
+	[WBUS] <-- [W0], LONG,			; get new PSW
+	NEW PSW,				; load hardware PSW
+						; >> no DECODE NEXT in next two cycles
+	SET NORETRY				; set disable retry flag
+
+RET.EXIT:
+	;---------------------------------------;
+	[SP] <-- [VA] + [W4], LONG		; S: new SP = end of frame + spa + 4
+						; G: new SP = end of frame + #args*4
+
+	;---------------------------------------;
+	[FP] <-- [W2], LONG			; restore FP
+
+	;---------------------------------------;
+	[PSL] <-- [W0] AND 000000[0F0], BYTE,	; restore microcode PSL<7:4>
+	LAST CYCLE				; decode next instruction
+
+;	RET, continued.
+;	RET from CALLS.  Finish stack cleanup.
+
+;	At this point,
+;		W0	=	spa/s/mask/psw
+;		W2	=	new FP
+;		W4	=	1'spa
+;		VA	=	running stack pointer (points at location read)
+
+RET.S:
+	;---------------------------------------; state<1:0> = 01:
+	[W5] <-- [W0] AND 000000[0FF], LONG,	; zero W5<31:8>, restore hardware PSW
+	NEW PSW,				; (can't load VA from W4)
+						; >> no DECODE NEXT in next two cycles
+	SET NORETRY				; set disable retry flag
+
+	;---------------------------------------;
+	VA <-- [VA] + [W4],			; #args is at end of frame + 4 + spa
+						; >> W4 not written in prev cycle
+	[W4] <-- MEM (VA), BYTE			; read number of arguments
+
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; point past number of arguments
+	[W5] <-- [VA]!![W4] RSH (VA), BYTE	; justify, zero extend number of arguments
+						; (this writes low order byte of W5,
+						;  the remaining bytes are zero)
+
+	;---------------------------------------;
+	[W4] <-- [W5] LSH [2], LONG,		; multiply number of arguments * 4
+	GOTO [RET.EXIT]				; go restore PSW, update SP
+
+;= END CALLRET

@@ -1,0 +1,139 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>F-11</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  F-11 (1979)
+</H1>
+<P>
+The F-11 (code name: the Fonz) was DEC's second microprocessor design, and
+the first to be architected by DEC personnel. Duane Dickhut was the project
+leader, Bill Johnson was lead design engineer for the Data chip, and Burt
+Hashizume wrote most of the microcode. The MMU was designed by Dan Dobberpuhl's
+consulting company.
+<P>
+The F-11 was substantially more ambitious than the LSI-11. It implemented
+the entire PDP-11/34 architecture, including FP11-compatible floating point
+and KT11-compatibile memory management. It targeted 3X the performance of
+the LSI-11, at almost the same clock rate. It provided physical address extension
+out to 22b, the first system to do so after the PDP-11/70. It implemented
+the PDP-11 Commercial Instruction Set as an option; the only other implementation
+was for the PDP-11/44.
+<P>
+Like the LSI-11, the F-11 was a chip set consisting of three designs, one
+of which could be replicated: the Control Chip (up to nine supported), the
+data chip, and the MMU chip. It was implemented in AMI's 6u NMOS process
+and operated at 3.6Mhz (280ns microcycle).
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/f11_d.jpg">Data</A></TD>
+    <TD>DC302</TD>
+    <TD>216x181</TD>
+    <TD>6,000</TD>
+    <TD>The Data chip implements the instruction execution path of the F-11 chip
+      set. The Data chip operates under the control of microwords fetched from
+      the Control chip(s). Its key features are:
+      <UL>
+	<LI>
+	  Execution data path
+	<LI>
+	  PDP-11 architectural general registers (16b), three stack pointers
+	<LI>
+	  Processor status word (PSW)
+	<LI>
+	  Microcode temporary registers (16b)
+	<LI>
+	  Full function arithmetic/logic unit (16b)
+	<LI>
+	  Single bit shifter/byte swapper
+	<LI>
+	  Condition code logic
+	<LI>
+	  External interface sequencer
+      </UL>
+      <P>
+      Power: 1.5W</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/f11_c.jpg">Control</A></TD>
+    <TD>DC303</TD>
+    <TD>200x173</TD>
+    <TD>23,000 sites</TD>
+    <TD>The Control chip implements the microword access and sequencing functions
+      of the F-11 chip set. Its key features are:
+      <UL>
+	<LI>
+	  ROM/PLA control store (138 x 23b PLA terms, 414 ROM terms)
+	<LI>
+	  Chip set microsequencing
+	<LI>
+	  Interrupt logic
+	<LI>
+	  Abort logic
+	<LI>
+	  Initial decode PLA
+      </UL>
+      <P>
+      Power: 1.0W</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/f11_m.jpg">MMU</A></TD>
+    <TD>DC304</TD>
+    <TD>250x196</TD>
+    <TD>10,000</TD>
+    <TD>The MMU implements the memory management data path and controls for the
+      F-11 chip set. It also contains the PDP-11 floating point accumulators
+      and status registers. Its key features are:
+      <UL>
+	<LI>
+	  Memory management data path
+	<LI>
+	  PDP-11 memory management registers for kernel and user mode
+	<LI>
+	  Instruction translation logic (22b)
+	<LI>
+	  Protection logic
+	<LI>
+	  Floating point storage (64b)
+	<LI>
+	  Microcode temporary registers (64b and 16b)
+      </UL>
+      <P>
+      Power: 1.5W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+The F-11, like its predecessor, was very successful. In addition to expanding
+the penetration of PDP-11's in embedded and OEM markets, the F-11 was the
+basis of the LSI-11/23 (Qbus) and PDP-11/24 (Unibus) family of systems. DEC
+continued its tradition of second sourcing its designs by importing AMI's
+technology into its semiconductor fabrication facility.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+I joined Small Systems Engineering's chip team in late 1978, when the Storage
+group I worked in transferred to Colorado Springs. For the first six months,
+I worked as an individual contributor, writing a strategic position paper
+on future chip directions and finishing half of the CIS microcode (the packed
+instructions). The position paper recommended a design project to build one
+more generation of PDP-11 microprocessors and an advanced development project
+focused on building a VLSI VAX. This recommendation was accepted, and I became
+the project leader for the last PDP-11 microprocessor, J-11.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

@@ -1,0 +1,109 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>T-11</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  T-11 (1981)
+</H1>
+<P>
+The T-11 (code name Tiny) was DEC's third microprocessor design, and the
+first single chip design. Rich Olsen and then Mary Ellen Lewandowski were
+the lead project engineers; Dan Dobberpuhl's consulting company did the circuit
+design and layout.
+<P>
+The T-11 had a substantially different focus than the F-11. It aimed to
+capitalize on the strength of the PDP-11 in embedded markets by providing
+a one chip, inexpensive, low-power PDP-11 with a standard interface. Its
+target markets were OEM's and embedded devices rather than systems.
+<P>
+The T-11 had the same feature set as the LSI-11 -- no floating point, no
+memory management -- but the integer performance of the F-11. It was implemented
+in a scaled version of the F-11 process -- 5u NMOS -- and operated at 250Mhz
+(400ns microcycle). The T-11 dissipated less than 1.2W and cost less than
+$10 in high volume.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/t11.jpg">T11</A></TD>
+    <TD>DC310</TD>
+    <TD>216x181</TD>
+    <TD>17,000 sites</TD>
+    <TD>The T11's key features are:
+      <UL>
+	<LI>
+	  Basic PDP-11 instruction set (except MARK)
+	<LI>
+	  Industry standard external interface
+	<LI>
+	  Vectored interrupt subsystem (4 priority levels, 15 internally generated
+	  vectors)
+	<LI>
+	  Dynamic memory support (RAS/CAS addressing, strobe generation, automatic
+	  refresh)
+	<LI>
+	  Programmable 8b or 16b external data bus
+	<LI>
+	  Programmable start and restart addresses
+	<LI>
+	  Internal clock oscillator
+	<LI>
+	  Single +5V supply
+      </UL>
+    </TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+The T-11 was always a bit of a stepchild in the Semiconductor Group. Because
+it wasn't targeting systems, it was prioritized lower than projects that
+generated systems revenue. Nonetheless, after release it was widely used
+inside DEC for smart controllers (like the RQDX3) and auxiliary processors
+(like the KXV21), and outside DEC in applications as diverse as arcade games
+(Atari's Paperboy) and laboratory instruments.
+<H3>
+  Personal Narrative
+</H3>
+<P>
+T-11 was the last DEC microprocessor to verify the chip layout manually.
+For several months, I was part of an army of volunteers that crawled over
+gigantic Mylar plots of the chip with colored pencils and rulers, tracing
+lines to make sure the wiring was correct, and measuring gates to make sure
+the sizing was right. Even with only 12,000 placed transistors, it was a
+tedious and error-prone process.
+<P>
+After release, the T-11 team drummed up business inside of DEC by holding
+a design contest. Entrants were encouraged to design a product around T-11;
+the winning designs would be fabricated. I designed a T-11 based personal
+computer than fit inside a VT100 terminal and ran RT-11. Although it didn't
+win the contest, it was interesting enough to be fabricated. This is the
+only logic design I ever personally did in my career at DEC.
+<P>
+T-11 was the first chip DEC presented at the International Solid State Circuits
+Conference (ISSCC). At the 1981 show, T-11 ended up sandwiched between Intel's
+mammoth "mainframe on a chip", the i432, with more than 1 million transistors
+in the chip set; and HP's Focus chip, with more than 500,000 transistor sites
+on a single die. Between these two behemoths, the 12,000 transistor T-11
+looked, well, tiny. The Semiconductor Group was very discouraged and vowed
+that its next experience would make a better impression (it did: in 1984,
+DEC showed both V-11 and MicroVAX).
+<P>
+Ironically, T-11 did far better commercially than either of its ballyhooed
+session mates. The i432 sank without a trace once its architectural and
+implementation follies became clear; Focus shipped only a few thousand units.
+T-11 shipped hundreds of thousands of units and is still running in embedded
+devices today.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 24-Feb-2008 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

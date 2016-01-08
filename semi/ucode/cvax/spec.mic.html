@@ -1,0 +1,463 @@
+.TOC    "SPEC.MIC -- Specifier Flows"
+.TOC    "Revision 4.1"
+
+;	Shawn Persels, Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC 	"	Revision History"
+
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 04	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	16-May-86	[RMS]	Removed shoft literal flagging
+;	24-Feb-86	[RMS]	Relaxed alignment constraints in immediate mode
+;	16-Feb-86	[RMS]	Restored SPEC.RN (ECO rescinded)
+; 03	31-Jan-86	[RMS]	Added DEC.NEXT validity checks 
+;	31-Jan-86	[RMS]	Changed SPEC.RN (ECO 6JAN31DWA.2)
+;	3-Jan-86	[RMS]	Documented misc RN+/-1 restriction (ECO 6JAN03DWA.1)
+;	19-Sep-85	[RMS]	Removed PASS.A/B.ZEXT.DL functions (ECO 5SEP19FF.1)
+;	10-Sep-85	[RMS]	Changed SN+1 to SN.PLUS.1
+;	22-Aug-85	[RMS]	Moved exceptions to INTEXC module
+; 02	18-Mar-85	[RMS]	Revised for second pass model
+; 01	8-Jan-85	[SDP]	Revised for new specifier parsing algorithm
+; 00	1-Dec-82	[RMS]	First edit for CVAX
+
+.bin
+
+;= BEGIN SPECIFIER
+
+.nobin
+;	Specifier decoding chart.
+;
+;						 (SPEC)DEC.NEXT
+;							|
+;							|
+;	+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;     index   short    reg    reg    autodec  rsrv   autoinc  immed  autoinc  absol   displ   displ  IB dry  IB halt
+;     	|     lit	|     defer	|     addr	|	|    defer	|	|     defer	|	|
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;	|	|	|	|	|     fault	|	|	|	|	|	|	|	|
+;	|	+-------+-------+-------+---------------+-------+-------+-------+-------+-------+-------+-------+
+;	|						|
+;	|						|
+;	|					    SPEC.NEXT
+;	|
+;	|
+;	+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+-------+
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;     index   short    reg    reg    autodec  rsrv   autoinc  immed  autoinc  absol   displ   displ  IB dry  IB halt
+;     	|     lit	|     defer	|     addr	|	|    defer	|	|     defer	|	|
+;	|	|	|	|	|	|	|	|	|	|	|	|	|	|
+;     fault   fault    fault	|	|     fault	|     fault	|	|	|	|	|	|
+;				+-------+---------------+---------------+-------+-------+-------+-------+-------+
+;							|
+;							|
+;						    SPEC.NEXT
+.bin
+
+.nobin
+.TOC	"	Normal Specifier Decode"
+
+;	These flows perform all specifier decoding except index mode base address.
+;	They are invoked by hardware, with a DEC.NEXT or SPEC.NEXT branch condition.
+;
+;	Entry conditions:
+;		DL	=	operand length
+;		AT	=	access type
+;		RMODE	=	set if specifier is 5x
+;		RN	=	register number of specifier
+;		ID.BUFF	=	ib data if specifier is 9F, Ax to Fx
+;
+;	Exit conditions:
+;		VA	=	operand address
+;		Wsn	=	operand address if AT=AV
+;		Wsn	=	operand if AT=RM and DL=BWL
+;		Wsn.plus.1'Wsn =operand if AT=RM and DL=Q
+;       	WMMGT, TMMGT =	trashed
+;		all other state is unchanged
+;
+;	Note:	sn is the working register index supplied by the I Box at dispatch time
+;		sn is supplied by the I Box as follows:
+;
+;		sn = 0		specifier 1
+;		sn = 2		specifier 2
+;		sn = 4		specifier 3
+;		sn = 7		specifier 4
+;		sn = 3		specifier 5
+;		sn = 1		specifier 6
+;
+;	Note:	SPEC exits by invoking the SPEC.NEXT branch.  If all specifiers have been decoded
+;		then the I Box dispatches to the execution flows.
+;
+.bin
+
+;	Short literal:  get specifier itself, check for quad, else exit.
+
+SPEC.SH.LIT:
+	;********** Hardware dispatch **********; S^# flows:  0x,1x,2x,3x
+	[WSN.BR]<--MXPS0[SPEC.RN],		; get short literal, broadcast to FPA
+	IF(DL.BWL.AT.R)_SPEC.NEXT		; dec next if length = bwl and access = r
+
+	;---------------------------------------;
+	[WSN.PLUS.1.BR]<--K[0],			; zero second lw, broadcast to FPA
+	IF(AT.R)_SPEC.NEXT.ELSE.[SPEC.RSRV.ADDR] ; dec next if access = r, else fault
+
+;	Index:  shift index by data length, parse base operand.
+
+SPEC.INDEX:
+	;********** Hardware dispatch **********; [R] flows:  4x
+	[WSN]<--[GRN].SHFL.(SC), USE.DL,	; shift index register by data length
+	SPEC.NEXT				; decode next specifier (index flows)
+
+;	Register:  get specified register(s).
+
+SPEC.REG:
+	;********** Hardware dispatch **********; R flows:  5x
+	[WSN]<--[GRN.BR], LEN(DL),		; get first GPR, zero ext, broadcast to FPA
+	RN<--RN+DL.Q,				; increment RN if quadword
+						; >>RN+1, no recoverable utrap this cycle
+	IF(DL.BWL.AT.RVM)_SPEC.NEXT		; dec next if length = bwl and access = rvm
+
+	;---------------------------------------;
+	[WSN.PLUS.1]<--[GRN.BR],		; get second GPR, broadcast to FPA
+	RN<--RN-1,				; restore RN
+						; >>RN-1, no recoverable utrap this cycle
+	IF(AT.RVM)_SPEC.NEXT.ELSE.[SPEC.RSRV.ADDR] ; dec next if access = rvm, else fault
+
+;	Register deferred:  use register as address, fetch operand.
+
+SPEC.REG.DEFER:
+	;********** Hardware dispatch **********; (R) flows:  6x
+	VA&, [WSN]<--[GRN],			; save operand address in VA, WSN
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Autodecrement:  compute register-k(dl), use as address, fetch operand.
+
+SPEC.AUTODEC:
+	;********** Hardware dispatch **********; -(R) flows:  7x
+	[GRN]<--[GRN]-[MKDL], RLOG,		; decrement GRN by data length
+	GOTO[SPEC.REG.DEFER]			; go copy GRN to WSN and VA
+
+;	Reserved address modes:  fault.
+
+SPEC.RSRV.ADDR:
+	;********** Hardware dispatch **********; [PC],PC,(PC),-(PC) flows:  4F,5F,6F,7F
+	GOTO[RSRV.ADDR.FLT]			; reserved address fault
+
+;	Autoincrement:  use register as address, compute register+k(dl), fetch operand.
+
+SPEC.AUTOINC:
+	;********** Hardware dispatch **********; (R)+ flows:  8x
+	VA&, [WSN]<--[GRN]			; save operand address in VA, WSN
+
+SPEC.AUTOINC.1:
+	;---------------------------------------;
+	[GRN]<--[GRN]+[MKDL], RLOG,		; increment GRN by data length
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Immediate:  get data item from instruction stream.
+
+SPEC.IMED:
+	;********** Hardware dispatch **********; (PC)+ flows:  8F
+	VA&, [WSN]<--[PC],			; save operand address in VA, WSN
+						; >>PC read, prev cycle was DEC.NEXT
+	CASE8[ID.LOAD].AT.[SPEC.IMED.AV.OK]	; load id, case on at<1>'id load
+
+;= ALIGNLIST 000*	(SPEC.IMED.AV.OK,	SPEC.IMED.AV.STALL,
+;=					,	SPEC.IMED.AV.HALTED,
+;=			 SPEC.IMED.RM.OK,	SPEC.IMED.RM.STALL,
+;=					,	SPEC.IMED.RM.HALTED)
+
+SPEC.IMED.AV.OK:
+	;---------------------------------------; at = av, ib ok:
+	IF(DL.BWL)_SPEC.NEXT.ELSE.[SPEC.IMED.AV.Q.STALL]	; dec next if dl = bwl
+
+SPEC.IMED.AV.STALL:
+	;---------------------------------------; at = av, ib stall:
+	CASE8[ID.LOAD].AT.[SPEC.IMED.AV.OK]	; try to load id, case on result
+
+SPEC.IMED.AV.HALTED:
+	;---------------------------------------; at = av, ib halted:
+	[TXPAGE]<--B.[VA],			; save VA for now
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE8[ID.LOAD].AT.[SPEC.IMED.AV.OK]	; try to load id, case on result
+
+;= ALIGNLIST *00*	(SPEC.IMED.AV.Q.OK,	SPEC.IMED.AV.Q.STALL,
+;=					,	SPEC.IMED.AV.Q.HALTED)
+;  AT = a or v --> ID.LOAD = 0??
+
+SPEC.IMED.AV.Q.OK:
+	;---------------------------------------; ib ok:
+	SPEC.NEXT				; decode next
+
+SPEC.IMED.AV.Q.STALL:
+	;---------------------------------------; ib stall:
+	CASE4[ID.LOAD].AT.[SPEC.IMED.AV.Q.OK]	; try to load id, case on result
+
+SPEC.IMED.AV.Q.HALTED:
+	;---------------------------------------; ib halted:
+	[TXPAGE]<--B.[VA],			; save VA for now
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[SPEC.IMED.AV.Q.OK]	; try to load id, case on result
+
+;	Immediate, continued.
+
+SPEC.IMED.RM.OK:
+	;---------------------------------------; at = rm, ib ok:
+	[WSN.BR]<--B.[MID.BUFF], LEN(DL),	; get immed oper, zero ext, broadcast to FPA
+	IF(DL.BWL)_SPEC.NEXT.ELSE.[SPEC.IMED.RM.Q.STALL]	; dec next if dl = bwl
+
+SPEC.IMED.RM.STALL:
+	;---------------------------------------; at = rm, ib stall:
+	CASE4[ID.LOAD].AT.[SPEC.IMED.RM.OK]	; try to load id, case on result
+
+SPEC.IMED.RM.HALTED:
+	;---------------------------------------; at = rm, ib halted:
+	[TXPAGE]<--B.[VA],			; save VA for now
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[SPEC.IMED.RM.OK]	; try to load id, case on result
+
+;= ALIGNLIST 100*	(SPEC.IMED.RM.Q.OK,	SPEC.IMED.RM.Q.STALL,
+;=					,	SPEC.IMED.RM.Q.HALTED)
+
+SPEC.IMED.RM.Q.OK:
+	;---------------------------------------; ib ok:
+	[WSN.PLUS.1.BR]<--B.[MID.BUFF],		; get second lw of immed, broadcast to FPA
+	SPEC.NEXT				; decode next
+
+SPEC.IMED.RM.Q.STALL:
+	;---------------------------------------; ib stall:
+	CASE4[ID.LOAD].AT.[SPEC.IMED.RM.Q.OK]	; try to load id, case on result
+
+SPEC.IMED.RM.Q.HALTED:
+	;---------------------------------------; ib halted:
+	[TXPAGE]<--B.[VA],			; save VA for now
+	CALL[ID.LOAD.HALTED]			; call subroutine to restart prefetch
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[TXPAGE],			; restore VA
+	CASE4[ID.LOAD].AT.[SPEC.IMED.RM.Q.OK]	; try to load id, case on result
+
+;	Autoincrement deferred:  use register as pointer, compute register+4,
+;	fetch pointer, fetch operand.
+
+SPEC.AUTOINC.DEFER:
+	;********** Hardware dispatch **********; @(R)+ flows:  9x
+	VA&, [WBUS]<--[GRN]			; save address of operand address in VA
+
+	;---------------------------------------;
+	[GRN]<--[GRN]+K[4], RLOG, 		; incr GRN to point beyond address in mem
+	GOTO[SPEC.DEFER]			; go process deferred address
+
+;	Absolute:  get address from instruction stream, fetch operand.
+
+SPEC.ABSOLUTE:
+	;********** Hardware dispatch **********; @(PC)+ flows:  9F
+	VA&, [WSN]<--B.[MID.BUFF],		; save operand address in VA, WSN
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Byte, word, longword displacement:  compute register+disp, use as address, 
+;	fetch operand.
+
+SPEC.BWL.DISP:
+	;********** Hardware dispatch **********; D^(R) flows:  Ax,Cx,Ex
+	VA&, [WSN]<--[GRN]+[MID.BUFF],		; add displ to GRN to form operand address
+						; >>possible PC read, prev cycle was
+						; >>DEC.NEXT, PC not written
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Byte, word, longword displacement deferred:  compute register+disp, use as pointer,
+;	fetch pointer, fetch operand.
+
+SPEC.BWL.DISP.DEFER:
+	;********** Hardware dispatch **********; @D^(R) flows:  Bx,Dx,Fx
+	VA&, [WBUS]<--[GRN]+[MID.BUFF],		; add in displ to form addr of operand addr
+						; >>possible PC read, prev cycle was
+						; >>DEC.NEXT, PC not written
+	GOTO[SPEC.DEFER]			; go process deferred address
+
+;	Deferred modes:  VA holds pointer to effective address.
+;	Read pointer.  If access = av, exit, else fetch operand.
+
+SPEC.DEFER:
+	;---------------------------------------;
+	VA&, [WSN]<--MEM(VA), LONG,		; read address of operand from memory
+ 	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Data read:  VA holds effective address.
+;	Read data longword(s) and exit.
+
+SPEC.MEM.READ:
+	;---------------------------------------;
+	[WSN.BR]<--MEM(VA).CHECK(AT),		; read data from memory, copy to FPA
+ 	LEN(DL),				; write check if access = m
+	IF(DL.BWL)_SPEC.NEXT			; dec next if dl = bwl, else read next
+
+	;---------------------------------------;
+	[WSN.PLUS.1.BR]<--MEM(VAP), LONG,	; read second lw from memory, copy to FPA
+	SPEC.NEXT				; decode next
+
+.nobin
+.TOC	"	Index Base Address Specifier Decode"
+
+;	These flows are used to decode the index mode base address specifier.
+;	They are invoked by hardware, from index mode, with a SPEC.NEXT branch condition.
+;
+;	Entry conditions:
+;		DL	=	operand length
+;		AT	=	access type
+;		RMODE	=	set if specifier is 5x
+;		RN	=	register number of specifier
+;		Wsn	=	INDEX (in bytes) into data array
+;		ID.BUFF	=	ib data if specifier is 9F, Ax to Fx
+;
+;	Exit conditions:
+;		VA	=	operand address
+;		Wsn	=	operand address if AT=AV
+;		Wsn	=	operand if AT=RM and DL=BWL
+;		Wsn.plus.1'Wsn =operand if AT=RM and DL=Q
+;	   	WMMGT, TMMGT =	trashed
+;		all other state is unchanged
+;
+.bin
+
+;	Short literal:  fault.
+
+INDEX.SH.LIT:
+	;********** Hardware dispatch **********; S^# flows:  0x,1x,2x,3x
+	GOTO[RSRV.ADDR.FLT]			; reserved addressing fault
+
+;	Index:  fault.
+
+INDEX.INDEX:
+	;********** Hardware dispatch **********; [R] flows:  4x
+	GOTO[RSRV.ADDR.FLT]			; reserved addressing fault
+
+;	Register:  fault.
+
+INDEX.REG:
+	;********** Hardware dispatch **********; R flows:  5x
+	GOTO[RSRV.ADDR.FLT]			; reserved addressing fault
+
+;	Register deferred:  use register+index as address, fetch operand.
+
+INDEX.REG.DEFER:
+	;********** Hardware dispatch **********; (R) flows:  6x
+	VA&, [WSN]<--[GRN]+[WSN],		; add base (GRN) to index (WSN)
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Autodecrement:  compute register-k(dl), use register+index as address,
+;	fetch operand.
+
+INDEX.AUTODEC:
+	;********** Hardware dispatch **********; -(R) flows:  7x
+	[GRN]<--[GRN]-[MKDL], RLOG,		; decrement GRN by data length
+	GOTO[INDEX.REG.DEFER]			; go add base to index
+
+;	Reserved address modes:  fault.
+
+INDEX.RSRV.ADDR:
+	;********** Hardware dispatch **********; [PC],PC,(PC),-(PC) flows:  4F,5F,6F,7F
+	GOTO[RSRV.ADDR.FLT]			; reserved address fault
+
+;	Autoincrement:  use register+index as address, compute register+k(dl),
+;	fetch operand.
+
+INDEX.AUTOINC:
+	;********** Hardware dispatch **********; (R)+ flows:  8x
+	VA&, [WSN]<--[GRN]+[WSN],		; save operand address in VA, WSN
+	GOTO[SPEC.AUTOINC.1]			; go increment GRN and dec next
+
+;	Immediate:  fault.
+
+INDEX.IMED:
+	;********** Hardware dispatch **********; (PC)+ flows:  8F
+	GOTO[RSRV.ADDR.FLT]			; reserved addressing fault
+
+;	Autoincrement deferred:  use register as pointer, compute register+4,
+;	fetch pointer, add index, fetch operand.
+
+INDEX.AUTOINC.DEFER:
+	;********** Hardware dispatch **********; @(R)+ flows:  9x
+	VA&, [WBUS]<--[GRN]			; save address of operand address in VA
+
+	;---------------------------------------;
+	[GRN]<--[GRN]+K[4], RLOG,		; incr GRN to point beyond address in mem
+	GOTO[INDEX.DEFER]			; go process deferred address
+
+;	Absolute:  use instruction stream data+index as address, fetch operand.
+
+INDEX.ABSOLUTE:
+	;********** Hardware dispatch **********; @(PC)+ flows:  9F
+	VA&, [WSN]<--[WSN]+[MID.BUFF],		; operand address plus index to VA, WSN
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;	Byte, word, longword displacement:  use register+disp+index as address,
+;	fetch operand.
+
+INDEX.BWL.DISP:
+	;********** Hardware dispatch **********; D^(R) flows:  Ax,Cx,Ex
+	[WSN]<--[GRN]+[WSN],			; add operand base address to index
+						; >>possible PC read, prev cycle was
+						; >>SPEC.NEXT, PC not written
+	GOTO[INDEX.ABSOLUTE]			; go add in displ, fetch operand
+
+;	Byte, word, longword displacement deferred:  use register+disp as pointer,
+;	fetch pointer, add index, fetch operand.
+
+INDEX.BWL.DISP.DEFER:
+	;********** Hardware dispatch **********; @D^(R) flows:  Bx,Dx,Fx
+	VA&, [WBUS]<--[GRN]+[MID.BUFF],		; add displ to register to form base address
+						; >>possible PC read, prev cycle was
+						; >>SPEC.NEXT, PC not written
+	GOTO[INDEX.DEFER]			; go processed deferred address
+
+;	Index deferred.
+;	Fetch pointer, add index.  If access = av, exit, else fetch operand.
+
+;	At this point,
+;		WSN	=	index
+;		VA	=	base address
+
+INDEX.DEFER:
+	;---------------------------------------;
+	VA&, [WBUS]<--MEM(VA), LONG		; read operand address into VA
+
+	;---------------------------------------;
+	VA&, [WSN]<--[WSN]+[VA],		; add base (VA) to index (WSN)
+	IF(AT.AV)_SPEC.NEXT.ELSE.[SPEC.MEM.READ] ; dec next if access = av, else read
+
+;= END SPECIFIER

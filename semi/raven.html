@@ -1,0 +1,126 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>Raven</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  Raven
+</H1>
+<H2>
+  Introduction: The ECL Conundrum
+</H2>
+<P>
+From 1975, with the introduction of the KL10, until 1991, when NVAX was released,
+the highest performance processors at DEC were built with ECL (emitter coupled
+logic) technology. Fast, hot, and not very dense, ECL was the technology
+of choice for high-end systems, not just at DEC, but at computer companies
+world-wide. Then, in the space of just a few short years, it became
+obsolete. In 1985, DEC's ECL systems were 7 times faster than the fastest
+CMOS systems. In 1992, they were no faster.
+<P>
+The high-end design groups at DEC made numerous attempts to cope with this
+shift, or to overcome it. The most ambitious attempt was Aquarius (VAX 9000),
+which used cutting edge multi-chip module technology and leading edge ECL
+processes to build a VAX mainframe. But it proved no faster than a the
+single-chip NVAX, and it was 25 times more expensive.
+<H2>
+  Raven: A Brief History
+</H2>
+<P>
+An alternate approach was Raven. Raven was started in 1988 by Doug Clark,
+Jim Keller, and Pete Bannon of DEC's Mid-Range Systems Group, following
+cancellation of their gate-array based system (Argonaut) in favor of the
+VAX 9000. They reasoned that ECL's native advantage over CMOS in gate speed
+was being negated by losses in interchip communications. If an ECL VAX CPU
+could be crammed onto a single chip, like a CMOS microprocessor, it should
+have a substantially higher clock rate and a performance advantage.
+<P>
+Raven was a simplified VAX design with a single chip CPU and a single chip
+FPU. Implemented in Fujitsu's ECL standard cells, it was intended to run
+at 250Mhz and deliver 50 "VUPS" of performance (about twice NVAX). Power
+dissipation would have been a startling (for the day) 150W.
+<P>
+Raven discarded the macropipelining of the VAX 9000 and NVAX in favor of
+a VAX 8800 style micropipeline with very few logic gates per stage.
+Microbranching was quite complicated, with condition select done in the cycle
+before the actual branch, based on conditions that had occurred many cycles
+earlier. Most non-32b memory operations required microcode assistance.
+<P>
+I became involved with Raven primarily for the fun of microcoding. Rigel
+was done, NVAX was in Mike Uhler's capable hands, Alpha hadn't really started,
+and I had time on my hands. I worked with the Raven team for 18 months, first
+on feasibility and then on implementation. Throughout the project, the technology
+specs, particularly from a density point of view, kept degrading. Although
+the team continually simplified the design, they eventually concluded that
+the CPU would have to be split into multiple chips. That negated the basic
+premise of the project, and in early 1990 Raven was cancelled.
+<P>
+Doug Clark left DEC to teach at Princeton University. Jim Keller and Pete
+Bannon joined Digital Semiconductor and worked on the second and third generation
+Alpha cores, EV-5 and EV-6. Today they are at Palo Alto Semiconductor, with
+Dan Dobberpuhl.
+<H2>
+  Raven Microcode Sources
+</H2>
+<P>
+All that remains of Raven are the sources to the microcode. Some, but not
+all, of the features of the microarchitecture can be reconstructed from comments
+in the files.
+<P>
+<UL>
+  <LI>
+    <A HREF="ucode/raven/align.mic">align.mic</A>
+  <LI>
+    <A HREF="ucode/raven/alloc.com">alloc.com</A>
+  <LI>
+    <A HREF="ucode/raven/b.com">b.com</A>
+  <LI>
+    <A HREF="ucode/raven/callret.mic">callret.mic</A>
+  <LI>
+    <A HREF="ucode/raven/console.mic">console.mic</A>
+  <LI>
+    <A HREF="ucode/raven/cstring.mic">cstring.mic</A>
+  <LI>
+    <A HREF="ucode/raven/ctrl.mic">ctrl.mic</A>
+  <LI>
+    <A HREF="ucode/raven/decrom.mic">decrom.mic</A>
+  <LI>
+    <A HREF="ucode/raven/define.mic">define.mic</A>
+  <LI>
+    <A HREF="ucode/raven/emulate.mic">emulate.mic</A>
+  <LI>
+    <A HREF="ucode/raven/fpoint.mic">fpoint.mic</A>
+  <LI>
+    <A HREF="ucode/raven/intexc.mic">intexc.mic</A>
+  <LI>
+    <A HREF="ucode/raven/intlogadr.mic">intlogadr.mic</A>
+  <LI>
+    <A HREF="ucode/raven/macro.mic">macro.mic</A>
+  <LI>
+    <A HREF="ucode/raven/memmgt.mic">memmgt.mic</A>
+  <LI>
+    <A HREF="ucode/raven/misc.mic">misc.mic</A>
+  <LI>
+    <A HREF="ucode/raven/muldiv.mic">muldiv.mic</A>
+  <LI>
+    <A HREF="ucode/raven/opsys.mic">opsys.mic</A>
+  <LI>
+    <A HREF="ucode/raven/powerup.mic">powerup.mic</A>
+  <LI>
+    <A HREF="ucode/raven/queue.mic">queue.mic</A>
+  <LI>
+    <A HREF="ucode/raven/specifier.mic">specifier.mic</A>
+  <LI>
+    <A HREF="ucode/raven/vector.mic">vector.mic</A>
+  <LI>
+    <A HREF="ucode/raven/vfield.mic">vfield.mic</A>
+  <LI>
+    <A HREF="ucode/raven/vvax.mic">vvax.mic</A>
+</UL>
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 30-Jan-2007 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

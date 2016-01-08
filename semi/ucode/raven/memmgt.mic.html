@@ -1,0 +1,1366 @@
+.TOC	"MEMMGT.MIC -- Memory Management Microtrap Routines"
+.TOC	"Revision 2.5"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*                                                                          *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.                  *
+;*  ALL RIGHTS RESERVED.                                                    *
+;*                                                                          *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.                                                            *
+;*                                                                          *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.                                                            *
+;*                                                                          *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.                 *
+;*                                                                          *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit    Date   Who         Description
+; ---- --------- ---    ---------------------
+;    5 19-Feb-90 RMS	Documented MAPEN write restriction.
+;    4 14-Feb-90 RMS	Fixed bug in cross page microtrap.
+;    3 19-Jan-90 RMS	Fixed bug in write word unaligned.
+;    2 16-Jan-90 RMS	Editorial changes.
+;    1 29-Nov-89 RMS	Halved size of TB.
+; (2)0 19-Nov-89 RMS	Revised for simplified decoder.
+;    8 13-Nov-89 RMS	Editorial changes.
+;    7 02-Nov-89 RMS	Revised memory management error interface.
+;    6 31-Oct-89 RMS	Fixed bug in write miss flows.
+;    5 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    4 23-Sep-89 RMS	Editorial changes.
+;    3 15-Sep-89 RMS	Revised for TB invalidate restrictions.
+;    2 08-Jul-89 RMS	Fixed alignlist in alignment trap.
+;    1 30-Jun-89 RMS	Revised for probe, TB invalidate restrictions.
+; (1)0 14-Jun-89 RMS	Revised to remove subroutine calls and for release to CMS.
+;    4 12-Apr-89 RMS	Moved IB problem handlers to INTEXC.
+;    3 07-Apr-89 RMS	Revised to zero unused branch recipe bits.
+;    2 03-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 25-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN MEMMGT
+.nobin
+
+;	Memory management consists of prioritized microtrap routines.
+;
+;	There are six prioritized microtrap routines (in order):
+;
+;	1. TB miss - The PTE entry corresponding to a virtual memory memory request or
+;	   probe is not in the TB.
+;
+;	2. ACV - The PTE entry corresponding to a virtual memory request causes a
+;	   privilege violation.
+;
+;	3. TNV - The PTE entry corresponding to a virtual memory request is not valid
+;	   (PTE.V = 0).
+;
+;	4. M = 0 - PTE entry corresponding to a virtual memory request with write or
+;	   modify check has the modify bit clear.
+;
+;	5. Cross page - The address + effective data length of a virtual memory request
+;	   will cross a virtual page boundary.  Since cross page is lower priority
+;	   than the previous microtraps, memory management problems corresponding to the
+;	   first page of a cross page situation are considered resolved.
+;
+;	6. Unaligned - The address + effective data length (quad considered as long)
+;	   of a memory request will cross a longword boundary.  Since unaligned is lowest
+;	   priority of all other microtraps, memory management problems corresponding
+;	   to both longwords containing the data item are considered resolved.
+;
+;	Memory management microtrap routines CANNOT use subroutine calls.
+
+;	The memory management hardware consists of:
+;
+;	1. Translation Buffer.  The TB contains 128 direct map entries indexed 
+;	   by VA<31,14:9>.  The tag portion of each entry contains bits<30:15>
+;	   bits of a virtual address.  A microinstruction with CRQ/TB.WRITE
+;	   writes the TB entry indexed by VA<31:14:9>.  The tag portion is
+;	   written from VA<30:15> and the PTE portion from the contents of
+;	   the Wbus from the PREVIOUS cycle.  ADR and CRQ must be NOP's in
+;	   the cycle following CRQ/TB.WRITE.
+;
+;	2. Status Registers.  The memory interface maintains three registers
+;	   which microcode can case on to determine memory management status.
+;
+;	   TRAP.STATUS<3:2>	=	VA<31:30>
+;	   TRAP.STATUS<1>	=	CRQ<4>: 0 if probe, 1 if mreq
+;	   TRAP.STATUS<0>	=	0 if read or no access check, 1 if write access check
+;
+;	   TRAP.STATUS is updated every cycle, unless memory management microtraps are disabled.
+;
+;	   ALGN.STATUS<3>	= 	restart_dl<1>: 0 if byte/word, 1 if long/quad
+;	   ALGN.STATUS<2>	=	floating point transfer
+;					  0 none
+;					  1 xmit lw
+;	   ALGN.STATUS<1>	=	0
+;	   ALGN.STATUS<0>	=	CRQ<3>: 0 if write, 1 if read
+;
+;	   ALGN.STATUS is updated every cycle, unless memory management microtraps are disabled.
+;
+;	   MMGT.STATUS<3>	= 	1 for ACV if TB hit
+;	   MMGT.STATUS<2>	= 	~PTE<v> if TB hit
+;	   MMGT.STATUS<1>	=	PTE<m> if TB hit
+;	   MMGT.STATUS<0>	= 	1 for TB miss
+;
+;	   MMGT.STATUS is updated every cycle.
+;	   Here are all legitimate values for MMGT.STATUS<3:0>:
+;
+;	   MMGT.STATUS<3:0>	= 0000 for reference okay, m bit clear
+;				= 0001 for TB miss
+;				= 0010 for reference ok, m bit set
+;				= 01x0 for process TNV (hardware)
+;				= 0101 for ppte TNV (microcode)
+;				= 10x0 for process ACV (hardware)
+;				= 1001 for process length violation (microcode)
+;				= 11x0 for process ACV and TNV (hardware)
+;				= 1101 for ppte length violation (microcode)
+
+;	3. Memory management registers.
+;
+;	   The VA register provides the address source for all memory requests.
+;	   VA may be an AAbus source or ADR destination at all times.
+;
+;	   The VAX P0BR, P1BR, SBR, P0LR, P1LR, and SLR are stored in dedicated
+;	   locations in the register file.  They may be AAbus sources or Wbus
+;	   destinations.  They are precompensated by the following algorithm
+;	   by MTPR and LDPCTX microcode to make length checks and address calculation
+;	   easier in the MEMMGT microcode.
+;
+;		P0LR - shift left 9, clear bit 31
+;		P0BR - no compensation
+;
+;		P1LR - shift left 9, add 40000000#16
+;		P1BR - subtract 800000#16
+;
+;		SLR - shift left 9, set bit 31
+;		SBR - subtract 1000000#16
+;
+;	   The MAPEN bit and MMGT.STATUS register are stored in the
+;	   memory interface and are writable as Wbus destinations.
+;
+;	4. Restart memory request.  The restart latch records the cache request
+;	   field, the data length, the destination register, and other pertinent
+;	   information.  It is updated every cycle unless memory management
+;	   microtraps are disabled.  The microtrap routines use the information
+;	   in the restart latch to restart cache requests which microtrapped.
+;	   Cross page traps may be inhibited on a restart.
+;
+;	   Trn points to the destination register for the restarted request.
+;	   For writes, WDR supplies the restart data.
+
+.TOC	"	TB Miss Microtrap"
+
+;	The TB miss microtrap is taken when the PTE entry corresponding to a
+;	virtual memory request or probe is not in the TB.  The routine fetches
+;	the PTE corresponding to the missed virtual address and loads the TB.
+;
+;	Entry conditions:
+;		VA	=	virtual address of original reference when trap occurred
+;		Trn	=	pointer to destination register
+;		WDR	=	if write, data to be written
+;		TRAP.STATUS =	VA<31:30>'probe/mreq'read/write check (frozen during microtrap)
+;
+;	Exit conditions:
+;		MMGT0, MMGT1, MMGT2, MMGT3 trashed
+;		Single Miss -
+;			TB[index]	=	if successful, contains PTE of missed virtual address
+;		Double Miss -
+;			TB[ppte.index]	=	if successful, contains SPTE of missed virtual address
+;			TB[index]	=	if successful, contains PTE of missed virtual address
+;
+;	Algorithm:
+;		System Space -
+;			calculate SPTE address
+;			check for length violation
+;			read SPTE
+;			IF write reference
+;			    THEN test and set m bit
+;				 IF not set, write to memory
+;			fill TB
+;			restart reference
+;		Process Space -
+;			calculate PPTE address
+;			check for length violation
+;			read PPTE
+;			IF successful
+;			    THEN IF write reference
+;				     THEN test and set m bit
+;					  IF not set, write to memory
+;				fill TB
+;				restart reference
+;			    ELSE
+;				calculate SPTE address
+;				check for length violation
+;				read SPTE
+;				fill TB
+;				read PPTE
+;				IF write reference
+;				    THEN test and set m bit
+;					 IF not set, write to memory
+;				fill TB
+;				restart reference
+;
+;	Notes:
+;		If an error occurs (length violation, ACV, TNV), TB[index] may be
+;		invalidated.  MMGT.STATUS is written with an error status code.
+;		Control is passed to the ACV or TNV microtrap routine if the original
+;		reference was a memory request (not a probe).
+
+.bin
+
+; 	TB miss microtrap.
+
+MM.TBM:
+	;********** Microtrap entry ************;
+	[MMGT0] <-- [VA], LONG,			; [1] put VA of miss in dual ported temp
+	SELECT [TRAP.STATUS]			; prepare to case on VA<31:30>
+
+MM.TBM.CASE:
+	;---------------------------------------;
+	[MMGT1] <-- ZEXT [MMGT0] RSH [7], LONG,	; [2] align fault addr for PTE addr calc
+	CASE AT [MM.TBM.P0]			; case on P0, P1, S0, RS space
+
+;= ALIGNLIST 0011*	(MM.TBM.P0,	MM.TBM.P1,	 MM.TBM.S0,	MM.TBM.LV)
+
+;	S1 space reference.
+;	Force length violation and exit.
+
+MM.TBM.LV:
+ 	;---------------------------------------; trap.status<3:2> = 11 (RS space):
+	[MMGT2] <-- 000000[MM.PROLENVIOL],	; [3] get error code
+	LONG,					; TB tags are ok
+	GOTO [MM.ERROR]				; jump to common error routine
+
+;	TB miss microtrap, continued.
+;	S0 space miss.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	MMGT0 rsh 7
+;		VA	=	address of original reference
+
+MM.TBM.S0:
+ 	;---------------------------------------; trap.status<3:2> = 10 (S0 space):
+	[WBUS] <-- (-[SLR] + [MMGT0]), LONG,	; [3] S0 length check, VA - SLR < 0
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+	;---------------------------------------;
+	[MMGT3] <-- [VA], LONG,			; [4] save VA
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [MM.TBM.S0.PROBE] 		; case on probe versus mreq
+
+;= ALIGNLIST 1101*	(MM.TBM.S0.PROBE,	MM.TBM.S0.MREQ)
+;  If this is a page cross from P1 to S0, then VA<31:30> could be 01
+
+;	Memory requests that trap require a RESYNC FROM TRAP to resync
+;	the I Box and E Box.  Probe references do not require a resync
+;	because the instruction stream is stable when probes are used.
+
+MM.TBM.S0.PROBE:
+ 	;---------------------------------------; trap.status<1> = 0 (probe):
+	NOP,					; [5] nothing to do...
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.S0.OK]			; case on length check from [3]
+
+MM.TBM.S0.MREQ:
+ 	;---------------------------------------; trap.status<1> = 1 (mreq):
+	VA <-- [PC],				; [5] get current PC
+	RESYNC FROM TRAP, LONG,			; flush IB, resync from trap
+						; >> no DECODE NEXT in next two cycles
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.S0.OK]			; case on length check from [3]
+
+;= ALIGNLIST 1110*	(MM.TBM.S0.OK,	MM.TBM.S0.LV)
+
+MM.TBM.S0.LV:
+ 	;---------------------------------------; wbus.c = 1 (process length violation):
+	[MMGT2] <-- 000000[MM.PROLENVIOL],	; [6] get error code
+	LONG,					; TB tags are ok
+	GOTO [MM.ERROR]				; jump to common error routine
+
+;	TB miss microtrap, continued.
+;	S0 space miss, continued.
+;	Read SPTE, break out modify mreq case for m = 0 check.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	MMGT0 rsh 7
+;		MMGT3	=	address of original reference
+
+MM.TBM.S0.OK:
+ 	;---------------------------------------; wbus.c = 0 (length ok):
+	VA <-- [SBR] + [MMGT1],			; [6] get SPTE address
+						; >> SBR, MMGT1 not written in prev cycle
+	[MMGT2] <-- MEM.SPTE (VA), BYTE,	; read SPTE, force aligned
+	CASE AT [MM.TBMPR.S0]			; case on probe/mreq, read/write check
+
+;= ALIGNLIST 1100*	(MM.TBMPR.S0,	MM.TBMPW.S0,	 MM.TBMMR.S0,	MM.TBMMW.S0)
+
+;	Break S0 flow into probe/mreq and read/write check paths.
+;	Mreq write flow must check for m bit clear.
+;	Reads and probes do not check the m bit condition.
+
+MM.TBMPR.S0:
+ 	;---------------------------------------; trap.status<1:0> = 00 (probe read):
+	[WBUS] <-- [MMGT2], LONG,		; [7] put data for TB on Wbus
+	GOTO [MM.TBMR.S0.OK]			; go write TB
+
+MM.TBMPW.S0:
+ 	;---------------------------------------; trap.status<1:0> = 01 (probe write):
+	[WBUS] <-- [MMGT2], LONG,		; [7] put data for TB on Wbus
+	GOTO [MM.TBMR.S0.OK]			; go write TB
+
+MM.TBMMR.S0:
+ 	;---------------------------------------; trap.status<1:0> = 10 (mreq read):
+	[WBUS] <-- [MMGT2], LONG,		; [7] put data for TB on Wbus
+	GOTO [MM.TBMR.S0.OK]			; go write TB
+
+MM.TBMR.S0.OK:
+	;---------------------------------------;
+	VA <-- [MMGT0],				; [8] get address of original reference
+						; >> MMGT0 not written in prev cycle
+	TB WRITE, LONG				; write address, PTE to TB
+						; >> no ADR or CRQ in next cycle
+
+	;---------------------------------------;
+	NOP,					; [9] wait one cycle for TB to be ready
+	GOTO [MM.RESTART]			; [10] restart memory request
+
+;	TB miss microtrap, continued.
+;	S0 space miss, mreq write.  Check for m = 0.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	MMGT0 rsh 7
+;		MMGT2	=	SPTE just read in
+;		MMGT3	=	address of original reference
+
+MM.TBMMW.S0:
+ 	;---------------------------------------; trap.status<1:0> = 11 (mreq write):
+	[WBUS] <-- [MMGT2] OR [PTE.M]000000,	; [7] set m bit in PTE
+	LONG					; put data for TB on Wbus
+
+ 	;---------------------------------------;
+	VA <-- B [MMGT0],			; [8] get address of original reference
+						; >> MMGT0 not written in prev cycle
+	[WBUS] <-- [MMGT2]!![MMGT0] LSH [5.],	; test m bit in PTE
+	TB WRITE, LONG				; write address, PTE to TB
+						; >> no ADR or CRQ in next cycle
+
+	;---------------------------------------;
+	[MMGT1] <-- [SBR] + [MMGT1], LONG,	; [9] calculate address of SPTE
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	VA <-- [MMGT0],				; [10] probe SPTE just read in
+						; >> MMGT0 not written in prev cycle
+	PROBE WRITE (VA), BYTE,			; for access
+	CASE AT [MM.TBMMW.S0.M.CLEAR]		; case on m = 0 check from [8]
+
+;= ALIGNLIST 01***	(MM.TBMMW.S0.M.CLEAR,	MM.TBMMW.S0.M.SET)
+;  WBUS.NZVC set by SHIFT --> V = C = 0
+
+MM.TBMMW.S0.M.SET:
+	;---------------------------------------; wbus.n = 1 (m = 1):
+	VA <-- [MMGT3],				; [11] get address from original reference
+						; >> MMGT3 not written in prev cycle
+	[Trn] <-- RESTART CACHE REQUEST,	; restart cache request
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+;	TB miss microtrap, continued.
+;	S0 space miss, mreq write, continued.
+;	If SPTE is accessible, rewrite SPTE with m bit set and restart.
+	
+;	At this point,
+;		MMGT0 = VA =	address of reference which faulted
+;		MMGT1	=	SPTE address
+;		MMGT2	=	SPTE
+;		MMGT3	=	address of original reference
+
+MM.TBMMW.S0.M.CLEAR:
+ 	;---------------------------------------; wbus.n = 0 (m = 0):
+	[MMGT2] <-- [MMGT2] OR [PTE.M]000000,	; [11] set m bit in PTE
+	LONG					;
+
+	;---------------------------------------;
+	NOP,					; [12] nothing to do...
+	SELECT [MMGT.STATUS]			;
+
+	;---------------------------------------;
+	NOP,					; [13] nothing to do...
+	CASE AT [MM.TBMMW.S0.M.CLEAR.OK]	; case on SPTE probe from [10]
+
+;= ALIGNLIST 001**	(MM.TBMMW.S0.M.CLEAR.OK,	MM.TBMMW.S0.M.CLEAR.TNV,
+;=			 MM.TBMMW.S0.M.CLEAR.ACV,	MM.TBMMW.S0.M.CLEAR.ACV.TNV)
+;  Must get TB hit on SPTE just loaded into TB --> mmgt.status<0> = 0
+
+MM.TBMMW.S0.M.CLEAR.OK:
+ 	;---------------------------------------; mmgt.status<3:2> = 00 (SPTE OK):
+	VA <-- [MMGT1],				; [14] get SPTE address
+						; >> MMGT1 not written in prev cycle
+	MEM.SPTE (VA)&, [WBUS] <-- B [MMGT2],	; write SPTE with m bit set
+	LONG,					;
+	GOTO [MM.RESTART]			; [15] go restart reference, exit trap
+
+MM.TBMMW.S0.M.CLEAR.TNV:
+ 	;---------------------------------------; mmgt.status<3:2> = 01 (TNV):
+	NOP,					; [14] nothing to do...
+	GOTO [MM.TNV]				; take fault (invalidate SPTE there)
+
+MM.TBMMW.S0.M.CLEAR.ACV:
+ 	;---------------------------------------; mmgt.status<3:2> = 10 (ACV):
+	NOP,					; [14] nothing to do...
+	GOTO [MM.ACV]				; take fault (invalidate SPTE there)
+
+MM.TBMMW.S0.M.CLEAR.ACV.TNV:
+ 	;---------------------------------------; mmgt.status<3:2> = 11 (ACV+TNV):
+	NOP,					; [14] nothing to do...
+	GOTO [MM.ACV]				; take fault (invalidate SPTE there)
+
+;	TB miss microtrap, continued.
+;	Error handling.
+
+;	At this point,
+;		MMGT0	=	faulting address if mreq
+;		MMGT2	=	parameter flags<2:0>'new mapen and status<4:0>
+;		MMGT3	=	address of original reference
+
+;	Note:	No ADR or CRQ in first cycle.
+
+MM.ERROR:
+ 	;---------------------------------------;
+	[WBUS] <-- [MMGT2] AND 000000[08],	; test for ACV in new status
+	LONG,					;
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+ 	;---------------------------------------;
+	VA <-- [MMGT0], LONG,			; restore address of faulting reference
+						; >> MMGT0 not written in prev cycle
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [MM.ERROR.PROBE]		; case on probe vs mreq
+
+;= ALIGNLIST 1101*	(MM.ERROR.PROBE,	MM.ERROR.MREQ)
+
+MM.ERROR.PROBE:
+ 	;---------------------------------------; trap.status<1> = 0 (probe):
+	VA <-- [MMGT3],				; restore VA
+						; >> MMGT3 not written in prev cycle
+	[WBUS] <-- B [MMGT2], LONG,		; get error status
+	NEW MAPEN AND STATUS,			; set new status (also set MAPEN)
+						; >> MAPEN not changed, no restriction
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap routine with status set
+
+MM.ERROR.MREQ:
+ 	;---------------------------------------; trap.status<1> = 1 (mreq):
+	[MMGT2] <-- ZEXT [MMGT2] RSH [5], LONG,	; isolate error parameter flags
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.ACV.OFFSET]			; case on ACV vs TNV
+
+;= ALIGNLIST *0***	(MM.ACV.OFFSET,		MM.TNV.OFFSET)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+;	TB miss microtrap, continued.
+;	P0 space miss.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	MMGT0 rsh 7
+;		VA	=	address of original reference
+
+MM.TBM.P0:
+ 	;---------------------------------------; trap.status<3:2> = 00 (P0 space):
+	[WBUS] <-- (-[P0LR] + [MMGT0]), LONG,	; [3] P0 length check, VA - P0LR < 0
+						; P0LR is precompensated
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+	;---------------------------------------;
+	[MMGT3] <-- [VA], LONG,			; [4] save VA
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [MM.TBM.P0.PROBE]		; case on probe vs mreq
+
+;= ALIGNLIST **01*	(MM.TBM.P0.PROBE,	MM.TBM.P0.MREQ)
+;  Page cross must be within P0, VA<31:30> = 0 --> TRAP.STATUS<3:0> = 00??
+
+;	Memory requests that trap require a RESYNC FROM TRAP to resync
+;	the I Box and E Box.  Probe references do not require a resync
+;	because the instruction stream is stable when probes are used.
+
+MM.TBM.P0.PROBE:
+ 	;---------------------------------------; trap.status<1> = 0 (probe):
+	NOP,					; [5] nothing to do...
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.P0.OK]			; case on length check from [3]
+
+MM.TBM.P0.MREQ:
+ 	;---------------------------------------; trap.status<1> = 1 (mreq):
+	VA <-- [PC],				; [5] get current PC
+	RESYNC FROM TRAP, LONG,			; flush IB, resync from trap
+						; >> no DECODE NEXT in next two cycles
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.P0.OK]			; case on length check from [3]
+
+;= ALIGNLIST 1110*	(MM.TBM.P0.OK,	MM.TBM.P0.LV)
+
+MM.TBM.P0.LV:
+ 	;---------------------------------------; wbus.c = 1 (process length violation):
+	[MMGT2] <-- 000000[MM.PROLENVIOL], LONG,; [6] get error code, TB tags are ok
+	GOTO [MM.ERROR]				; jump to common error routine
+
+MM.TBM.P0.OK:
+ 	;---------------------------------------; wbus.c = 0 (length ok):
+	VA <-- [P0BR] + [MMGT1],		; [6] get PPTE address
+						; >> P0BR, MMGT1 not written in prev cycle
+	IntWbus <-- [P0BR]!![MMGT1] LSH [16.],	; test reference addr<30> as byte sign
+	[MMGT2] <-- MEM.PPTE (VA), BYTE,	; read PPTE, force aligned
+	CASE AT [MM.TBMPR.PPTE]			; case on probe/mreq, read/write check
+
+;	TB miss microtrap, continued.
+;	P1 space miss.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	MMGT0 rsh 7
+;		VA	=	address of original reference
+
+MM.TBM.P1:
+ 	;---------------------------------------; trap.status<3:2> = 01 (P1 space):
+	[WBUS] <-- [P1LR] - [MMGT0] - 1, LONG,	; [3] P1 length check, P1LR - VA - 1 < 0
+						; P1LR is precompensated
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+	;---------------------------------------;
+	[MMGT3] <-- [VA], LONG,			; [4] save VA
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [MM.TBM.P1.PROBE]		; case on probe vs mreq
+
+;= ALIGNLIST *101*	(MM.TBM.P1.PROBE,	MM.TBM.P1.MREQ)
+;  Page cross must be within P0 or P1, VA<31> = 0 --> TRAP.STATUS<3:0> = 0???
+
+;	Memory requests that trap require a RESYNC FROM TRAP to resync
+;	the I Box and E Box.  Probe references do not require a resync
+;	because the instruction stream is stable when probes are used.
+
+MM.TBM.P1.PROBE:
+ 	;---------------------------------------; trap.status<1> = 0 (probe):
+	NOP,					; [5] nothing to do...
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.P1.OK]			; case on length check from [3]
+
+MM.TBM.P1.MREQ:
+ 	;---------------------------------------; trap.status<1> = 1 (mreq):
+	VA <-- [PC],				; [5] get current PC
+	RESYNC FROM TRAP, LONG,			; flush IB, resync from trap
+						; >> no DECODE NEXT in next two cycles
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.P1.OK]			; case on length check from [3]
+
+;= ALIGNLIST 1110*	(MM.TBM.P1.OK,	MM.TBM.P1.LV)
+
+MM.TBM.P1.LV:
+ 	;---------------------------------------; wbus.c = 1 (process length violation):
+	[MMGT2] <-- 000000[MM.PROLENVIOL], LONG,; [6] get error code, TB tags are ok
+	GOTO [MM.ERROR]				; jump to common error routine
+
+MM.TBM.P1.OK:
+ 	;---------------------------------------; wbus.c = 0 (length ok):
+	VA <-- [P1BR] + [MMGT1],		; [6] get PPTE address
+						; >> P1BR, MMGT1 not written in prev cycle
+	IntWbus <-- [P1BR]!![MMGT1] LSH [16.],	; test reference addr<30> as byte sign
+	[MMGT2] <-- MEM.PPTE (VA), BYTE,	; read PPTE, force aligned
+	CASE AT [MM.TBMPR.PPTE]			; case on probe/mreq, read/write check
+
+;	TB miss microtrap, continued.
+;	Process PTE miss, continued.
+;	Probe or read processing.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT2	=	PPTE just read in
+;		MMGT3	=	address of original reference
+;		VA	=	PPTE address
+
+;= ALIGNLIST 1100*	(MM.TBMPR.PPTE,	MM.TBMPW.PPTE,	 MM.TBMMR.PPTE,	MM.TBMMW.PPTE)
+
+;	Break Px flow into probe/mreq and read/write check paths.
+;	Mreq write flow must check for m bit clear.
+;	Reads and probes do not check the m bit condition.
+
+MM.TBMPR.PPTE:
+ 	;---------------------------------------; trap.status<1:0> = 00 (probe read):
+	[WBUS] <-- [MMGT2], LONG,		; [7] put data for TB on Wbus
+	GOTO [MM.TBMR.PPTE.OK]			; go write TB
+
+MM.TBMPW.PPTE:
+ 	;---------------------------------------; trap.status<1:0> = 01 (probe write):
+	[WBUS] <-- [MMGT2], LONG,		; [7] put data for TB on Wbus
+	GOTO [MM.TBMR.PPTE.OK]			; go write TB
+
+MM.TBMMR.PPTE:
+ 	;---------------------------------------; trap.status<1:0> = 10 (mreq read):
+	[WBUS] <-- [MMGT2], LONG,		; [7] put data for TB on Wbus
+	GOTO [MM.TBMR.PPTE.OK]			; go write TB
+
+MM.TBMR.PPTE.OK:
+	;---------------------------------------;
+	VA <-- B [MMGT0],			; [8] get address of original reference
+						; >> MMGT0 not written in prev cycle
+	[MMGT1] <-- [VA],			; save PPTE address in MMGT1
+	TB WRITE, LONG,				; write address, PTE to TB
+						; >> no ADR or CRQ in next cycle
+	SELECT [MMGT.STATUS]			; prepare to case on mem mgt status
+
+	;---------------------------------------;
+	[WBUS] <-- (-[SLR] + [MMGT1]), LONG,	; [9] S0 length check, VA - SLR < 0
+	CASE AT [MM.TBMR.PPTE.RESTART]		; case on PPTE read from [6]
+
+;= ALIGNLIST **10*	(MM.TBMR.PPTE.RESTART,	MM.TBMR.PPTE.DOUBLE)
+;  Cannot have ACV because PPTE read is done with no access check.
+;  Cannot have TNV because TNVs are eliminated by microcode in TNV
+;  	microtrap handler or by probe case breakouts.
+;  Status must be TB miss (0001) or reference okay (00x0).
+
+MM.RESTART:
+MM.TBMR.PPTE.RESTART:
+ 	;---------------------------------------; mmgt.status<0> = 0 (tb hit):
+	VA <-- [MMGT3],				; [10] get address from original reference
+						; >> MMGT3 not written in prev cycle
+	[Trn] <-- RESTART CACHE REQUEST,	; restart cache request
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+;	TB miss microtrap, continued.
+;	Process PTE miss, mreq write check.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	MMGT0 rsh 7
+;		MMGT2	=	PPTE just read in
+;		MMGT3	=	address of original reference
+;		VA	=	PPTE address
+;		Wbus.n	=	set from MMGT0<30>, testable in [8]
+
+MM.TBMMW.PPTE:
+ 	;---------------------------------------; trap.status<1:0> = 11 (mreq write):
+	[WBUS] <-- [MMGT2] OR [PTE.M]000000,	; [7] set m bit in PTE
+	LONG,					; put data for TB on Wbus
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+ 	;---------------------------------------;
+	VA <-- B [MMGT0],			; [8] get address of original reference
+						; >> MMGT0 not written in prev cycle
+	[WBUS] <-- [MMGT2]!![MMGT0] LSH [5.],	; test m bit in PTE
+	TB WRITE, LONG,				; write address, PTE to TB
+						; >> no ADR or CRQ in next cycle
+	SELECT [MMGT.STATUS],			; prepare to case on mem mgt status
+	CASE AT [MM.TBMMW.PPTE.P0]		; case on address<30> test from [6]
+
+;= ALIGNLIST 01***	(MM.TBMMW.PPTE.P0,	MM.TBMMW.PPTE.P1)
+;  WBUS.NZVC set by SHIFT --> V = C = 0
+
+MM.TBMMW.PPTE.P0:
+	;---------------------------------------; wbus.n = 0:
+	[MMGT1] <-- [P0BR] + [MMGT1], LONG,	; [9] calculate address of PPTE
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [MM.TBMMW.PPTE.OK]		; case on PPTE read from [6]
+
+MM.TBMMW.PPTE.P1:
+	;---------------------------------------; wbus.n = 1:
+	[MMGT1] <-- [P1BR] + [MMGT1], LONG,	; [9] calculate address of PPTE
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	CASE AT [MM.TBMMW.PPTE.OK]		; case on PPTE read from [6]
+
+;= ALIGNLIST **10*	(MM.TBMMW.PPTE.OK,	MM.TBMMW.PPTE.DOUBLE)
+;  Cannot have ACV because PPTE read is done with no access check.
+;  Cannot have TNV because TNVs are eliminated by microcode in TNV
+;  	microtrap handler or by probe case breakouts.
+;  Status must be TB miss (0001) or reference okay (00x0).
+
+MM.TBMMW.PPTE.OK:
+	;---------------------------------------; mmgt.status<0> = 0 (tb hit):
+	VA <-- [MMGT0],				; [10] probe PPTE just read in
+						; >> MMGT0 not written in prev cycle
+	PROBE WRITE (VA), BYTE,			; for access
+	CASE AT [MM.TBMMW.PPTE.M.CLEAR]		; case on m = 0 check from [8]
+
+;= ALIGNLIST 01***	(MM.TBMMW.PPTE.M.CLEAR,	MM.TBMMW.PPTE.M.SET)
+;  WBUS.NZVC set by SHIFT --> V = C = 0
+
+MM.TBMMW.PPTE.M.SET:
+	;---------------------------------------; wbus.n = 1 (m = 1):
+	VA <-- [MMGT3],				; [11] get address from original reference
+						; >> MMGT3 not written in prev cycle
+	[Trn] <-- RESTART CACHE REQUEST,	; restart cache request
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+;	TB miss microtrap, continued.
+;	Process space miss, mreq write, continued.
+;	If PPTE is accessible, rewrite PPTE with m bit set and restart.
+	
+;	At this point,
+;		MMGT0 = VA =	address of reference which faulted
+;		MMGT1	=	PPTE address
+;		MMGT2	=	PPTE
+;		MMGT3	=	address of original reference
+
+MM.TBMMW.PPTE.M.CLEAR:
+ 	;---------------------------------------; wbus.n = 0 (m = 0):
+	[MMGT2] <-- [MMGT2] OR [PTE.M]000000,	; [11] set m bit in PTE
+	LONG					;
+
+	;---------------------------------------;
+	NOP,					; [12] nothing to do...
+	SELECT [MMGT.STATUS]			;
+
+	;---------------------------------------;
+	NOP,					; [13] nothing to do...
+	CASE AT [MM.TBMMW.PPTE.M.CLEAR.OK]	; case on PPTE probe from [10]
+
+;= ALIGNLIST 001**	(MM.TBMMW.PPTE.M.CLEAR.OK,	MM.TBMMW.PPTE.M.CLEAR.TNV,
+;=			 MM.TBMMW.PPTE.M.CLEAR.ACV,	MM.TBMMW.PPTE.M.CLEAR.ACV.TNV)
+;  Must get TB hit on PPTE just loaded into TB --> mmgt.status<0> = 0
+
+MM.TBMMW.PPTE.M.CLEAR.OK:
+ 	;---------------------------------------; mmgt.status<3:2> = 00 (SPTE OK):
+	VA <-- [MMGT1],				; [14] get SPTE address
+						; >> MMGT1 not written in prev cycle
+	MEM.PPTE (VA)&, [WBUS] <-- B [MMGT2],	; write PPTE with m bit set
+	LONG,					;
+	GOTO [MM.RESTART]			; [15] go restart reference, exit trap
+
+MM.TBMMW.PPTE.M.CLEAR.TNV:
+ 	;---------------------------------------; mmgt.status<3:2> = 01 (TNV):
+	NOP,					; [14] nothing to do...
+	GOTO [MM.TNV]				; take fault (invalidate SPTE there)
+
+MM.TBMMW.PPTE.M.CLEAR.ACV:
+ 	;---------------------------------------; mmgt.status<3:2> = 10 (ACV):
+	NOP,					; [14] nothing to do...
+	GOTO [MM.ACV]				; take fault (invalidate SPTE there)
+
+MM.TBMMW.PPTE.M.CLEAR.ACV.TNV:
+ 	;---------------------------------------; mmgt.status<3:2> = 11 (ACV+TNV):
+	NOP,					; [14] nothing to do...
+	GOTO [MM.ACV]				; take fault (invalidate SPTE there)
+
+;	TB miss microtrap, continued.
+;	Process PTE double miss.
+
+;	At this point,
+;		MMGT0 = VA =	address of reference which faulted
+;		MMGT1	=	PPTE address
+;		MMGT3	=	address of original reference
+
+MM.TBMMW.PPTE.DOUBLE:
+ 	;---------------------------------------; mmgt.status<0> = 1 (tb miss):
+	[WBUS] <-- (-[SLR] + [MMGT1]), LONG	; [10-->"9"] S0 length check, VA - SLR < 0
+						; SLR is precompensated
+
+MM.TBMR.PPTE.DOUBLE:
+ 	;---------------------------------------; mmgt.status<0> = 1 (tb miss):
+	[MMGT2] <-- ZEXT [MMGT1] RSH [7], LONG,	; [10] align PPTE addr for SPTE addr calc
+	TB INVALIDATE,				; VA is addr of reference, invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	NOP,					; [11] nothing to do...
+	CASE AT [MM.TBM.PPTE.S0]		; case on S0 length check from [9]
+
+;= ALIGNLIST 1110*	(MM.TBM.PPTE.S0,	MM.TBM.PPTE.S0.LV)
+
+MM.TBM.PPTE.S0.LV:
+ 	;---------------------------------------; wbus.c = 1 (system length violation):
+	[MMGT2] <-- 000000[MM.SYSLENVIOL],	; [12] get error code
+	LONG,					; TB tags are ok
+	GOTO [MM.ERROR]				; jump to common error routine
+
+;	TB miss microtrap, continued.
+;	PTE double miss, continued.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	PPTE address
+;		MMGT2	=	PFN of PPTE address
+;		MMGT3	=	address of original reference
+
+MM.TBM.PPTE.S0:
+ 	;---------------------------------------; wbus.c = 0:
+	VA <-- [SBR] + [MMGT2],			; [12] SPTE addr = (VA<29:9> + SBR<29:2>)'00
+						; >> SBR, MMGT2 not written in prev cycle
+	[MMGT2] <-- MEM.SPTE (VA), BYTE		; read SPTE, force aligned
+
+	;---------------------------------------;
+	[WBUS] <-- [MMGT2], LONG		; [13] put data for TB on Wbus, test PTE.V
+
+ 	;---------------------------------------;
+	VA <-- [MMGT1],				; [14] get PPTE address
+						; >> MMGT1 not written in prev cycle
+	TB WRITE, LONG,				; write address, PTE to TB
+						; >> no ADR or CRQ in next cycle
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+ 	;---------------------------------------;
+	NOP,					; [15] wait for TB
+	SELECT [TRAP.STATUS],			; prepare to case on cache command
+	CASE AT [MM.TBM.RETRY.TNV]		; case on SPTE valid from [13]
+
+;= ALIGNLIST 01***	(MM.TBM.RETRY.TNV,	MM.TBM.RETRY.OK)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+MM.TBM.RETRY.TNV:
+ 	;---------------------------------------; wbus.n = 0 (system TNV):
+	VA <-- [MMGT1],				; [16] get PPTE address
+						; >> MMGT1 not written in prev cycle
+	[MMGT2] <-- 000000[MM.SYSTNV], LONG,	; get error code
+	TB INVALIDATE,				; invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	GOTO [MM.ERROR]				; jump to common error routine
+
+MM.TBM.RETRY.OK:
+ 	;---------------------------------------; wbus.n = 1 (spte valid):
+	VA <-- [MMGT1],				; [16] get PPTE address
+						; >> MMGT1 not written in prev cycle
+	[MMGT2] <-- MEM.PPTE (VA), BYTE,	; read PPTE, force aligned, must hit
+	CASE AT [MM.TBMPR.PPTE.TBM]		; case on probe/mreq, read/write check
+
+;	TB miss microtrap, continued.
+;	Process PTE double miss, continued.
+;	PPTE read in again, finish processing.
+
+;	At this point,
+;		MMGT0	=	address of reference which faulted
+;		MMGT1	=	PPTE address
+;		MMGT2	=	PPTE just read in
+;		MMGT3	=	address of original reference
+
+;= ALIGNLIST 1100*	(MM.TBMPR.PPTE.TBM,	MM.TBMPW.PPTE.TBM,
+;=			 MM.TBMMR.PPTE.TBM,	MM.TBMMW.PPTE.TBM)
+
+;	Break Px flow into probe/mreq and read/write check paths.
+;	Modify mreq flow must check for m bit clear.
+;	Reads and probes do not check the m bit condition.
+
+MM.TBMPR.PPTE.TBM:
+ 	;---------------------------------------; trap.status<1:0> = 00 (probe read):
+	[WBUS] <-- [MMGT2], LONG,		; [17] put data for TB on Wbus
+	GOTO [MM.TBMR.S0.OK]			; [18-20] write TB, then restart reference
+
+MM.TBMPW.PPTE.TBM:
+ 	;---------------------------------------; trap.status<1:0> = 01 (probe write):
+	[WBUS] <-- [MMGT2], LONG,		; [17] put data for TB on Wbus
+	GOTO [MM.TBMR.S0.OK]			; [18-20] write TB, then restart reference
+
+MM.TBMMR.PPTE.TBM:
+ 	;---------------------------------------; trap.status<1:0> = 10 (mreq read):
+	[WBUS] <-- [MMGT2], LONG,		; [17] put data for TB on Wbus
+	GOTO [MM.TBMR.S0.OK]			; [18-20] write TB, then restart reference
+
+;	Note that this cycle is reached one cycle later than the read or probe
+;	flows, due to an extra cycle in the original PPTE processing.
+
+MM.TBMMW.PPTE.TBM:
+ 	;---------------------------------------; trap.status<1:0> = 11 (mreq write):
+	[WBUS] <-- [MMGT2] OR [PTE.M]000000,	; [18] set m bit in PTE
+	LONG					; put data for TB on Wbus
+
+ 	;---------------------------------------;
+	VA <-- B [MMGT0],			; [19] get address of original reference
+						; >> MMGT0 not written in prev cycle
+	[WBUS] <-- [MMGT2]!![MMGT0] LSH [5.],	; test m bit in PTE
+	TB WRITE, LONG				; write addr, PTE to TB
+						; >> no ADR or CRQ in next cycle
+
+	;---------------------------------------;
+	NOP,					; [20] wait for TB to settle
+	SELECT [WBUS.NZVC],			; prepare to case on Wbus cc's
+	GOTO [MM.TBMMW.PPTE.OK]			; [21-22] go check m bit again and exit trap
+
+.nobin
+.TOC	"	ACV, TNV Microtraps"
+
+;	The ACV (TNV) microtrap is taken when the PTE entry corresponding to a virtual
+;	memory request causes a privilege violation (or is not valid (PTE<v> = 0)).
+;	The TB miss microtrap routine jumps to the appropriate routine if a system length
+;	violation or TNV occurs during virtual address translation.  The routines
+;	establish the fault type then enters the exception flows.
+;
+;	Entry conditions:
+;		VA	=	original virtual address referenced when trap occurred
+;		TRAP.STATUS =	VA<31:30>'probe/read'read/write check (frozen during microtrap)
+;
+;	Exit conditions:
+;		W1	=	SCB vector address
+;		MMGT2 	=	fault parameter
+;		VA	=	original virtual address referenced when trap occurred
+;		case into INTEXC based on STATE<5:4>
+;
+;	Algorithm:
+;		set up vector
+;		load MMGT2 with error information
+;		case into INTEXC
+
+.bin
+
+; 	ACV, TNV microtraps.
+
+MM.ACV:
+	;********** Microtrap entry ************;
+	[MMGT2] <-- 000000[00],			; [1] clear parameter bits
+	TB INVALIDATE, LONG,			; invalidate TB entry
+						; >> no ADR or CRQ next cycle
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+MM.ACV.OFFSET:
+	;---------------------------------------; wbus.z = 0:
+	[W1] <-- [SCBB] + 000000[SCB.ACV],	; [2] get SCB vector address
+	LONG,					;
+	SELECT [RS.MP.STATE.5-4],		; prepare to case on state flags
+	CASE AT [MM.ACV.TNV.READ]		; case on read check vs write check
+
+MM.TNV:
+	;********** Microtrap entry ************;
+	[MMGT2] <-- 000000[00],			; [1] clear parameter bits
+	TB INVALIDATE, LONG,			; invalidate TB entry
+						; >> no ADR or CRQ next cycle
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+MM.TNV.OFFSET:
+	;---------------------------------------; wbus.z = 1:
+	[W1] <-- [SCBB] + 000000[SCB.TNV],	; [2] get SCB vector address
+	LONG,					;
+	SELECT [RS.MP.STATE.5-4],		; prepare to case on state flags
+	CASE AT [MM.ACV.TNV.READ]		; case on read check vs write check
+
+;= ALIGNLIST 1110*	(MM.ACV.TNV.READ,	MM.ACV.TNV.WRITE)
+
+MM.ACV.TNV.READ:
+	;---------------------------------------; trap.status<0> = 0:
+	[MMGT2] <-- [MMGT2] OR 000000[MM.PARAM.READ],	; [4] read error, or in status
+	LONG,					;
+	CASE AT [IE.ACV.TNV]			; case into exception flows
+
+MM.ACV.TNV.WRITE:
+	;---------------------------------------; trap.status<0> = 1:
+	[MMGT2] <-- [MMGT2] OR 000000[MM.PARAM.WRITE],	; [4] write error, or in status
+	LONG,					;
+	CASE AT [IE.ACV.TNV]			; case into exception flows
+
+.nobin
+.TOC	"	M = 0 Microtrap"
+
+;	The M = 0 microtrap is taken when the PTE entry corresponding to a
+;	virtual memory request with modify intent has the modify bit clear.
+;	The routine invalidates the PTE corresponding to the virtual address,
+;	and cases into the TB miss microtrap flows.  The TB miss microtrap
+;	sets the M bit if applicable and loads the TB.
+;
+;	Entry conditions:
+;		VA	=	original virtual address referenced when trap occurred
+;		Trn	=	pointer to destination register
+;		WDR	=	if write, data to be written
+;		TRAP.STATUS =	VA<31:30>'probe/mreq'read/write check (frozen during microtrap)
+;
+;	Exit conditions:
+;		TB[VA] is invalidated
+;		jump into MM.TBM
+;
+;	Algorithm:
+;		invalidate single
+
+.bin
+
+;	M = 0 microtrap.
+
+MM.M.EQL.0:
+	;********** Microtrap entry ************;
+	[MMGT0] <-- [VA], LONG,			; put VA of miss in dual ported temp
+	TB INVALIDATE,				; VA is addr of reference, invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+	SELECT [TRAP.STATUS],			; prepare to case on VA<31:30>
+	GOTO [MM.TBM.CASE]			; join TB miss flows
+
+.nobin
+.TOC	"	Cross Page Microtrap"
+
+;	The Cross Page microtrap is taken when the address + effective data
+;	length of a virtual memory request will cross a virtual page boundary.
+;	The routine probes the second page of the cross page reference and restarts
+;	the reference with cross page traps suppressed only if both pages are present
+;	in the TB.
+;
+;	Entry conditions:
+;		VA	=	original virtual address referenced when trap occurred
+;		Trn	=	pointer to destination register
+;		WDR	=	if write, data to be written
+;		TRAP.STATUS =	VA<31:30>'probe/mreq'read/write check (frozen during microtrap)
+;
+;	Exit conditions:
+;		MMGT0, MMGT1, MMGT2, MMGT3 trashed
+;
+;	Algorithm:
+;		first page guaranteed to be ok
+;		probe second page
+;		if OK, restart reference with cross page traps suppressed function
+;		ELSE jump to the appropriate microtrap routine, and restart reference
+;
+;	Notes:
+;		1. Because probe, .lock, .nochk, and .phys functions must be aligned
+;		   by microcode restriction, only normal virtual reads and writes can
+;		   invoke a cross page trap.
+;
+;		2. As a consequence of chaining microtraps, care must be taken to insure
+;		   both pages are present.  Since cross page is the lowest priority
+;		   microtrap except for alignment, memory management faults for the first
+;		   page will already be resolved when control gets here.
+;
+;		   - If the second page is present, restart the reference with cross
+;		     page traps suppressed.
+;		   - If the second page is not present, jump to TB miss routine.  The
+;		     TB miss routine will restart the reference normally.  Restarting
+;		     the reference will cross page trap again.  This time both pages
+;		     are guaranteed to be present.
+;
+;		3. If a TNV exists on the second page, the cross page probe will get
+;		   a TB miss and enter the TB miss flows.  The TB miss flows will exit
+;		   without suppressing cross page traps, so the cross page trap will
+;		   happen again.  This time, the cross page probe will get a TNV.
+;
+.bin
+
+;	Cross page microtrap.
+
+MM.CPB:
+	;********** Microtrap entry ************;
+	VA <-- [VA] + 000000[16.],		; [1] form address in the next page
+	[MMGT0] <-- [VA] + 000000[16.],		; keep permanent record
+	PROBE READ (VA), BYTE			; probe across page, read access
+
+	;---------------------------------------;
+	[MMGT3] <-- [MMGT0] - 000000[16.],	; [2] recover original VA
+	PROBE WRITE (VA), BYTE,			; probe across page, write access
+	SELECT [TRAP.STATUS]			; prepare to case on cache command
+
+	;---------------------------------------;
+	VA <-- [PC],				; [3] get current PC
+						; >> no DECODE NEXT in next two cycles
+	RESYNC FROM TRAP, LONG,			; flush IB, resync from trap
+	SELECT [MMGT.STATUS],			; prepare to case on mem mgt status
+	CASE AT [MM.CPB.READ]			; case on read versus write access check
+
+;= ALIGNLIST 1110*	(MM.CPB.READ,	MM.CPB.WRITE)
+
+MM.CPB.READ:
+ 	;---------------------------------------; trap.status<0> = 0 (read):
+	[WBUS] <-- ZEXT [MMGT0] RSH [28.],	; [4] put VA<31:30> on Wbus<3:2> for casing
+	LONG,					;
+	CASE AT [MM.CPB.READ.OK]		; case on mem mgt status from [1]
+
+MM.CPB.WRITE:
+ 	;---------------------------------------; trap.status<0> = 1 (write):
+	NOP,					; [4] nothing to do...
+	SELECT [MMGT.STATUS]			; prepare to case on mem mgt status
+
+	;---------------------------------------;
+	[WBUS] <-- ZEXT [MMGT0] RSH [28.],	; [5] put VA<31:30> on Wbus<3:2> for casing
+	LONG,					;
+	CASE AT [MM.CPB.M.EQL.0]		; case on mem mgt status from [2]
+
+;	Cross page microtrap, continued.
+
+;	At this point,
+;		MMGT0	=	address of cross page reference (VA+16)
+;		MMGT3	=	address of original reference
+
+;	Note that on a cross page read, the case microaddress has bit<2> forced to 1.
+;	Thus the effect of the m bit is ignored.  On a write, bit<2> is used to
+;	distinguish m = 0 from reference ok.  This creates a phony case point of 0011
+;	for TB miss on a read.
+
+;= ALIGNLIST 0000*	(MM.CPB.M.EQL.0,	MM.CPB.TBM,
+;=			 MM.CPB.READ.OK,	MM.CPB.READ.TBM,
+;=			 MM.CPB.TNV.M.EQL.0,		,
+;=			 MM.CPB.TNV,			,
+;=			 MM.CPB.ACV.M.EQL.0,		,
+;=			 MM.CPB.ACV,			,
+;=			 MM.CPB.ACV.TNV.M.EQL.0,	,
+;=			 MM.CPB.ACV.TNV,		)
+
+MM.CPB.M.EQL.0:
+	;---------------------------------------; mmgt.status<3:0> = 0000 (m = 0, write):
+	VA <-- [MMGT0],				; [5] get reference address
+						; >> MMGT0 not written in prev cycle
+	TB INVALIDATE, LONG			; invalidate TB entry
+						; >> no ADR or CRQ in next cycle
+
+	;---------------------------------------;
+	[WBUS] <-- ZEXT [MMGT0] RSH [28.], LONG	; [6] put VA<31:30> on Wbus<3:2> for casing
+						; fall through to restore VA
+
+MM.CPB.TBM:
+	;---------------------------------------; mmgt.status<3:0> = 0001 (TB miss, write):
+	VA <-- [MMGT3], LONG,			; [5] restore VA
+						; >> MMGT3 not written in prev cycle
+	SELECT [WBUS.3-0],			; select Wbus<3:0> = fault addr<31:28>
+	GOTO [MM.TBM.CASE]			; join TB miss flows
+
+MM.CPB.READ.OK:
+ 	;---------------------------------------; mmgt.status<3:0> = 0010 (ref ok):
+	NOP					; [5] wait for PC
+
+	;---------------------------------------;
+	VA <-- [MMGT3],				; [6] restore VA
+						; >> MMGT3 not written in prev cycle
+	[Trn] <-- RESTART CACHE REQUEST ALIGNED, ; restart cache request
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+MM.CPB.READ.TBM:
+	;---------------------------------------; mmgt.status<3:0> = 0011 (TB miss, read):
+	VA <-- [MMGT3], LONG,			; [5] restore VA
+						; >> MMGT3 not written in prev cycle
+	SELECT [WBUS.3-0],			; select Wbus<3:0> = fault addr<31:28>
+	GOTO [MM.TBM.CASE]			; join TB miss flows
+
+MM.CPB.TNV.M.EQL.0:
+ 	;---------------------------------------; mmgt.status<3:0> = 0100 (TNV):
+	VA <-- [MMGT0], LONG,			; [5] set VA to faulting address
+						; >> MMGT0 not written in prev cycle
+	GOTO [MM.TNV]				; join error flows
+
+MM.CPB.TNV:
+ 	;---------------------------------------; mmgt.status<3:0> = 0110 (TNV):
+	VA <-- [MMGT0], LONG,			; [5] set VA to faulting address
+						; >> MMGT0 not written in prev cycle
+	GOTO [MM.TNV]				; join error flows
+
+MM.CPB.ACV.M.EQL.0:
+ 	;---------------------------------------; mmgt.status<3:0> = 1000 (ACV):
+	VA <-- [MMGT0], LONG,			; [5] set VA to faulting address
+						; >> MMGT0 not written in prev cycle
+	GOTO [MM.ACV]				; join error flows
+
+MM.CPB.ACV:
+ 	;---------------------------------------; mmgt.status<3:0> = 1010 (ACV):
+	VA <-- [MMGT0], LONG,			; [5] set VA to faulting address
+						; >> MMGT0 not written in prev cycle
+	GOTO [MM.ACV]				; join error flows
+
+MM.CPB.ACV.TNV.M.EQL.0:
+ 	;---------------------------------------; mmgt.status<3:0> = 1100 (ACV and TNV):
+	VA <-- [MMGT0], LONG,			; [5] set VA to faulting address
+						; >> MMGT0 not written in prev cycle
+	GOTO [MM.ACV]				; join error flows
+
+MM.CPB.ACV.TNV:
+ 	;---------------------------------------; mmgt.status<3:0> = 1110 (ACV and TNV):
+	VA <-- [MMGT0], LONG,			; [5] set VA to faulting address
+						; >> MMGT0 not written in prev cycle
+	GOTO [MM.ACV]				; join error flows
+
+.nobin
+.TOC	"	Alignment Microtrap"
+
+;	The alignment microtrap is taken when the word or longword to be read or written
+;	crosses a longword boundary.  The routine reads or writes the data item from or
+;	to the surrounding longwords.
+;
+;	Entry conditions:
+;		VA	=	virtual address of original reference when trap occurred
+;		Trn	=	pointer to destination register
+;		WDR	=	if write, data to be written
+;		ALGN.STATUS =	restart_dl<1>'fpu xfer'write/read (frozen during microtrap)'0
+;
+;	Exit conditions:
+;		MMGT0, MMGT1, MMGT2, MMGT3 trashed
+;		On a read, data item read to destination register
+;		On a write, WDR written to memory
+;
+;	Algorithm:
+;		if read
+;			read @VA+4
+;			merge and store data
+;			exit trap
+;		if write
+;			read @VA+4
+;			insert high part of data
+;			write @VA+4
+;			read @VA
+;			insert low part of data
+;			write @VA
+;			exit trap
+;
+;	Notes:
+;		1.  Because probe, .lock, .nochk, and .phys functions must be aligned
+;		    by microcode restriction, only normal virtual reads and writes can
+;		    writes can invoke an alignment trap.
+;
+;		2.  Alignment is the lowest priority microtrap.  All memory management
+;		    problems have been resolved, even if the data crosses a page boundary.
+
+.bin
+
+;	Alignment microtrap.
+
+MM.ALIGN:
+	;*********** Microtrap entry ***********;
+	[MMGT3] <-- [VA], LONG,			; [1] save VA
+	SELECT [ALGN.STATUS]			; prepare to case on alignment information
+
+	;---------------------------------------;
+	VA <-- [PC],				; [2] get current PC
+	RESYNC FROM TRAP, LONG,			; flush IB, resync from trap
+						; >> no DECODE NEXT in next two cycles
+	CASE AT [MM.ALIGN.WRITE.WORD]		; case on write vs read operation
+
+;= ALIGNLIST 01*0*	(MM.ALIGN.WRITE.WORD,	MM.ALIGN.READ.WORD,
+;=			 MM.ALIGN.WRITE.LONG,	MM.ALIGN.READ.LONG)
+;  ALGN.STATUS<1> = 0 --> ALGN.STATUS<3:0> = ??0?
+
+MM.ALIGN.READ.WORD:
+	;---------------------------------------; algn.status<3,0> = 01:
+	VA <-- [MMGT3] + 4,			; [3] point at second longword
+						; >> MMGT3 not written in prev cycle
+	[MMGT0] <-- MEM (VA), BYTE		; read second longword, force aligned
+						; data read is aaaaxx
+
+	;---------------------------------------;
+	VA <-- [MMGT3],				; [4] point at first longword
+						; >> MMGT3 not written in prev cycle
+	[Trn] <-- MEM (VA), BYTE		; read first longword, force aligned
+						; data read is yybbbb
+
+	;---------------------------------------;
+	[Trn] <-- [MMGT0], BYTE,		; [5] insert high byte in low word
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+;	Alignment microtrap, continued.
+;	Unaligned read, longword.
+
+;	At this point,
+;		MMGT3	=	address of original reference
+		
+MM.ALIGN.READ.LONG:
+	;---------------------------------------; algn.status<3,0> = 11:
+	VA <-- [MMGT3] + 4,			; [3] point at second longword
+						; >> MMGT3 not written in prev cycle
+	[MMGT0] <-- MEM (VA), BYTE,		; read second longword, force aligned
+						; data read is aaaaxx
+	SELECT [ALGN.STATUS]			; prepare to case on alignment data
+
+	;---------------------------------------;
+	VA <-- [MMGT3],				; [4] point at first longword
+						; >> MMGT3 not written in prev cycle
+	[MMGT1] <-- MEM (VA), BYTE,		; read first longword, force aligned
+						; data read is yyyybb
+	CASE AT [MM.ALIGN.READ.LONG.0]		; case on floating point function
+
+;= ALIGNLIST 10*1*	(MM.ALIGN.READ.LONG.0,	MM.ALIGN.READ.LONG.1)
+;  ALGN.STATUS<1> = 0 --> ALGN.STATUS<3:0> = ??0?
+
+MM.ALIGN.READ.LONG.0:
+	;---------------------------------------; algn.status<2> = 0:
+	[Trn] <-- [MMGT0]!![MMGT1] RSH (VA),	; [5] aaaaxx!!yyyybb --> xxyyyy
+	LONG,					; store extracted data in destination
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+MM.ALIGN.READ.LONG.1:
+	;---------------------------------------; algn.status<2> = 1:
+	[Trn] <-- [MMGT0]!![MMGT1] RSH (VA),	; [5] aaaaxx!!yyyybb --> xxyyyy
+	LONG,					; store extracted data in destination
+	XMIT FPU LW (ENABLE),			; transmit 32b to fpu
+	EXIT TRAP				; exit trap
+
+;	Alignment microtrap, continued.
+;	Unaligned write, word.
+;	Note that VA<1:0> must be 11, and that the word data was rotated
+;	left before transfer to WDR.
+
+;	At this point,
+;		WDR	=	write data (nn....mm)
+;		MMGT3	=	address of original reference
+
+MM.ALIGN.WRITE.WORD:
+	;---------------------------------------; algn.status<3,0> = 00:
+	VA <-- [MMGT3] + 4,			; [3] point at second longword
+						; >> MMGT3 not written in prev cycle
+	[MMGT0] <-- MEM.MOD (VA), BYTE		; read longword, force aligned
+						; data read is aaaaxx
+
+	;---------------------------------------;
+	[MMGT0] <-- [WDR]!![MMGT0] RSH [8.],	; [4] mm!!aaaaxx --> mmaaaa
+	LONG					;
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MMGT0] LROT [8.], ; [5] mmaaaa --> aaaamm
+	BYTE					; force aligned
+
+	;---------------------------------------;
+	VA <-- [MMGT3],				; [6] point at first longword, restore VA
+						; >> MMGT3 not written in prev cycle
+	[MMGT0] <-- MEM.MOD (VA), BYTE		; read longword, force aligned
+
+	;---------------------------------------;
+	[MMGT0] <-- [MMGT0]!![WDR] LSH [8.],	; [7] yybbbb!!nn....mm --> bbbbnn
+	LONG					;
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MMGT0] RROT [8.], ; [8] bbbbnn --> nnbbbb
+	BYTE,					; force aligned
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+;	Alignment microtrap, continued.
+;	Write unaligned, longword.
+
+;	At this point,
+;		WDR	=	write data (mmnnnn)
+;		MMGT3	=	address of original reference
+
+MM.ALIGN.WRITE.LONG:
+	;---------------------------------------; algn.status<3,0> = 10:
+	VA <-- [MMGT3] + 4,			; [3] point at second longword
+						; >> MMGT3 not written in prev cycle
+	[MMGT0] <-- MEM.MOD (VA), BYTE		; read longword, force aligned
+						; data read is aaaaxx
+
+	;---------------------------------------;
+	[MMGT0] <-- [MMGT0] RROT (VA), LONG	; [4] aaaaxx --> xxaaaa
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MMGT0]!![WDR] LSH (VA), ; [5] xxaaaa!!mmnnnn --> aaaamm
+	BYTE					; force aligned
+
+	;---------------------------------------;
+	VA <-- [MMGT3],				; [6] point at first longword, restore VA
+						; >> MMGT3 not written in prev cycle
+	[MMGT0] <-- MEM.MOD (VA), BYTE		; read longword, force aligned
+						; data read is yyyybb
+
+	;---------------------------------------;
+	[MMGT0] <-- [MMGT0] RROT (VA), LONG	; [7] yyyybb --> bbyyyy
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [WDR]!![MMGT0] LSH (VA), ; [8] mmnnnn!!bbyyyy --> nnnnbb
+	BYTE,					; force aligned
+	ENABLE TRAPS,				; re-enable memory management traps
+	EXIT TRAP				; exit trap
+
+;= END MEMMGT

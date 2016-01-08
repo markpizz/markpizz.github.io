@@ -1,0 +1,824 @@
+.TOC    "SPECIFIER.MIC -- Specifier Flows"
+.TOC    "Revision 3.3"
+
+;	Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC 	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    3 09-May-89 REC	Add a nop to the first cycle of SPEC.AV.REG..
+;			to guarantee that we get the correct value of
+;			DL for case branching.
+;    2 28-Dec-87 GMU	Added notes about DL case restriction in SPEC.AV.REG
+;			flow.
+; (3)1 21-Aug-87 RMS	Editorial changes; pass 1 code freeze.
+;
+;    3 21-May-87 GMU	Added warning about CALL on first cycle.
+;    2 29-Dec-86 RMS	Editorial changes.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+
+.bin
+;= BEGIN SPECIFIER
+
+.nobin
+
+
+;	Specifier decoding chart.
+;
+;                                                    DECODER NEXT
+;                                                         |
+;                                                         |
+;	+---------+---------+---------+---------+---------+---------+---------+---------+---------+---------+
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;     index     short      reg    reg defer  autoinc   autodec   autoinc    displ     displ     immed   absolute
+;       |        lit        |         |         |         |       defer       |       defer       |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         +---------+---------+---------+---------+---------+---------+---------+---------+---------+
+;       |                                                 |
+;       |                                                 |
+;  DECODER NEXT                                      DECODER NEXT
+;       |
+;       |
+;	+---------+---------+---------+---------+---------+---------+---------+---------+---------+---------+
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;     index     short      reg    reg defer  autoinc   autodec   autoinc    displ     displ     immed   absolute
+;       |        lit        |         |         |         |       defer       |       defer       |         |
+;	|         |         |         |         |         |         |         |         |         |         |
+;	|         |         |         |         |         |         |         |         |       fault       |
+;     fault     fault     fault       +---------+---------+---------+---------+---------+-------------------+
+;                                                         |
+;                                                         |
+;                                                    DECODER NEXT
+
+;	The specifier decode flows are entered to parse all specifiers in an
+;	instruction before the instruction is executed (there is no separation
+;	of first and subsequent specifiers ala MicroVAX and V-11).  They are
+;	entered via the DECODER NEXT micro-order from the previous macro
+;	instruction execution flow, or from the previous specifier flow.
+;
+;	There are four copies of each specifier flow, as follows:
+;
+;		AT = RMW,  Not indexed
+;		AT = AV,   Not indexed
+;		AT = RMW,  Indexed
+;		AT = AV,   Indexed
+;
+;	There are 11 major entry points into the specifier flows, one of which is used
+;	to process each specifier.  The entry points are:
+;
+;		Short literal
+;		Index
+;		Register
+;		Register deferred
+;		Auto decrement
+;		Auto increment
+;		Auto increment deferred
+;		Displacement
+;		Displacement deferred
+;		Immediate
+;		Absolute
+
+;	Entry conditions:
+;
+;	IDR:		Contains zero-extended short literal data for short literal
+;				mode,
+;			Contains immediate data for immediate mode,
+;			Contains address for absolute mode,
+;			Contains sign-extended displacement for displacement and
+;				displacement deferred modes,
+;			Is unpredictable for all other modes.
+;	Rn:		Register number of the specifier.
+;	AT:		Access type of the specifier
+;	DL:		Data length of the specifier.
+;	Sn:		MD address of slot to use for this specifier.
+;	PC:		PC after adjustment for the current specifier and extension.
+;
+;	Exit conditions:
+;	VA:		Memory address for specifiers which reference memory.
+;	Rn:		Register number of the specifier.
+;	INT.RMODE<0>:	1 if the last specifier was a register, 0 otherwise.
+;	STATE<2>	1 if the previous specifier was a .vx register specifier, 0 otherwise.
+;	DL:		Data length of the specifier.
+;	SC:		Shifted value of the logical index for an indexed specifier.
+
+
+
+;					WARNING
+;
+;	A hardware restriction prohibits the microcode from using a CALL during
+;	a cycle in which first cycle is asserted.  As the first specifier of
+;	any instruction may be processed during first cycle, no CALLs should
+;	be used in the microinstruction at a hardware dispatch entry in this
+;	module.
+
+.bin
+.TOC	"	Short Literal (Modes 0-3)"
+
+
+;	For this mode, AT=M, W, A, and V are illegal, as is an indexed short
+;	literal.  There are separate dispatch addresses for AT=A, V and for
+;	index, so the microcode explicitly generates a reserved addressing mode
+;	fault in these cases.  The I-box checks for AT=M, W and generates a
+;	microtrap in which the reserved addressing mode is forced.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		DL	=	Data length for specifier
+;		IDR	=	Short literal in bits <5:0>, 0's in bits <31:6>
+
+
+;	Short literal (modes 0-3), AT=R,M,W, Not indexed
+
+SPEC.RMW.SLIT..:
+	;********** Hardware Dispatch **********;
+	FPU&, [MD.SN] <-- B[IDR], SHORT LITERAL, ; send literal to MD and F-chip
+	DECODER NEXT IF DL.BWL OR AT.W		; exit if DL <> quad
+
+	;---------------------------------------;
+	FPU&, [MD.SN+1] <-- [K0], SHORT LITERAL, ; send zero to MD+1 and F-chip
+	DECODER NEXT				; exit
+
+
+;	Short literal (modes 0-3), AT=A,V, Not indexed
+
+SPEC.AV.SLIT..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+
+;	Short literal (modes 0-3), AT=R,M,W, Indexed
+
+SPEC.RMW.SLIT.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+
+;	Short literal (modes 0-3), AT=A,V, Indexed
+
+SPEC.AV.SLIT.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Index (Mode 4)"
+
+
+;	For this mode, the contents of the index register shifted left by the
+;	amount indicated by DL is saved in a working registers.  The saved value
+;	is then added to the base address at the end of the indexed specifier flows.
+;
+;	Because an index specifier can't be followed by another index specifier,
+;	the microcode generates a reserved addressing mode fault in this case.
+;	The I-box checks for XR=PC and generates a micro-address in which the
+;	reserved addressing mode is forced.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	Index register number
+;		DL	=	Data length for the base specifier
+
+
+;	Index (mode 4), AT=RMW, Not indexed
+
+SPEC.RMW.INDEX..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [G.RN] LSH (DL),		; convert logical to byte index
+	DECODER NEXT				; do base specifier
+
+
+;	Index (mode 4), AT=A,V, Not indexed
+
+SPEC.AV.INDEX..:
+	;********** Hardware Dispatch **********;
+	[SC] <-- [G.RN] LSH (DL),		; convert logical to byte index
+	DECODER NEXT				; do base specifier
+
+
+;	Index (mode 4), AT=R,M,W, Indexed
+
+SPEC.RMW.INDEX.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+
+;	Index (mode 4), AT=A,V, Indexed
+
+SPEC.AV.INDEX.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Register (Mode 5)"
+
+
+;	For this mode, the register data gets copied to an MD register.
+;
+;	Because it is illegal to index a register mode specifier, those cases
+;	generate a reserved addressing mode fault.  The I-box checks for AT=A
+;	and generates a microtrap in which the reserved addressing mode is
+;	forced.
+;
+;	The code for AT=A,V is more complex than it might seem in order to support
+;	the field instructions and EDIV.
+;
+;	For the field instructions, the SRM says that
+;
+;		EXTV #0, #32, r0, (r0)+
+;
+;	must extract the value from r0 BEFORE the auto-increment.  As all the
+;	specifiers are processed before the execution flow, that flow sees the
+;	auto-incremented value of r0.  To compensate, the register-mode AV specifier
+;	flow copies the values from the GPRs addressed by Rn and Rn+1 to the MDs
+;	so that the execution flow has access to the unmodified value of the GPRs.
+;
+;	EDIV has two write destinations.  In this case, we turn the
+;	next-to-last write specifier into the corresponding .vx specifier so that
+;	the potential memory address is left in the MD.  If that specifier is
+;	register-mode, we store the register number plus one (Rn+1) into MD+1
+;	so that the execution flow has access to the register number to which to
+;	store the result.
+;
+;	The register-mode AV code assumes that it is processing a field instruction
+;	and copies the GPR addressed by Rn to the MD.  It then increments Rn
+;	and does a case on DL for the specifier.  By pure chance (or clever
+;	layout of the specifiers, your choice), all field instruction have DL=B
+;	and EDIV has DL=L for .vx specifiers.  This allows the microcode
+;	to case on one bit of DL.  For field instructions, the GPR addressed
+;	by Rn+1 is copied to MD+1 and Rn is decremented.  For EDIV,
+;	Rn+1 (not Rn!!!) is copied to MD+1 and Rn is decremented.  The execution
+;	flow for EDIV takes care of compensating for the off-by-one
+;	register number.
+
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	Number of the register
+;		DL	=	Data length for specifier
+
+
+;	Register (mode 5), AT=R,M,W, Not indexed
+
+SPEC.RMW.REG..:
+	;********** Hardware Dispatch **********;
+	FPU&, [MD.SN] <-- [G.RN], LEN(DL),	; copy zero-extended GPR to MD and F-chip
+	RN <-- RN + (IF (DL.BWL OR AT.W) THEN 0 ELSE 1), ; step Rn if DL=Q and AT<>W
+	DECODER NEXT IF DL.BWL OR AT.W		; exit if DL<>Q or AT=W
+
+	;---------------------------------------;
+	FPU&, [MD.SN+1] <-- [G.RN],		; copy GPR+1 to MD+1 and F-chip
+	RN <-- RN - 1,				; compensate for increment above
+	DECODER NEXT				; exit
+
+
+;	Register (mode 5), AT=A,V, Not indexed
+;	Note: Due to a hardware restriction, the the microword at
+;	the entry point of this flow can not case on the value of
+;	DL in the first cycle of the flow.  Therefore, the microword
+;	at the entry point simply delays a cycle before continuing
+;	with the flow.
+
+SPEC.AV.REG..:
+	;********** Hardware Dispatch **********;
+	NOP,					; Delay one cycle and jump to
+	GOTO [SPEC.AV.REG.DISPATCH]		; a microword in SELFTEST.MIC
+						; >> No case on DL in first cycle of flow
+
+;= ALIGNLIST 101*	(SPEC.AV.REG.VFIELD,	SPEC.AV.REG.EDIV)
+
+SPEC.AV.REG.VFIELD:
+	;---------------------------------------; fpu.dl = x0x => dl = b (or w):
+	[MD.SN+1] <-- [G.RN], LONG,		; copy GPR+1 to MD+1 for Vfield
+	RN <-- RN - 1,				; compensate for increment above
+	DECODER NEXT				; exit
+
+SPEC.AV.REG.EDIV:
+	;---------------------------------------; fpu.dl = x1x => dl = l (or q):
+	[MD.SN+1] <-- [AT.DL.OPCODE.RN] AND 000000[0F],
+ 						; copy Rn+1 to MD+1 for use by EDIV
+	RN <-- RN - 1,				; compensate for increment above
+	DECODER NEXT				; exit
+
+;	Register (mode 5), AT=R,M,W, Indexed
+
+SPEC.RMW.REG.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+
+;	Register (mode 5), AT=A,V, Indexed
+
+SPEC.AV.REG.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Register Deferred (Mode 6)"
+
+
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write operation, depending on the access type.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	number of the register
+;		DL	=	Data length for specifier
+;		AT	=	Access type for specifier
+
+
+;	Register deferred (mode 6), AT=R,M,W, Not indexed
+
+SPEC.RMW.REG.DEF..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT ([G.RN]), LEN(DL), ; start memref and send to F-chip
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW],	; join common code if DL=Q
+		sim addr [ea] [sn]
+
+
+;	Register deferred (mode 6), AT=A,V, Not indexed
+
+SPEC.AV.REG.DEF..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [G.RN],			; copy address to MD
+	DECODER NEXT				; exit
+
+
+;	Register deferred (mode 6), AT=R,M,W, Indexed
+
+SPEC.RMW.REG.DEF.I..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT ([G.RN] + [SC]),	; add base to index, start
+	LEN(DL),				;   memref and send to F-chip
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW],	; join common code if DL=Q
+		sim addr [ea] [sn]
+
+;	Register deferred (mode 6), AT=A,V, Indexed
+
+SPEC.AV.REG.DEF.I..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [G.RN] + [SC],		; add base to index and save in MD
+	DECODER NEXT				; exit
+.TOC	"	Auto Decrement (Mode 7)"
+
+
+;	Auto decrement mode does a pre-decrement of the GPR, then joins the
+;	register deferred flow above to complete the work.
+;
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write, depending on the access type.
+;
+;	As this mode causes a change to the specified register, the change
+;	must be recorded in RLOG.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	Number of the register
+;		DL	=	Data length of operand (for auto decrement adjustment)
+;		AT	=	Access type for specifier
+
+
+;	Auto decrement (mode 7), AT=R,M,W, Not indexed
+
+SPEC.RMW.AUTO.DEC..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] - [KDL], LONG, RLOG,	; do auto-decrement and record in RLOG
+	GOTO [SPEC.RMW.REG.DEF..]		; join register deferred code
+	
+
+;	Auto decrement (mode 7), AT=A,V, Not indexed
+
+SPEC.AV.AUTO.DEC..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] - [KDL], LONG, RLOG,	; do auto-decrement and record in RLOG
+	GOTO [SPEC.AV.REG.DEF..]		; join register deferred code
+
+
+;	Auto decrement (mode 7), AT=R,M,W, Indexed
+
+SPEC.RMW.AUTO.DEC.I..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] - [KDL], LONG, RLOG,	; do auto-decrement and record in RLOG
+	GOTO [SPEC.RMW.REG.DEF.I..]		; join register deferred code
+
+
+;	Auto decrement (mode 7), AT=A,V, Indexed
+
+SPEC.AV.AUTO.DEC.I..:
+	;********** Hardware Dispatch **********;
+	[G.RN] <-- [G.RN] - [KDL], LONG, RLOG,	; do auto-decrement and record in RLOG
+	GOTO [SPEC.AV.REG.DEF.I..]		; join register deferred code
+.TOC	"	Auto Increment (Mode 8)"
+
+
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write, depending on the access type.
+;
+;	As this mode causes a change to the specified register, the change
+;	must be recorded in RLOG.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	Number of the register
+;		DL	=	Data length of operand (for auto decrement adjustment)
+;		AT	=	Access type of operand
+
+
+;	Auto increment (mode 8), AT=R,M,W, Not indexed
+
+SPEC.RMW.AUTO.INC..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT ([G.RN]), LEN(DL), ; start memref and send to F-chip
+		sim addr [ea] [sn]
+
+;	Here from the auto-increment indexed flow to do the increment.
+
+SPEC.RMW.AUTO.INC.1:
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [KDL], LONG, RLOG,	; do auto-increment and record in RLOG
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW]		; join common code if DL=Q
+
+
+;	Auto increment (mode 8), AT=A,V, Not indexed
+
+SPEC.AV.AUTO.INC..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [G.RN]			; copy address to MD
+
+;	Here from the auto-increment indexed flow to do the increment.
+
+SPEC.AV.AUTO.INC.1:
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [KDL], LONG, RLOG,	; do auto-increment and record in RLOG
+	DECODER NEXT				; exit
+
+;	Auto increment (mode 8), AT=R,M,W, Indexed
+
+SPEC.RMW.AUTO.INC.I..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT ([G.RN] + [SC]),	; compute base+index, start memref
+	LEN(DL),				;   and send to F-chip
+	GOTO [SPEC.RMW.AUTO.INC.1],		; join common exit code
+		sim addr [ea] [sn]
+	
+
+;	Auto increment (mode 8), AT=A,V, Indexed
+
+SPEC.AV.AUTO.INC.I..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [G.RN] + [SC],		; compute base+index and store in MD
+	GOTO [SPEC.AV.AUTO.INC.1]		; join common exit code
+.TOC	"	Immediate (Mode 8 with Rn=PC)"
+
+
+;	As Rn=PC, the I-box has already read the immediate data from the I
+;	stream.  Note that for AT=A, V, the correct result is the address of the
+;	bytes (which is PC backed up by the data length).
+;
+;	Note that the I-box only supplies the first longword of data for quadword
+;	operands.  The second longword must be explicitly referenced by the
+;	microcode.
+;
+;	As AT=M, W is unpredictable for this mode, we can use an unconditional
+;	read in the RMW flow to get the second longword of a quad operand.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		IDR	=	Immediate data supplied by the I-box
+;		PC	=	Current value of PC after update to reflect immediate
+;				  data.
+;		DL	=	Data length of operand (for address calculation in AT=A).
+
+
+;	Immediate (mode 8 with RN=PC), AT=R,M,W, Not indexed
+
+SPEC.RMW.IMM..:
+	;********** Hardware Dispatch **********;
+	FPU&, [MD.SN] <-- B[IDR], LEN(DL),	; zero-extend data and send to F-chip
+	DECODER NEXT IF DL.BWL OR AT.W		; exit if DL<>Q or AT=W
+
+;	Here if DL=Q.  PC was incremented by 8 to step past the quad immediate.
+;	The address of the second longword of the quadword must be explicitly read
+;	by the E-box, and is at (PC-8)+4 = PC-4.
+;
+;	The memory reference below intentionally does not use an AT-dependent command
+;	because that would result in an implicit F-chip operand transfer.  The F-chip
+;	only looks at operand alignment for the first transfer of an operand, which
+;	was the explicit aligned transfer above.  Therefore, an AT-dependent command,
+;	which is likely to be unaligned, would cause the F-chip to get the wrong data
+;	for the second longword of the quadword.  To solve this problem, we do the
+;	memory read into MD.TMP, and then copy the data to the appropriate MD, along
+;	with sending it to the F-chip with an explicit, aligned transfer.  This
+;	costs 1 microword and 2 cycles for all quad immediates.
+
+	;---------------------------------------;
+	[MD.TMP] <-- MEM ([PC] - 4), LONG,	; compute address of 2nd LW, start memref
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [pc] [0]
+
+	;---------------------------------------;
+	FPU&, [MD.SN+1] <-- [MD.TMP],		; copy data to correct MD and send to F-chip
+	DECODER NEXT				; exit
+
+;	Immediate (mode 8 with RN=PC), AT=A,V, Not indexed
+
+SPEC.AV.IMM..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [PC] - [KDL],		; address of data is PC-DL
+	DECODER NEXT				; exit
+
+
+;	Immediate (mode 8 with RN=PC), AT=R,M,W, Indexed
+
+SPEC.RMW.IMM.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+
+
+;	Immediate (mode 8 with RN=PC), AT=A,V, Indexed
+
+SPEC.AV.IMM.I..:
+	;********** Hardware Dispatch **********;
+	RESERVED ADDRESSING MODE		; illegal
+.TOC	"	Auto Increment Deferred (Mode 9)"
+
+
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write, depending on the access type.
+;
+;	Since this mode causes a change to the specified register, the change
+;	must be recorded in RLOG.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	Number of the register
+;		DL	=	Data length of operand (for auto decrement adjustment)
+;		AT	=	Access type of operand
+
+
+;	Auto increment deferred (mode 9), AT=R,M,W, Not indexed
+
+SPEC.RMW.AI.DEF..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- MEM ([G.RN]), LONG,	; start read for address
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [ia] [sn]
+
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [K4], LONG, RLOG,	; do auto-increment and record in RLOG
+	GOTO [SPEC.RMW.DISPL.DEF.1]		; join displacement deferred code
+
+
+;	Auto increment deferred (mode 9), AT=A,V, Not indexed
+
+SPEC.AV.AI.DEF..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- MEM ([G.RN]), LONG,		; start read for address
+		sim addr [ia] [sn]
+
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [K4], LONG, RLOG,	; do auto-increment and record in RLOG
+	DECODER NEXT				; exit
+
+;	Auto increment deferred (mode 9), AT=R,M,W, Indexed
+
+SPEC.RMW.AI.DEF.I..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- MEM ([G.RN]), LONG,	; start read for address
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [ia] [sn]
+
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [K4], LONG, RLOG,	; do auto-increment and record in RLOG
+	GOTO [SPEC.RMW.DISPL.DEF.I.1]		; join displacement deferred code
+
+
+;	Auto increment deferred (mode 9), AT=A,V, Indexed
+
+SPEC.AV.AI.DEF.I..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- MEM ([G.RN]), LONG,	; start read for address
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [ia] [sn]
+
+	;---------------------------------------;
+	[G.RN] <-- [G.RN] + [K4], LONG, RLOG,	; do auto-increment and record in RLOG
+	GOTO [SPEC.AV.DISPL.DEF.I.1]		; join displacement deferred code
+.TOC	"	Absolute (Mode 9 with Rn=PC)"
+
+
+;	Since Rn=PC, the I-box has already read the datum address from the I
+;	stream.
+;
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write, depending on the access type.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		IDR	=	Immediate data supplied by the I-box
+;		DL	=	Data length for specifier
+;		AT	=	Access type of specifier
+;		PC	=	Address of address of operand
+
+
+;	Absolute (mode 9 with Rn=PC), AT=R,M,W, Not indexed
+
+SPEC.RMW.ABS..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT (B[IDR]), LEN(DL),; get address from I-box, start memref,
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW],	; join common code if DL=Q
+		sim addr [ea] [sn]
+
+
+;	Absolute (mode 9 with Rn=PC), AT=A,V, Not indexed
+
+SPEC.AV.ABS..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- B[IDR],			; store address of datum in MD
+	DECODER NEXT				; exit
+
+
+;	Absolute (mode 9 with Rn=PC), AT=R,M,W, Indexed
+
+SPEC.RMW.ABS.I..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT ([SC] + [IDR]),	; compute base+index, start memref,
+	LEN(DL),				;   and send to the F-chip
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW],	; join common code for DL=Q
+		sim addr [ea] [sn]
+
+
+;	Absolute (mode 9 with Rn=PC), AT=A,V, Indexed
+
+SPEC.AV.ABS.I..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [SC] + [IDR],		; compute base+index and store in MD
+	DECODER NEXT				; exit
+.TOC	"	Displacement (Modes 10, 12, 14)"
+
+
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write operation, depending on the access type.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	number of the register
+;		IDR	=	sign-extended displacment
+;		DL	=	Data length of specifier
+;		AT	=	Access type of specifier
+
+
+;	Displacement (modes 10, 12, 14), AT=R,M,W, Not indexed
+
+SPEC.RMW.DISPL..:
+	;********** Hardware Dispatch **********;
+	FPU&[MD.SN] <-- MEM.AT ([G.RN] + [IDR]), ; compute address, start memref,
+	LEN(DL),				;   and send to F-chip
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+		sim addr [ea] [sn]
+
+;	Here from many other flows to reference the second longword of a quadword
+;	operand.  VAP contains the address of the second longword.
+
+SPEC.RMW.DISPL.SECOND.LW:
+	;---------------------------------------;
+	FPU&[MD.SN+1] <-- MEM.AT (VAP), LONG,	; advance to 2nd LW, start memref,
+	DECODER NEXT				;   and send to F-chip
+
+
+;	Displacement (modes 10, 12, 14), AT=A,V, Not indexed
+
+SPEC.AV.DISPL..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- [G.RN] + [IDR],		; compute address and store in MD
+	DECODER NEXT				; exit
+
+
+;	Displacement (modes 10, 12, 14), AT=R,M,W, Indexed
+
+SPEC.RMW.DISPL.I..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- [G.RN] + [IDR],		; compute address and save in temp
+	GOTO [SPEC.RMW.DISPL.DEF.I.1]		; exit through common code
+
+
+;	Displacement (modes 10, 12, 14), AT=A,V, Indexed
+
+SPEC.AV.DISPL.I..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- [G.RN] + [IDR],		; compute address and save in temp
+	GOTO [SPEC.AV.DISPL.DEF.I.1]		; exit through common code
+.TOC	"	Displacement Deferred (Modes 11, 13, 15)"
+
+
+;	For AT=R, M, and W, the memory request issued is either a read, modify, or
+;	write, depending on the access type.
+;
+;	The auto-increment deferred flows also merge in here after the register
+;	update to complete processing of the specifier.
+;
+;	At this point,
+;		SN	=	MD address to use for this specifier
+;		Rn	=	Number of the register
+;		IDR	=	Sign-extended displacement
+;		DL	=	Data length of specifier
+;		AT	=	Access type of specifier
+
+
+;	Displacement deferred (modes 11, 13, 15), AT=R,M,W, Not indexed
+
+SPEC.RMW.DISPL.DEF..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- MEM ([G.RN] + [IDR]), LONG, ; compute address and start memref
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [ia] [sn]
+
+;	Here from the auto-increment deferred flow after the increment to
+;	complete the reference.  MD.TMP contains the deferred address.
+
+SPEC.RMW.DISPL.DEF.1:
+	;---------------------------------------;
+	FPU&[MD.SN] <-- MEM.AT ([MD.TMP]),	; using deferred address, start memref
+	LEN(DL),				;   and send to F-chip
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW],	; exit through common code
+		sim addr [ea] [sn]
+
+
+;	Displacement deferred (modes 11, 13, 15), AT=A,V, Not indexed
+
+SPEC.AV.DISPL.DEF..:
+	;********** Hardware Dispatch **********;
+	[MD.SN] <-- MEM ([G.RN] + [IDR]), LONG,	; compute address and start memref
+	DECODER NEXT,				; exit
+		sim addr [ia] [sn]
+
+;	Displacement deferred (modes 11, 13, 15), AT=R,M,W, Indexed
+
+SPEC.RMW.DISPL.DEF.I..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- MEM ([G.RN] + [IDR]), LONG, ; compute address and start read
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [ia] [sn]
+
+;	Here from the auto-increment deferred and the displacement flows to
+;	complete the reference.  MD.TMP contains the address.
+
+SPEC.RMW.DISPL.DEF.I.1:
+	;---------------------------------------;
+	FPU&[MD.SN] <-- MEM.AT ([SC] + [MD.TMP]), ; compute deferred address+index,
+	LEN(DL),				;   start memref, and send to F-chip
+	DECODER NEXT IF DL.BWL OR AT.W,		; exit if DL<>Q or AT=W
+	GOTO [SPEC.RMW.DISPL.SECOND.LW],	; exit through common code if DL=Q
+		sim addr [ea] [sn]
+
+
+;	Displacement deferred (modes 11, 13, 15), AT=A,V, Indexed
+
+SPEC.AV.DISPL.DEF.I..:
+	;********** Hardware Dispatch **********;
+	[MD.TMP] <-- MEM ([G.RN] + [IDR]), LONG, ; compute address and start memref
+ 						; >> MD.TMP usable because MM trap
+ 						; >> restart will re-clear MD valid bit
+		sim addr [ia] [sn]
+
+;	Here from the auto-increment deferred and the displacement flows to
+;	complete the reference.  MD.TMP contains the address.
+
+SPEC.AV.DISPL.DEF.I.1:
+	;---------------------------------------;
+	[MD.SN] <-- [SC] + [MD.TMP],		; compute base+index and store in MD
+	DECODER NEXT				; exit
+
+
+;= END SPECIFIER

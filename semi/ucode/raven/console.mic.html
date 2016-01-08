@@ -1,0 +1,128 @@
+.TOC	"CONSOLE.MIC -- Console Interface"
+.TOC    "Revision 2.3"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989, 1990 BY			    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC 	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    3 19-Feb-90 RMS	Revised for MAPEN write restriction.
+;    2 15-Feb-90 RMS	Documented PSL write restriction.
+;    1 14-Feb-90 RMS	Added IPL write synchronization.
+; (2)0 16-Nov-89 RMS	Revised for simplified decoder.
+;    2 05-Jul-89 RMS	Moved state flag clear out of harms way.
+;    1 22-Jun-89 RMS	Revised CONSOLE HALT macro for initialization.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    2 02-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 14-Oct-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN CONSOLE
+.nobin
+.TOC	"	Console Entry"
+
+;	This entry point passes control to the macrocode console after an
+;	error or console halt.  It does the following:
+;
+;		1.  Saves PC in SAVEPC
+;		2.  Saves PSL in SAVEPSL<31:16,7:0>
+;		3.  Saves MAPEN in SAVEPSL<15>
+;		4.  Saves the halt code in SAVEPSL<14:8>
+;		5.  If on interrupt stack, saves SP in ISP
+;		6.  Sets PSL	= 041F0000
+;		7.  Sets PC	= console start address
+;		8.  Sets MAPEN	= 0
+;		9.  Clears all internal funny flags
+;		10. Decodes next instruction.
+
+.bin
+
+;	Console entry point.
+
+;	At this point,
+;		W6<14:8> =	console halt code (via CONSOLE HALT macro)
+;
+;	The CONSOLE HALT macro flushed the write buffers and set NORETRY.
+
+;	Two cycles elapse between setting PSL<tp,nzvc> and testing this state:
+;		1. Console halt macro
+;		2. First instruction of console halt routine
+
+CONSOLE.HALT:
+	;---------------------------------------;
+	VA <-- [PA.ABSIO.3]000000,		; [1] get address of absolute I/O space
+	[SAVEPC] <-- [PC], LONG,		; save PC
+	STATE.5-4 <-- 0,			; clear exception flags
+	CALL [SELECT.ASSEMBLE.PSL]		; [2-5] wait, then assemble PSL in W5
+
+	;---------------------------------------;
+	[SAVEPSL] <-- [W5] OR [W6], LONG,	; [6] merge PSL with halt code
+	SELECT [RS.MP.STATE.5-4]		; prepare to case on MAPEN
+
+	;---------------------------------------;
+	MEM.PHYS (VA)&, [WDR] <-- 00[PSL.IPL.1F]0000, ; [7] PSL<ipl> = 1F, update hardware IPL
+	LONG,					; >> IPL write, sync needed before DECODE NEXT
+	NEW PSW,				; clear PSW
+						; >> no DECODE NEXT in next two cycles
+	CASE AT [CONSOLE.HALT.MAPEN.OFF]	; case on MAPEN
+
+;= ALIGNLIST 10***	(CONSOLE.HALT.MAPEN.OFF,	CONSOLE.HALT.MAPEN.ON)
+;  STATE<5:4> = 00
+
+CONSOLE.HALT.MAPEN.ON:
+	;---------------------------------------; mapen = 1:
+	[SAVEPSL] <-- [SAVEPSL] OR 0000[80]00,	; [7a] set MAPEN bit in saved PSL
+	LONG					;
+
+CONSOLE.HALT.MAPEN.OFF:
+	;---------------------------------------; mapen = 0:
+	[WBUS] <-- [PSL] AND [PSL.IS]000000,	; [8] test PSL<is>
+	LONG,					;
+	NEW MAPEN AND STATUS			; turn off memory management
+						; >> no TB operation in next cycle
+
+	;---------------------------------------;
+	MEM.PHYS (VA)&, [PSL] <-- [WDR] OR [PSL.IS]000000, ; [9] new PSL = 041F0000, write again
+	LONG,					; >> IPL sync, no DECODE NEXT in next two cycles
+	NEW PSL,				; update hardware PSL
+						; >> no DECODE NEXT in next two cycles
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	VA <-- [VA] + 00[PA.CONS.2]0000, LONG,	; [10] new PC = console start address
+	ENABLE TRAPS,				; re-enable microtraps
+	CASE AT [CONSOLE.HALT.IS]		; case on PSL<is> test from [8]
+
+;= ALIGNLIST *0***	(CONSOLE.HALT.IS,	JMP)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+CONSOLE.HALT.IS:
+	;---------------------------------------; wbus.z = 0:
+	[IS] <-- [SP], LONG,			; [10a] save stack ptr in ISP
+	GOTO [JMP]				; go load new PC, decode next
+
+;= END CONSOLE

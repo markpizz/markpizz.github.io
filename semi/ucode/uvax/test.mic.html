@@ -1,0 +1,174 @@
+.TOC	"TEST.MIC -- Test Mode Microinstructions"
+.TOC	"Revision 4.0"
+
+;	Taan Lee, Steve Morris, Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 04	6-Sep-84	[RMS]	Removed four words for pass 3
+;	14-May-84	[RMS]	Redefined test hooks
+;	7-May-84	[RMS]	Removed eight words
+; 03	12-Apr-84	[RMS]	Editorial changes for pass 2
+; 02	26-Jan-84	[SJM]	Added microcode for pass 1 debug
+;	3-Jan-84	[RMS]	Moved microcode to less critical locations
+; 01	23-Nov-83	[TL]	Initial edit
+
+.bin
+;= REGION 620 63F
+;= BEGIN TEST
+
+;	The following microwords are used to test the internal logic
+;	of the MicroVAX CPU chip.  When the test pin is asserted, a
+;	test microaddress can be forced on the eleven test address
+;	pins.  The associated microword is executed two cycles later.
+
+;= AT 620
+
+TEST.START:
+	;---------------------------------------;
+	ALL.ZERO				; zero word to prime ctrl store reducer
+
+;= AT 621
+
+	;---------------------------------------;
+	G(RN)<--W[0], SET.ALUCC, LEN(DL),	; copy W0 to G(RN), len(dl)
+	RN<--RN+1				; increment register pointer
+
+;= AT 622
+
+	;---------------------------------------;
+	W[0]<--KKKK[0FF]			; all ones pattern for reg file test
+
+;= AT 623
+
+	;---------------------------------------;
+	W[0]<--KKKK[0AA]			; 1010 pattern for reg file test
+
+;= AT 624
+
+	;---------------------------------------;
+	W[0]<--KKKK[055]			; 0101 pattern for reg file test
+
+;= AT 625
+
+	;---------------------------------------;
+	W[0]<--K[0], LOAD.V&PC			; 0000 pattern for reg file test
+						; also clears PC, VIBA
+
+;= AT 626
+
+	;---------------------------------------;
+	W[0]<--W[0]+K[4]			; add four to W0
+
+;= AT 627
+
+	;---------------------------------------;
+	ENABLE.REDUCERS				; enable test reducers
+
+;= AT 628
+
+	;---------------------------------------;
+	ENABLE.CS.READOUT			; enable control store readout
+
+;	These test microinstructions are intended for use only in chip debug.
+
+;= AT 629
+
+	;---------------------------------------;
+	G(RN)<--FPU.DATA, RN<--RN+1		; load the G[rn]'s
+
+;	;---------------------------------------;
+;	FPU.DATA<--G(RN), RN<--RN+1		; unload the G(rn)'s (exists)
+
+;	;---------------------------------------;
+;	W[0]<--FPU.DATA				; load the W regs (exists)
+
+;	;---------------------------------------;
+;	W[1]<--FPU.DATA				; load the W regs (exists)
+
+;= AT 62A
+
+	;---------------------------------------;
+	W[2]<--FPU.DATA				; load the W regs
+
+;= AT 62B
+
+	;---------------------------------------;
+	W[3]<--FPU.DATA				; load the W regs
+
+;= AT 62C
+
+	;---------------------------------------;
+	W[4]<--FPU.DATA				; load the W regs
+
+;= AT 62D
+
+	;---------------------------------------;
+	W[5]<--FPU.DATA				; load the W regs
+
+;= AT 62E
+
+	;---------------------------------------;
+	W[6]<--FPU.DATA				; load the W regs
+
+;= AT 62F
+
+	;---------------------------------------;
+	W[7]<--FPU.DATA				; load the W regs
+
+;	;---------------------------------------;
+;	FPU.DATA<--W[0]				; unload the W regs (exists)
+
+;	;---------------------------------------;
+;	FPU.DATA<--W[1]				; unload the W regs (exists)
+
+;	;---------------------------------------;
+;	FPU.DATA<--W[2]				; unload the W regs (exists)
+
+;= AT 630
+
+	;---------------------------------------;
+	FPU.DATA<--W[3]				; unload the W regs
+
+;= AT 631
+
+	;---------------------------------------;
+	FPU.DATA<--W[4]				; unload the W regs
+
+;= AT 632
+
+	;---------------------------------------;
+	FPU.DATA<--W[5]				; unload the W regs
+
+;= AT 633
+
+	;---------------------------------------;
+	FPU.DATA<--W[6]				; unload the W regs
+
+;	;---------------------------------------;
+;	FPU.DATA<--W[7]				; unload the W regs (exists)
+
+;= END TEST

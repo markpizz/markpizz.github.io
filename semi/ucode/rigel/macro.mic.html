@@ -1,0 +1,451 @@
+.TOC	"MACRO.MIC -- Macro Definitions"
+.TOC	"Revision 3.5"
+
+;	Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989, 1990 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+;    5 23-Jan-90 JPE	Explictly set length to longword in Macros LOAD VIBA AND PC, RESTORE IBOX AND LOAD VIBA, and
+;				CONDITIONALLY LOAD VIBA AND PC	
+;    4 28-Feb-89 GMU	Removed conditional assembly for PCB macros now that both
+;			Rigel and Mariah are back to physical PCBs.
+;    3 23-Feb-88 RMS 	Revised SCB macros to do physical references per VAXB ECO.
+;    2 10-Dec-87 RMS	Added conditional macros for Mariah.
+; (3)1 24-Aug-87 GMU	Removed unused macros; pass 1 code freeze.
+;
+;    9 27-Jul-87 GMU	Added new MFPR macro.
+;    8 11-Mar-87 GMU	Added macros to set and clear odd parity flop.
+;    7 15-Jan-87 GMU	Added macros to set and clear F-chip present
+;			and vector unit present latch.
+;    6 05-Jan-87 RMS	Added macro for new string algorithms.
+;    5 29-Dec-86 GMU	Editorial changes.
+;    4 16-Dec-86 GMU	Added PM hooks for new string instructions.
+;    3 17-Oct-86 GMU	Renamed all SIM R4 macros to SIM R0.
+;    2 22-Sep-86 GMU	Added TB INVALIDATE PROCESS.
+; (2)1 12-Sep-86 GMU	Initial production microcode.
+.TOC	"	BASIC Format Macros"
+
+                                                                                                                 
+;	BASIC macros always have the A as the first operand, followed by the B field.
+
+[] <-- [] + []			"BASIC/FORMAT,BASIC.ALU/A.PLUS.B,W/@1,A/@2,B/@3"
+[] <-- [] + [] + 1		"BASIC/FORMAT,BASIC.ALU/A.PLUS.B.PLUS.1,W/@1,A/@2,B/@3"
+[] <-- [] + [] + PSL(C)		"BASIC/FORMAT,BASIC.ALU/A.PLUS.B.PLUS.PSL.C,W/@1,A/@2,B/@3"
+[] <-- [] - []			"BASIC/FORMAT,BASIC.ALU/A.MINUS.B,W/@1,A/@2,B/@3"
+[] <-- [] - [] - PSL(C)		"BASIC/FORMAT,BASIC.ALU/A.MINUS.B.PLUS.NOT.PSL.C,W/@1,A/@2,B/@3"
+[] <-- [] AND []		"BASIC/FORMAT,BASIC.ALU/A.AND.B,W/@1,A/@2,B/@3"
+[] <-- [] ANDNOT []		"BASIC/FORMAT,BASIC.ALU/A.AND.NOT.B,W/@1,A/@2,B/@3"
+[] <-- [] OR []			"BASIC/FORMAT,BASIC.ALU/A.OR.B,W/@1,A/@2,B/@3"
+[] <-- [] XOR []		"BASIC/FORMAT,BASIC.ALU/A.XOR.B,W/@1,A/@2,B/@3"
+[] <-- (-[] + [])		"BASIC/FORMAT,BASIC.ALU/B.MINUS.A,W/@1,A/@2,B/@3"
+[] <-- ([] - [] - 1)		"BASIC/FORMAT,BASIC.ALU/A.MINUS.B.MINUS.1,W/@1,A/@2,B/@3"
+[] <-- [] SMUL []		"BASIC/FORMAT,BASIC.ALU/SMUL.STEP,W/@1,A/@2,B/@3"
+[] <-- [] UDIV []		"BASIC/FORMAT,BASIC.ALU/UDIV.STEP,W/@1,A/@2,B/@3"
+
+[] <-- []			"BASIC/FORMAT,BASIC.ALU/PASS.A,W/@1,A/@2"
+[] <-- B[]			"BASIC/FORMAT,BASIC.ALU/PASS.B,W/@1,B/@2"
+[] <-- -[]			"BASIC/FORMAT,BASIC.ALU/NEG.B,W/@1,B/@2"
+[] <-- NOT []			"BASIC/FORMAT,BASIC.ALU/NOT.B,W/@1,B/@2"
+[] <-- [] + 1			"BASIC/FORMAT,BASIC.ALU/A.PLUS.1,W/@1,A/@2"
+[] <-- [] - 1			"BASIC/FORMAT,BASIC.ALU/A.MINUS.1,W/@1,A/@2"
+[] <-- [] + 4			"BASIC/FORMAT,BASIC.ALU/A.PLUS.B,W/@1,A/@2,B/K4"
+[] <-- [] - 4			"BASIC/FORMAT,BASIC.ALU/A.MINUS.B,W/@1,A/@2,B/K4"
+
+NOP				"[WBUS] <-- [K0]"
+SET PSL(V)			"[WBUS] <-- [K1],PSL(V) <-- NOT WBUS(Z),LONG"
+CLEAR PSL(V)			"[WBUS] <-- [K0],PSL(V) <-- NOT WBUS(Z),LONG"
+.TOC	"	BASIC Format Memory Reference Macros"
+
+
+[] <-- MEM (VAP)		"BASIC/FORMAT,W/@1,BASIC.MRQ/READ.V.NEXT"
+[] <-- MEM.PHYS (VAP)		"BASIC/FORMAT,W/@1,BASIC.MRQ/READ.P.NEXT"
+FPU&[] <-- MEM.AT (VAP)		"BASIC/FORMAT,W/@1,BASIC.MRQ/AT.CMD.V.NEXT"
+
+[] <-- MEM.INTVEC ([])		"[@1] <-- [@2],BASIC.MRQ/READ.INT.VECTOR"
+[] <-- MEM.INTVEC ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.INT.VECTOR"
+
+[] <-- MEM.PPTE ([])		"[@1] <-- [@2],BASIC.MRQ/READ.V.NOCHK"    
+[] <-- MEM.PPTE ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.V.NOCHK"
+
+[] <-- MEM.SCB ([])		"[@1] <-- [@2],BASIC.MRQ/READ.P.NOCHK"
+[] <-- MEM.SCB ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.P.NOCHK"
+
+[] <-- MEM.SPTE ([])		"[@1] <-- [@2],BASIC.MRQ/READ.P.NOCHK"
+[] <-- MEM.SPTE ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.P.NOCHK"
+
+[] <-- MEM.PHYS ([])		"[@1] <-- [@2],BASIC.MRQ/READ.P.NOCHK"
+[] <-- MEM.PHYS ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.P.NOCHK"
+
+FPU&[] <-- MEM.AT ([])		"[@1] <-- [@2],BASIC.MRQ/AT.CMD.V.ATCHK.CUR"
+FPU&[] <-- MEM.AT (B[])		"[@1] <-- B[@2],BASIC.MRQ/AT.CMD.V.ATCHK.CUR"
+FPU&[] <-- MEM.AT ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/AT.CMD.V.ATCHK.CUR"
+FPU&[] <-- MEM.AT ([] + 4)	"[@1] <-- [@2] + 4,BASIC.MRQ/AT.CMD.V.ATCHK.CUR"
+FPU&[] <-- MEM.AT ([] - 4)	"[@1] <-- [@2] - 4,BASIC.MRQ/AT.CMD.V.ATCHK.CUR"
+
+[] <-- MEM ([])			"[@1] <-- [@2],BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM (B[])		"[@1] <-- B[@2],BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM ([] + 4)		"[@1] <-- [@2] + 4,BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM ([] + [])		"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM ([] - 4)		"[@1] <-- [@2] - 4,BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM ([] - [])		"[@1] <-- [@2] - [@3],BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM (-[] + [])		"[@1] <-- (-[@2] + [@3]),BASIC.MRQ/READ.V.RCHK.CUR"
+[] <-- MEM ([] - [] - 1)	"[@1] <-- ([@2] - [@3] - 1),BASIC.MRQ/READ.V.RCHK.CUR"
+
+[] <-- MEM.LOCK ([])		"[@1] <-- [@2],BASIC.MRQ/READ.LOCK.V.MCHK.CUR"
+[] <-- MEM.LOCK ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.LOCK.V.MCHK.CUR"
+[] <-- MEM.LOCK ([] ANDNOT [])	"[@1] <-- [@2] ANDNOT [@3],BASIC.MRQ/READ.LOCK.V.MCHK.CUR"
+
+[] <-- MEM.WCHECK ([] + [])	"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.V.MCHK.CUR"
+[] <-- MEM.WCHECK ([])		"[@1] <-- [@2],BASIC.MRQ/READ.V.MCHK.CUR"
+
+;	BASIC format memory reference macros, continued.
+
+                                                                    
+VA.WCHK&			"BASIC/FORMAT,BASIC.MRQ/WRITE.V.WCHK.CUR"
+VA.NOCHECK&			"BASIC/FORMAT,BASIC.MRQ/WRITE.V.NOCHK"
+
+MEM (VA)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA"
+MEM.UNLOCK (VA)&		"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.UNLOCK"
+MEM (VAP)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.NEXT"
+MEM.PHYS (VA)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.PHYS"
+MEM.PHYS (VAP)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.PHYS.NEXT"
+MEM.SPTE (VA)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.PHYS"
+
+LOAD VIBA AND PC		"BASIC/FORMAT,BASIC.MRQ/LOAD.PC.VIBA,L/0"
+RESTORE IBOX AND LOAD VIBA	"[VA.BUS] <-- [PC] - [K0],BASIC.MRQ/RESTORE.IBOX.LOAD.VIBA,L/0"
+CONDITIONALLY LOAD VIBA AND PC	"BASIC/FORMAT,BASIC.MRQ/COND.LOAD.PC.VIBA,L/0"
+
+FPU&				"BASIC/FORMAT,BASIC.MRQ/FPU.OPERAND"
+[] <-- FPU RESULT		"BASIC/FORMAT,BASIC.MRQ/FPU.READ.RESULT,W/@1,A/K0,BASIC.ALU/PASS.A"
+[] <-- FPU RESULT(LOW)		"BASIC/FORMAT,BASIC.MRQ/FPU.READ.RESULT,W/@1,A/K0,BASIC.ALU/PASS.A"
+[] <-- FPU RESULT(HIGH)		"BASIC/FORMAT,BASIC.MRQ/FPU.READ.RESULT,W/@1,B/K4,BASIC.ALU/PASS.B"
+
+FLUSH WRITE BUFFERS		"BASIC/FORMAT,BASIC.MRQ/FLUSH.WRITE.BUFFERS"
+
+END OPTIMIZED WRITE		"BASIC/FORMAT,BASIC.MRQ/END.OPTIMIZED.WRITE,W/VA.BUS,B/K4,BASIC.ALU/PASS.B"
+SYNCHRONIZE BIU 		"END OPTIMIZED WRITE"
+
+PROBE READ (CURMODE)		"BASIC/FORMAT,BASIC.MRQ/PROBE.V.RCHK.CUR"
+PROBE WRITE (CURMODE)		"BASIC/FORMAT,BASIC.MRQ/PROBE.V.WCHK.CUR"
+PROBE READ (MODE)		"BASIC/FORMAT,BASIC.MRQ/PROBE.V.RCHK.MODE"
+PROBE WRITE (MODE)		"BASIC/FORMAT,BASIC.MRQ/PROBE.V.WCHK.MODE"
+
+RESTART MEMORY REQUEST		"BASIC/FORMAT,BASIC.MRQ/RESTART.MREQ"
+
+[] <-- MFPR ([])		"[@1] <-- [@2],BASIC.MRQ/READ.IPR"
+[] <-- MFPR ([] + [])		"[@1] <-- [@2] + [@3],BASIC.MRQ/READ.IPR"
+[] <-- MFPR ([] - [])		"[@1] <-- [@2] - [@3],BASIC.MRQ/READ.IPR"
+MTPR (VA)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.IPR"
+
+[] <-- MEM.PCB ([])		"[@1] <-- [@2],BASIC.MRQ/READ.P.NOCHK"
+[] <-- MEM.PCB (VAP)		"BASIC/FORMAT,W/@1,BASIC.MRQ/READ.P.NEXT"
+
+MEM.PCB (VA)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.PHYS"
+MEM.PCB (VAP)&			"BASIC/FORMAT,BASIC.MRQ/WRITE.DATA.PHYS.NEXT"
+
+.TOC	"	CONSTANT Format Macros"
+
+
+; CONSTANT macros always have the A as the first operand, followed by the constant.
+
+[] <-- [] + 000000[]		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/A.PLUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] - 000000[]		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/A.MINUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- 000000[] - []		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/B.MINUS.A,CONST.BYTE/@2,
+				 W/@1,A/@3"
+[] <-- [] AND 000000[]		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/A.AND.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] OR 000000[]		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/A.OR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- 000000[]			"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/PASS.B,CONST.BYTE/@2,
+				 W/@1"
+[] <-- [] ANDNOT 000000[]	"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/A.AND.NOT.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] XOR 000000[]		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/A.XOR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+
+[] <-- [] + 0000[]00		"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/A.PLUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] - 0000[]00		"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/A.MINUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- 0000[]00 - []		"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/B.MINUS.A,CONST.BYTE/@2,
+				 W/@1,A/@3"
+[] <-- [] AND 0000[]00		"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/A.AND.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] OR 0000[]00		"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/A.OR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- 0000[]00			"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/PASS.B,CONST.BYTE/@2,
+				 W/@1"
+[] <-- [] ANDNOT 0000[]00	"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/A.AND.NOT.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] XOR 0000[]00		"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/A.XOR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+
+;	CONSTANT format macros, continued.
+
+
+[] <-- [] + 00[]0000		"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/A.PLUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] - 00[]0000		"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/A.MINUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- 00[]0000 - []		"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/B.MINUS.A,CONST.BYTE/@2,
+				 W/@1,A/@3"
+[] <-- [] AND 00[]0000		"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/A.AND.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] OR 00[]0000		"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/A.OR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- 00[]0000			"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/PASS.B,CONST.BYTE/@2,
+				 W/@1"
+[] <-- [] ANDNOT 00[]0000	"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/A.AND.NOT.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] XOR 00[]0000		"CONST/FORMAT,CONST.POS/BYTE2,CONST.ALU/A.XOR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+
+[] <-- [] + []000000		"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/A.PLUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] - []000000		"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/A.MINUS.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- []000000 - []		"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/B.MINUS.A,CONST.BYTE/@2,
+				 W/@1,A/@3"
+[] <-- [] AND []000000		"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/A.AND.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] OR []000000		"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/A.OR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- []000000			"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/PASS.B,CONST.BYTE/@2,
+				 W/@1"
+[] <-- [] ANDNOT []000000	"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/A.AND.NOT.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+[] <-- [] XOR []000000		"CONST/FORMAT,CONST.POS/BYTE3,CONST.ALU/A.XOR.B,CONST.BYTE/@3,
+				 W/@1,A/@2"
+
+CONSOLE HALT []			"CONST/FORMAT,CONST.POS/BYTE1,CONST.ALU/PASS.B,CONST.BYTE/@1,
+				 W/SAVEPSL,GOTO [CONSOLE.HALT]"
+MACHINE CHECK []		"CONST/FORMAT,CONST.POS/BYTE0,CONST.ALU/PASS.B,CONST.BYTE/@1,
+				 W/MMGT2,GOTO [MACHINE.CHECK]"
+.TOC	"	SHIFT Format Macros"
+
+
+[] <-- [] LROT []		"SHIFT/FORMAT,SHIFT.VAL/@3,W/@1,B/@2,A/@2,SHIFT.FNC/A.B..LSH.SV"
+[] <-- [] LROT (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,B/@2,A/@2,SHIFT.FNC/A.B..LSH.SC"
+[] <-- [] RROT []		"SHIFT/FORMAT,SHIFT.VAL/@3,W/@1,B/@2,A/@2,SHIFT.FNC/A.B..RSH.SV"
+[] <-- [] RROT (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,B/@2,A/@2,SHIFT.FNC/A.B..RSH.SC"
+[] <-- []!![] LSH []		"SHIFT/FORMAT,SHIFT.VAL/@4,W/@1,B/@3,A/@2,SHIFT.FNC/A.B..LSH.SV"
+[] <-- []!![] LSH (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,B/@3,A/@2,SHIFT.FNC/A.B..LSH.SC"
+[] <-- []!![] RSH []		"SHIFT/FORMAT,SHIFT.VAL/@4,W/@1,B/@3,A/@2,SHIFT.FNC/A.B..RSH.SV"
+[] <-- []!![] RSH (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,B/@3,A/@2,SHIFT.FNC/A.B..RSH.SC"
+[] <-- []!![] RSH (32-SC)	"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,B/@3,A/@2,SHIFT.FNC/A.B..LSH.SC"
+[] <-- SEXT.[] RSH []		"SHIFT/FORMAT,SHIFT.VAL/@3,W/@1,A/SHIFTER.SIGN,B/@2,SHIFT.FNC/A.B..RSH.SV"
+[] <-- SEXT.[] RSH (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,A/SHIFTER.SIGN,B/@2,SHIFT.FNC/A.B..RSH.SC"
+[] <-- SEXT.[] RSH (32-SC)	"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,A/SHIFTER.SIGN,B/@2,SHIFT.FNC/A.B..LSH.SC"
+
+[] <-- [] LSH []		"SHIFT/FORMAT,SHIFT.VAL/@3,W/@1,SHIFT.FNC/A.B..LSH.SV,A/@2,B/K0"
+[] <-- [] LSH (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,SHIFT.FNC/A.B..LSH.SC,A/@2,B/K0"
+[] <-- ZEXT.[] RSH []		"SHIFT/FORMAT,SHIFT.VAL/@3,W/@1,A/K0,B/@2,SHIFT.FNC/A.B..RSH.SV"
+[] <-- ZEXT.[] RSH (SC)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,A/K0,B/@2,SHIFT.FNC/A.B..RSH.SC"
+[] <-- ZEXT.[] RSH (32-SC)	"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,A/K0,B/@2,SHIFT.FNC/A.B..LSH.SC"
+
+[] <-- [] LSH (DL)		"SHIFT/FORMAT,SHIFT.VAL/0,W/@1,SHIFT.FNC/A.B..LSH.DL,A/@2,B/K0"
+.TOC	"	SPECIAL Format Macros"
+
+
+;	The default ALU operation for SPECIAL-format microwords is A.MINUS.B.  In order to obtain the
+;	desired PASS.A function, the following macro is used in place of SPECIAL/FORMAT to force
+;	B/K0.  In the cases where there is no ALU function implied, SPECIAL/FORMAT is used instead.
+
+SPECIAL FORMAT			"SPECIAL/FORMAT,B/K0"
+
+;	The following macros force the PASS.A function with SPECIAL FORMAT.
+
+[] <-- S[]			"SPECIAL FORMAT,W/@1,A/@2"
+
+TB INVALIDATE SINGLE <-- []	"SPECIAL FORMAT,SPECIAL.MISC1/ZAP.TB.SINGLE,A/@1"
+TB INVALIDATE SINGLE&[] <-- []	"SPECIAL FORMAT,SPECIAL.MISC1/ZAP.TB.SINGLE,A/@2,W/@1"
+TB.TAG <-- []			"SPECIAL FORMAT,SPECIAL.MISC1/WRITE.TB.TAG,A/@1"
+TB.TAG&[] <-- []		"SPECIAL FORMAT,SPECIAL.MISC1/WRITE.TB.TAG,A/@2,W/@1"
+
+;	The following macros do not force the PASS.A function with SPECIAL/FORMAT.
+
+READ RLOG			"SPECIAL/FORMAT,SPECIAL.MISC3/READ.RLOG"
+RESTORE GPR FROM RLOG		"SPECIAL/FORMAT,W/G.RN,A/G.RN,B/KDL"
+
+PC <-- BACKUP PC		"SPECIAL/FORMAT,SPECIAL.MISC2/PC<--BPC"
+
+START OPTIMIZED WRITE		"SPECIAL/FORMAT,SPECIAL.MISC1/START.OPTIMIZED.WRITE"
+CLEAR VAX TRAP REQUEST		"SPECIAL/FORMAT,SPECIAL.MISC1/CLEAR.VAX.TRAP.REQUEST"
+SET VAX TRAP REQUEST		"SPECIAL/FORMAT,SPECIAL.MISC1/SET.VAX.TRAP.REQUEST"
+CLEAR FCHIP PRESENT		"SPECIAL/FORMAT,SPECIAL.MISC1/CLEAR.FCHIP.PRESENT"
+SET FCHIP PRESENT		"SPECIAL/FORMAT,SPECIAL.MISC1/SET.FCHIP.PRESENT"
+CLEAR VECTOR UNIT PRESENT	"SPECIAL/FORMAT,SPECIAL.MISC1/CLEAR.VECTOR.UNIT.PRESENT"
+SET VECTOR UNIT PRESENT		"SPECIAL/FORMAT,SPECIAL.MISC1/SET.VECTOR.UNIT.PRESENT"
+WRITE EVEN PARITY		"SPECIAL/FORMAT,SPECIAL.MISC1/WRITE.EVEN.PARITY"
+WRITE ODD PARITY		"SPECIAL/FORMAT,SPECIAL.MISC1/WRITE.ODD.PARITY"
+SET TRAP IN PROGRESS		"SPECIAL/FORMAT,SPECIAL.MISC1/SET.MMGT.TP"
+
+TB INVALIDATE			"SPECIAL/FORMAT,SPECIAL.MISC1/ZAP.TB"
+TB INVALIDATE PROCESS		"SPECIAL/FORMAT,SPECIAL.MISC1/ZAP.TB.PROCESS"
+
+STATE5-4 <-- 0			"SPECIAL/FORMAT,SPECIAL.MISC3/CLR.STATE.5-4"
+STATE2 <-- 1			"SPECIAL/FORMAT,SPECIAL.MISC3/SET.STATE.2"
+STATE3 <-- 1			"SPECIAL/FORMAT,SPECIAL.MISC3/SET.STATE.3"
+STATE4 <-- 1			"SPECIAL/FORMAT,SPECIAL.MISC3/SET.STATE.4"
+STATE5 <-- 1			"SPECIAL/FORMAT,SPECIAL.MISC3/SET.STATE.5"
+.TOC	"	LENGTH Field Macros"
+
+
+;	LENGTH macros are treated as follows:  LONG is ignored, since the length
+;	field defaults to long in microinstructions which have a length field, and
+;	is implied to be long in microinstructions which do not have it.  LEN(DL)
+;	sets the length bit where appropriate.
+
+LEN(DL)				"L/LEN(DL),LV/SET"
+LONG				"LV/SET"
+.TOC	"	CC Format Macros"
+
+
+SET PSL CC			"CC/LOAD.PSL.CC"
+.TOC	"	MISC Field Macros"
+
+              
+PC <-- TRAP PC			"MISC/PC<--TPC"
+TB.PTE&       			"MISC/WRITE.TB.PTE"
+SC&				"MISC/WRITE.SC"
+HOLD WBUS CC			"MISC/HOLD.WBUS.CC"
+ABORT TRAP			"MISC/EXIT.TRAP"
+RESTART IB PREFETCH		"MISC/RESTART.IB.PREFETCH"
+ENABLE IB PREFETCH		"MISC/ENABLE.IB.PREFETCH"
+DISABLE IB PREFETCH		"MISC/DISABLE.IB.PREFETCH"
+SHORT LITERAL			"MISC/SHORT.LIT"
+RN <-- 0			"MISC/CLEAR.RN"
+RN <-- RN - 1			"MISC/RN.MINUS.1"
+RN <-- RN + 1			"MISC/RN.PLUS.1"
+RN <-- RN + (IF (DL.BWL OR AT.W) THEN 0 ELSE 1) "MISC/RN.PLUS.(DL.Q.ANDNOT.AT.W)"
+DL <-- BYTE			"MISC/DL.BYTE"
+DL <-- WORD			"MISC/DL.WORD"
+DL <-- LONG			"MISC/DL.LONG"
+DL <-- QUAD			"MISC/DL.QUAD"
+STATE3-0 <-- 0			"MISC/CLR.STATE.3-0"
+STATE0 <-- 1			"MISC/SET.STATE.0"
+STATE1 <-- 1			"MISC/SET.STATE.1"
+PSL(Z) <-- PSL(Z) AND WBUS(Z)	"MISC/Z..PZ.AND.WZ"
+PSL(V) <-- NOT WBUS(Z)		"MISC/V..NOT.WZ"
+LOAD FPU CC			"MISC/LOAD.FPU.CC"
+RLOG				"MISC/RLOG"
+MAP.JIZJ			"MISC/MAP.JIZJ"
+MAP.IIII			"MISC/MAP.IIII"
+MAP.IIIJ			"MISC/MAP.IIIJ"
+SET 30 BIT PA MODE		"MISC/SET.ADDRESS.MODE.30"
+SET 32 BIT PA MODE		"MISC/SET.ADDRESS.MODE.32"
+.TOC	"	Microsequencer Control Macros"
+
+
+CASE [] AT []			"SEQ.FMT/BRANCH,SEQ.MUX/J,SEQ.COND.1/<SEQ.COND/@1>,J/@2"
+
+RETURN				"SEQ.FMT/JUMP,SEQ.MUX/STACK,J/0"
+
+CALL []				"SEQ.FMT/JUMP,SEQ.SUB/CALL,SEQ.MUX/J,J/@1"
+GOTO []				"J/@1"
+
+EXIT TRAP			"SEQ.FMT/JUMP,SEQ.MUX/TRAP.SILO,J/0,MISC/EXIT.TRAP"
+
+DECODER NEXT			"SEQ.FMT/JUMP,SEQ.MUX/DEC.NEXT,J/0"
+DECODER NEXT IF DL.BWL OR AT.W	"SEQ.FMT/JUMP,SEQ.MUX/DEC.NEXT.DL.BWL.OR.AT.W"
+DECODER NEXT IF DL.BWL		"SEQ.FMT/JUMP,SEQ.MUX/DEC.NEXT.DL.BWL"
+
+LAST CYCLE			"DECODER NEXT"
+LAST CYCLE IF DL.BWL		"DECODER NEXT IF DL.BWL"
+
+RESERVED ADDRESSING MODE	"GOTO [IE.RSVD.ADDR.MODE..]"
+RESERVED OPERAND FAULT		"SYNCHRONIZE BIU,GOTO [IE.RSVD.OPERAND]"
+RESERVED INSTRUCTION FAULT	"SYNCHRONIZE BIU,GOTO [IE.RSVD.OPCODE..]"
+
+REEXECUTE AND EXIT TRAP		"SEQ.MUX/TRAP.SILO,J/0,MISC/REEXECUTE&EXIT.TRAP"
+
+.TOC	"	A/B Port Select Macros"
+
+
+;	The A/B Port Select macros provide a way to explicitly specify an A or B port select.
+
+ACCESS []			"A/@1"
+ACCESS B[]			"B/@1"
+.TOC	"	Performance Model Control Macros"
+
+
+;	Macros to load WBUS CC latch with the appropriate values.
+
+sim wbus.nzvc <-- k[]		"SIM.WBUS.CC/CONST.NZVC,SIM.CONST/@1"
+sim wbus.nzvc <-- []		"SIM.WBUS.CC/@1"
+
+;	Macros to load SC.
+
+;	sim sc <-- []
+;	sim sc <-- k[]
+
+sim sc <-- register mask 11-0	"SIM.CTRL/SC.MASK.11-0"
+sim sc <-- register mask 14-12	"SIM.CTRL/SC.MASK.14-12"
+sim sc <-- []			"SIM.CTRL/SC.LOAD,SIM.ADDR/@1"
+sim sc <-- ashx count		"SIM.CTRL/SC.ASHX.COUNT.7-5"
+sim sc <-- 32-s			"SIM.CTRL/SC.32-S"
+sim sc <-- (p+s)-32		"SIM.CTRL/SC.(P+S)-32"
+sim sc <-- ffx field		"SIM.CTRL/SC.FFX.FIELD"
+sim sc <-- sc rsh 6		"SIM.CTRL/SC.RSH.6"
+sim sc <-- ipr xor 18		"SIM.CTRL/SC.IPR.XOR.18"
+sim sc <-- ipr			"SIM.CTRL/SC.IPR"
+sim sc <-- movc dst addr	"SIM.CTRL/SC.MOVC.DST"
+sim sc <-- sc + r[]		"SIM.CTRL/SC.INCR.RN,SIM.CONST/@1"
+sim sc <-- movc len		"SIM.CTRL/SC.MOVC.LEN"
+sim sc <-- movc dst + r[]	"SIM.CTRL/SC.MOVC.DST+RN,SIM.CONST/@1"
+sim sc <-- movc dst - r[]	"SIM.CTRL/SC.MOVC.DST-RN,SIM.CONST/@1"
+sim sc <-- movc fill addr	"SIM.CTRL/SC.MOVC.FILL.ADDR"
+sim sc <-- sc + kdl		"SIM.CTRL/SC.INCR.DL"
+
+sim va <-- pcbb			"SIM.CTRL/VA.PCBB"
+sim vap <-- addr		"SIM.CTRL/VAP.LOAD"
+sim va <-- addr			"SIM.CTRL/VA.LOAD"
+sim va <-- epr[]		"SIM.CTRL/VA.EPR,SIM.ADDR/@1"
+
+;	Macros to load internal count registers.
+
+
+sim r[] <-- movc len		"SIM.CTRL/RN.MOVC.COUNT,SIM.CONST/@1"
+sim r[] <-- r[] - kdl		"SIM.CTRL/DECR.RN.DL,SIM.CONST/@1"
+sim r[] <-- r[] + kdl		"SIM.CTRL/INCR.RN.DL,SIM.CONST/@1"
+sim r[] <-- r[] - []		"SIM.CTRL/DECR.RN.K,SIM.CONST/@1,SIM.ADDR/@3"
+sim r[] <-- r[] + []		"SIM.CTRL/INCR.RN.K,SIM.CONST/@1,SIM.ADDR/@3"
+sim r[] <-- fill count		"SIM.CTRL/RN.FILL.COUNT,SIM.CONST/@1"
+sim r[]				"SIM.CONST/@1"
+
+;	Assorted simulation macros.
+
+sim load movc addr []		"SIM.CTRL/LOAD.MOVC.ADDR,SIM.CONST/@1"
+sim addr [] []			"SIM.ADDR.SEL/@1, SIM.ADDR/@2"
+sim halt			"SPECIAL FORMAT,SPECIAL.MISC1/SIM.HALT"
+sim halt if not powerup		"MISC/SIM.HALT"
+sim exception []		"SIM.CTRL/EXCEPTION,SIM.CONST/@1"
+sim load character gprs		"SIM.CTRL/LOAD.CHAR.GPRS"
+
+.bin

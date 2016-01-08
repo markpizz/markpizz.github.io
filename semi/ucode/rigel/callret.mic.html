@@ -1,0 +1,1364 @@
+.TOC	"CALLRET.MIC -- Procedure Call Instructions"
+.TOC	"Revision 3.1"
+
+;	Rick Calcagni
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988, 1989 BY			    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (3)1 22-Aug-87 RMS	Editorial changes; pass 1 code freeze.
+;
+;    3 16-Jul-87 REC	Saved one cycle in CALLS, one in RET, three cycles in CALLx mask = 0.
+;    2 21-May-87 GMU	Added warning about CALL during first cycle.
+; (2)1 12-Sep-86 RMS	Initial production microcode.
+
+.bin
+;= BEGIN CALLRET
+.nobin
+
+;	This module implements the procedure call class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	FA	 CALLG arglist.ab, dst.ab, {-(SP).w*}				0 0 0 0		rsv
+;
+;	FB	 CALLS numarg.rl, dst.ab, {-(SP).w*}				0 0 0 0		rsv
+;
+;	04	 RET {(SP)+.r*}							* * * *		rsv
+;
+
+;	These instructions implement a generalized procedure call and return facility.
+;	The principal data structure involved is the stack frame.
+;	CALLS and CALLG build a stack frame in the following format:
+;
+;
+;	+---------------------------------------------------------------+
+;	|		  condition handler (initially 0)		|  +0	<-- SP,FP on exit
+;	+---+-+-+-----------------------+--------------------+----------+	
+;	|SPA|S|0|   entry mask<11:0>	|   saved PSW<15:5>  | 0 0 0 0 0|  +4	SPA = # bytes to force stack alignment
+;	+---+-+-+-----------------------+--------------------+----------+	S   = 0 for CALLG, 1 for CALLS
+;	|			    saved AP				|  +8	
+;	+---------------------------------------------------------------+	
+;	|			    saved FP				|  +12	
+;	+---------------------------------------------------------------+	
+;	|			    saved PC				|  +16	
+;	+---------------------------------------------------------------+	
+;	|			    saved R0 (...)			|  +20	
+;	+---------------------------------------------------------------+	
+;		.						.		
+;		.	(according to entry mask<11:0>)		.		
+;		.						.		
+;	+---------------------------------------------------------------+	
+;	|			    saved R11 (...)			|	
+;	+---------------+-----------------------------------------------+	
+;	| #args (CALLS)	|	(0-3 bytes needed to align stack)	|	
+;	+---------------+-----------------------------------------------+	
+;	|		|	0	0	0	(CALLS)		|	
+;	+---------------+-----------------------------------------------+
+;
+;	RET expects to find this structure based at the frame pointer (FP).
+
+;	For CALLG and CALLS, the entry mask specifies the new settings of DV and IV,
+;	and also which registers are to be saved on entry:
+;
+;	 15 14 13 12 11                               0
+;	+--+--+-----+----------------------------------+
+;	|DV|IV| MBZ |		register mask	       |
+;	+--+--+-----+----------------------------------+
+;
+.bin
+
+.nobin
+.TOC	"	CALLG, CALLS"
+
+;	These instructions invoke a procedure with a general (a stack based) argument list.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	CALLG		FA	call procedure with general arg list	2	aa/bb	--	CALLX	   --
+;	CALLS		FB	call procedure with stack arg list	2	ra/lb	--	CALLX	   --
+;
+;	Entry conditions:
+;		MD.S1		=	first (argument) operand
+;		MD.S2 = VA	=	address of procedure entry
+;		DL		=	data type of second operand (byte)
+;
+;	Exit conditions:
+;		The procedure stack frame has been created.
+;		SP, FP point to the new top of stack.
+;		AP points to the argument list.
+;		PC points to the first instruction of the procedure (entry+2).
+;		PSW<7,5> are equal to mask<15,14>.
+;		PSW<6,3:0> are clear.
+;
+;	Condition codes:
+;		N <-- 0
+;		Z <-- 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	CALLG/CALLS operation:
+;
+;		Read the procedure entry mask.
+;		Calculate the new SP (longword aligned).
+;		Make sure that the stack frame will be accessible.
+;		If CALLS, push the number of arguments onto the stack.
+;		The call frame is pushed onto the stack in reverse order (condition
+;		handler first, etc.) to take advantage of optimized, consecutive writes.
+;		Push conditon handler, saved SPA/S0/mask/PSW, AP, FP, PC.
+;		Push the registers specified by the procedure entry mask.
+;		Update PSW traps, clear condition codes.
+;		Update PC, AP, FP, SP.
+
+CALLX..:
+	;********** Hardware dispatch **********;
+	[MD.T5] <-- [SP] ANDNOT 000000[3],	; [1] get SP longword aligned in MD5
+	DL <-- WORD				; length is word to read entry mask
+
+	;---------------------------------------;
+	[MD.T4] <-- MEM ([MD.S2]), LEN(DL),	; [2] read entry mask (length is WORD)
+	DISABLE IB PREFETCH,			; turn off prefetch for writes
+		sim addr [ea] [2]
+
+	;---------------------------------------;
+	[MD.T6] <-- [PSL] AND 000000[0E0]	; [3] save non-zero PSW bits
+
+	;---------------------------------------;
+	[SC] <-- [MD.T4] LROT [19.],		; [4] put dv.iv.mbz in SC<31,2:0> for casing
+						; get mask onto BBUS for register count
+	STATE3-0 <-- 0,				; clear state flags
+	CASE [OPCODE2-0] AT [CALLG.NEW.SP],	; case on CALLG vs CALLS
+		sim sc <-- [0],
+		sim wbus.nzvc <-- [callret.0z00]
+
+;	CALLx, continued.
+;	CALLG preprocessing.
+;	Calculate the number of longwords to be pushed onto the stack.
+;	Create SPA/00/mask/PSW longwords.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T4	=	mask
+;		MD.T5	=	current SP, longword aligned
+;		MD.T6	=	PSW<7:5>
+;		SC	=	mask left rotated 19
+;		DL	=	word
+
+;= ALIGNLIST *10*	(CALLG.NEW.SP,		CALLS.NEW.SP)
+;  Opcodes = FA, FB --> opcode<2:0> = 01?
+
+CALLG.NEW.SP:
+	;---------------------------------------; opcode<2:0> = 010 (CALLG):
+	[MD.T3] <-- [MASK.BITS.SET*4] + 000000[20.] ; [5] mask bits + 5 common lw
+
+	;---------------------------------------;
+	[MD.T1] <-- ZEXT.[SC] RSH [1.]		; [6] 00/mask/<17:2>/dv.iv
+
+	;---------------------------------------;
+	[MD.T1] <-- [SP]!![MD.T1] RSH [2.],	; [7] SPA/00/mask/<15:0>
+	CASE [WBUS.NZV] AT [CALLG.MBZ.X0]	; case on mask<12> from [4]
+
+;	CALLx, continued.
+;	CALLG preprocessing.
+;	Probe stack.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T1	=	SPA/00/mask
+;		MD.T3	=	mask bits*4 + 20
+;		MD.T4	=	mask
+;		MD.T5	=	current SP, longword aligned
+;		MD.T6	=	PSW<7:5>
+;		SC	=	mask left rotated 19
+;		DL	=	word
+
+;= ALIGNLIST 00**	(CALLG.MBZ.X0,		CALLG.ZERO.MASK,
+;=			 CALLG.MBZ.X1,				)
+;  WBUS.NZVC set by rotate --> V = C = 0
+
+CALLG.MBZ.X1:
+	;---------------------------------------; wbus.nz = 10:
+	RESERVED OPERAND FAULT			; mask<12> non-zero
+
+CALLG.MBZ.X0:
+	;---------------------------------------; wbus.nz = 00:
+	VA.WCHK&, [MD.T3] <-- [MD.T5] - [MD.T3],; [8] write check new top of stack
+	LONG,					; must be aligned
+	DL <-- BYTE,				; use dl<1> to flag not zero mask case
+	CASE [SC2-0] AT [CALLG.MBZ.00],		; case on mask<13> from [4]
+		sim addr [callx.sp] [0]
+
+CALLG.ZERO.MASK:
+	;---------------------------------------; wbus.nz = 01:
+	VA.WCHK&, [MD.T3] <-- [MD.T5] - [MD.T3],; [8] write check new top of stack
+	LONG,					; must be aligned
+	DL <-- LONG,				; use dl<1> to flag zero mask case
+	CASE [SC2-0] AT [CALLG.MBZ.00],		; case on mask<13> from [4]
+		sim addr [callx.sp] [0]
+
+;= ALIGNLIST 110*	(CALLG.MBZ.00,	CALLG.MBZ.10)
+
+CALLG.MBZ.10:
+	;---------------------------------------; sc<0> = 1:
+	RESERVED OPERAND FAULT			; mask<13> non-zero
+
+CALLG.MBZ.00:
+	;---------------------------------------; sc<0> = 0:
+	VA.WCHK&, [WBUS] <-- [MD.T5] - [K4],	; write check the first frame location
+	LONG,					; must be aligned
+	GOTO [CALL.REPROBE],			; go reprobe new top of stack
+		sim addr [sp] [0]
+
+;	CALLx, continued.
+;	CALLS preprocessing.
+;	Calculate the number of longwords to be pushed onto the stack.
+;	Create SPA/10/mask/PSW longwords.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T4	=	mask
+;		MD.T5	=	current SP, longword aligned
+;		MD.T6	=	PSW<7:5>
+;		SC	=	mask left rotated 19
+;		DL	=	word
+
+CALLS.NEW.SP:
+	;---------------------------------------; opcode<2:0> = 011 (CALLS):
+	[MD.T3] <-- [MASK.BITS.SET*4] + 000000[24.] ; [5] mask bits + 5 common lw + # args
+
+	;---------------------------------------;
+	[MD.T1] <-- [K1]!![SC] RSH [1.]		; [6] 10/mask/<17:2>/dv.iv
+
+	;---------------------------------------;
+	[MD.T1] <-- [SP]!![MD.T1] RSH [2.],	; [7] SPA/10/mask/<15:0>
+	CASE [WBUS.NZV] AT [CALLS.MBZ.X0]	; case on mask<12> from [4]
+
+
+;	CALLx, continued.
+;	CALLS preprocessing.
+;	Probe stack, write # args.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T1	=	SPA/10/mask
+;		MD.T3	=	mask bits*4 + 24
+;		MD.T4	=	mask
+;		MD.T5	=	current SP, longword aligned
+;		MD.T6	=	PSW<7:5>
+;		SC	=	mask left rotated 19
+;		DL	=	word
+
+;= ALIGNLIST 00**	(CALLS.MBZ.X0,		CALLS.ZERO.MASK,
+;=			 CALLS.MBZ.X1,				)
+;  WBUS.NZVC set by rotate --> V = C = 0
+
+CALLS.MBZ.X1:
+	;---------------------------------------; wbus.nz = 10:
+	RESERVED OPERAND FAULT			; mask<12> non-zero
+
+CALLS.MBZ.X0:
+	;---------------------------------------; wbus.nz = 00:
+	VA.WCHK&, [MD.T3] <-- [MD.T5] - [MD.T3],; [8] write check new top of stack
+	LONG,					; must be aligned
+	DL <-- BYTE,				; use dl<1> to flag not zero mask case
+	CASE [SC2-0] AT [CALLS.MBZ.00],		; case on mask<13> from [4]
+		sim addr [callx.sp] [0]
+
+CALLS.ZERO.MASK:
+	;---------------------------------------; wbus.nz = 01:
+	VA.WCHK&, [MD.T3] <-- [MD.T5] - [MD.T3],; [8] write check new top of stack
+	LONG,					; must be aligned
+	DL <-- LONG,				; use dl<1> to flag zero mask case
+	CASE [SC2-0] AT [CALLS.MBZ.00],		; case on mask<13> from [4]
+		sim addr [callx.sp] [0]
+
+;= ALIGNLIST 110*	(CALLS.MBZ.00,	CALLS.MBZ.10)
+
+CALLS.MBZ.10:
+	;---------------------------------------; sc<0> = 1:
+	RESERVED OPERAND FAULT			; mask<13> non-zero
+
+CALLS.MBZ.00:
+	;---------------------------------------; sc<0> = 0:
+	VA.WCHK&, [WBUS] <-- [SP] - [K4], LONG,	; write check the next stack location
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	MEM (VA)&, [WBUS] <-- [MD.S1], LONG,	; push # args onto possibly unaligned stack
+	GOTO [CALL.REPROBE]			; go reprobe top of stack
+
+;	CALLx, continued.
+;	Both ends of the stack have been probed.
+;	Reprobe the new top of stack in case it's entry in the TB got overwritten.
+;	Get mask into SC for casing.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T1	=	SPA/S0/mask
+;		MD.T3	=	new SP
+;		MD.T4	=	mask
+;		MD.T6	=	PSW
+;		SC	=	mask left rotated 19
+;		STATE<2:0> =	0
+;		DL	=	byte, long if mask = 0
+
+CALL.REPROBE:
+	;---------------------------------------;
+	VA.WCHK&, [WBUS] <-- [MD.T3], LONG,	; reprobe new top of stack for TB
+	CASE [SC2-0] AT [CALL.REPROBE.0X],	; case on dv bit (SC<2>)
+		sim addr [callx.sp] [0]
+
+;= ALIGNLIST 01**	(CALL.REPROBE.0X,	CALL.REPROBE.1X)
+;  SC<0> = 0 by mbz test
+
+CALL.REPROBE.0X:
+	;---------------------------------------; sc<2> = 0:
+	[SC] <-- S[MD.T4],			; get mask<11:0> into SC<11:0>
+	START OPTIMIZED WRITE,			; turn on packed writes
+						; mm faults cannot occur from here on
+	CASE [SC2-0] AT [CALL.WRITE.X0],	; case on iv bit (SC<1>)
+		sim sc <-- register mask 11-0
+
+CALL.REPROBE.1X:
+	;---------------------------------------; sc<2> = 1:
+	[SC] <-- S[MD.T4],			; get mask<11:0> into SC<11:0>
+	START OPTIMIZED WRITE,			; turn on packed writes
+						; mm faults cannot occur from here on
+	STATE1 <-- 1,				; set flag for dv bit
+	CASE [SC2-0] AT [CALL.WRITE.X0],	; case on iv bit (SC<1>)
+		sim sc <-- register mask 11-0
+
+;	CALLx, continued.
+;	Begin writing the call frame at the new SP.
+;	The call frame is pushed onto the stack in reverse order (condition
+;	handler first, etc.) to take advantage of optimized, consecutive writes.
+;	Both ends of the stack have been checked; no memmgt errors from can occur
+;	here on.  If the mask is zero, case branches on SC in the register push
+;	routines are bypassed, saving three cycles.
+
+;	At this point:
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T1	=	SPA/00/mask
+;		MD.T3	=	new SP
+;		MD.T6	=	S/PSW
+;		SC	=	mask, not yet testable
+;		VA	=	new SP
+;		STATE<1:0> =	dv
+;		STATE<2> =	0 (CALL/PUSHR flag)
+;		DL	=	byte, long if mask = 0
+
+;= ALIGNLIST 10**	(CALL.WRITE.X0,		CALL.WRITE.X1)
+;  SC<0> = 0 by mbz test
+
+CALL.WRITE.X0:
+	;---------------------------------------; sc<1> = 0:
+	MEM (VA)&, [WBUS] <-- [K0], LONG,	; write the condition handler at new SP
+	GOTO [CALL.WRITE.FRAME]			; go write mask word
+
+CALL.WRITE.X1:
+	;---------------------------------------; sc<1> = 0:
+	MEM (VA)&, [WBUS] <-- [K0], LONG,	; write the condition handler at new SP
+	STATE0 <-- 1				; set flag for iv bit
+
+CALL.WRITE.FRAME:
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- [MD.T1] OR [MD.T6], ; write SPA/S0/mask/PSW to stack
+	LONG					;
+
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- [AP], LONG	; write AP to stack
+
+	;---------------------------------------;
+	MEM (VAP)&, [WBUS] <-- [FP], LONG,	; write FP to stack
+	CASE [FPU.DL] AT [CALL.PUSH.PC]		; case on flag for mask = 0
+
+;	CALLx, continued.
+;	Push the old PC onto the stack and case into the general register push routines.
+;	If the mask is zero, case branches on SC in the general register push routines
+;	are bypassed, saving three cycles.
+
+;	At this point:
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T3	=	new SP
+;		STATE<1:0> =	new dv.iv
+;		STATE<2> =	0 (CALL/PUSHR flag)
+;		DL	=	byte, long if mask = 0
+
+;= ALIGNLIST 10**	(CALL.PUSH.PC,		CALL.PUSH.PC.ZERO.MASK)
+;  DL<1:0> = 00 byte, 10 long, flag set by microcode for mask = 0
+;  DL<0> = 0 frees up alignment constraints
+
+CALL.PUSH.PC:
+	;---------------------------------------; dl<1> = 0:
+	MEM (VAP)&, [WBUS] <-- [PC], LONG,	; write PC to stack
+	CASE [SC2-0] AT [CALL.PUSH.2.0.000]	; case on mask bits<2:0>
+
+CALL.PUSH.PC.ZERO.MASK:
+	;---------------------------------------; dl<1> = 1:
+	MEM (VAP)&, [WBUS] <-- [PC], LONG,	; write PC to stack
+	GOTO [CALL.PUSH.11.9.000]		; mask = 0, save 3 cycles by avoiding
+						; unnecessary case branches
+
+;	CALLx, continued.
+;	Get here from either CALLX or PUSHR.
+;	Process mask bits<2:0> = SC<2:0> (R2 to R0).
+
+;	At this point:
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	CALL/PUSHR flag
+
+;= ALIGNLIST 000*	(CALL.PUSH.2.0.000,	CALL.PUSH.2.0.001,
+;=			 CALL.PUSH.2.0.010,	CALL.PUSH.2.0.011,
+;=			 CALL.PUSH.2.0.100,	CALL.PUSH.2.0.101,
+;=			 CALL.PUSH.2.0.110,	CALL.PUSH.2.0.111)
+
+CALL.PUSH.2.0.000:
+	;---------------------------------------; sc<2:0> = 000:
+	CASE [SC5-3] AT [CALL.PUSH.5.3.000]	; no regs, case on mask bits<5:3>
+
+CALL.PUSH.2.0.001:
+	;---------------------------------------; sc<2:0> = 001:
+	MEM (VAP)&, [WBUS] <-- [G.0], LONG,	; push R0 on stack
+	CASE [SC5-3] AT [CALL.PUSH.5.3.000]	; done here, case on mask bits<5:3>
+
+CALL.PUSH.2.0.010:
+	;---------------------------------------; sc<2:0> = 010:
+	MEM (VAP)&, [WBUS] <-- [G.1], LONG,	; push R1 on stack
+	CASE [SC5-3] AT [CALL.PUSH.5.3.000]	; done here, case on mask bits<5:3>
+
+CALL.PUSH.2.0.011:
+	;---------------------------------------; sc<2:0> = 011:
+	MEM (VAP)&, [WBUS] <-- [G.0], LONG,	; push R0 on stack
+	GOTO [CALL.PUSH.2.0.010]		; go push R1
+
+CALL.PUSH.2.0.100:
+	;---------------------------------------; sc<2:0> = 100:
+	MEM (VAP)&, [WBUS] <-- [G.2], LONG,	; push R2 on stack
+	CASE [SC5-3] AT [CALL.PUSH.5.3.000]	; done here, case on mask bits<5:3>
+
+CALL.PUSH.2.0.101:
+	;---------------------------------------; sc<2:0> = 101:
+	MEM (VAP)&, [WBUS] <-- [G.0], LONG,	; push R0 on stack
+	GOTO [CALL.PUSH.2.0.100]		; go push R2
+
+CALL.PUSH.2.0.110:
+	;---------------------------------------; sc<2:0> = 110:
+	MEM (VAP)&, [WBUS] <-- [G.1], LONG,	; push R1 on stack
+	GOTO [CALL.PUSH.2.0.100]		; go push R2
+
+CALL.PUSH.2.0.111:
+	;---------------------------------------; sc<2:0> = 111:
+	MEM (VAP)&, [WBUS] <-- [G.0], LONG,	; push R0 on stack
+	GOTO [CALL.PUSH.2.0.110]		; go push R1 and R2
+
+;	CALLx, continued.
+;	Process mask bits<5:3> = SC<5:3> (R5 to R3).
+
+;	At this point:
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	CALL/PUSHR flag
+
+;= ALIGNLIST 000*	(CALL.PUSH.5.3.000,	CALL.PUSH.5.3.001,
+;=			 CALL.PUSH.5.3.010,	CALL.PUSH.5.3.011,
+;=			 CALL.PUSH.5.3.100,	CALL.PUSH.5.3.101,
+;=			 CALL.PUSH.5.3.110,	CALL.PUSH.5.3.111)
+
+CALL.PUSH.5.3.000:
+	;---------------------------------------; sc<5:3> = 000:
+	CASE [SC8-6] AT [CALL.PUSH.8.6.000]	; no regs, case on mask bits<8:6>
+
+CALL.PUSH.5.3.001:
+	;---------------------------------------; sc<5:3> = 001:
+	MEM (VAP)&, [WBUS] <-- [G.3], LONG,	; push R3 on stack
+	CASE [SC8-6] AT [CALL.PUSH.8.6.000]	; done here, case on mask bits<8:6>
+
+CALL.PUSH.5.3.010:
+	;---------------------------------------; sc<5:3> = 010:
+	MEM (VAP)&, [WBUS] <-- [G.4], LONG,	; push R4 on stack
+	CASE [SC8-6] AT [CALL.PUSH.8.6.000]	; done here, case on mask bits<8:6>
+
+CALL.PUSH.5.3.011:
+	;---------------------------------------; sc<5:3> = 011:
+	MEM (VAP)&, [WBUS] <-- [G.3], LONG,	; push R3 on stack
+	GOTO [CALL.PUSH.5.3.010]		; go push R4
+
+CALL.PUSH.5.3.100:
+	;---------------------------------------; sc<5:3> = 100:
+	MEM (VAP)&, [WBUS] <-- [G.5], LONG,	; push R5 on stack
+	CASE [SC8-6] AT [CALL.PUSH.8.6.000]	; done here, case on mask bits<8:6>
+
+CALL.PUSH.5.3.101:
+	;---------------------------------------; sc<5:3> = 101:
+	MEM (VAP)&, [WBUS] <-- [G.3], LONG,	; push R3 on stack
+	GOTO [CALL.PUSH.5.3.100]		; go push R5
+
+CALL.PUSH.5.3.110:
+	;---------------------------------------; sc<5:3> = 110:
+	MEM (VAP)&, [WBUS] <-- [G.4], LONG,	; push R4 on stack
+	GOTO [CALL.PUSH.5.3.100]		; go push R5
+
+CALL.PUSH.5.3.111:
+	;---------------------------------------; sc<5:3> = 111:
+	MEM (VAP)&, [WBUS] <-- [G.3], LONG,	; push R3 on stack
+	GOTO [CALL.PUSH.5.3.110]		; go push R4 and R5
+
+;	CALLx, continued.
+;	Process mask bits<8:6> = SC<8:6> (R8 to R6).
+
+;	At this point:
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	CALL/PUSHR flag
+
+;= ALIGNLIST 000*	(CALL.PUSH.8.6.000,	CALL.PUSH.8.6.001,
+;=			 CALL.PUSH.8.6.010,	CALL.PUSH.8.6.011,
+;=			 CALL.PUSH.8.6.100,	CALL.PUSH.8.6.101,
+;=			 CALL.PUSH.8.6.110,	CALL.PUSH.8.6.111)
+
+CALL.PUSH.8.6.000:
+	;---------------------------------------; sc<8:6> = 000:
+	CASE [SC11-9] AT [CALL.PUSH.11.9.000]	; no regs, case on mask<11:9>
+
+CALL.PUSH.8.6.001:
+	;---------------------------------------; sc<8:6> = 001:
+	MEM (VAP)&, [WBUS] <-- [G.6], LONG,	; push R6 on stack
+	CASE [SC11-9] AT [CALL.PUSH.11.9.000]	; done here, case on mask<11:9>
+
+CALL.PUSH.8.6.010:
+	;---------------------------------------; sc<8:6> = 010:
+	MEM (VAP)&, [WBUS] <-- [G.7], LONG,	; push R7 on stack
+	CASE [SC11-9] AT [CALL.PUSH.11.9.000]	; done here, case on mask<11:9>
+
+CALL.PUSH.8.6.011:
+	;---------------------------------------; sc<8:6> = 011:
+	MEM (VAP)&, [WBUS] <-- [G.6], LONG,	; push R6 on stack
+	GOTO [CALL.PUSH.8.6.010]		; go push R7
+
+CALL.PUSH.8.6.100:
+	;---------------------------------------; sc<8:6> = 100:
+	MEM (VAP)&, [WBUS] <-- [G.8], LONG,	; push R8 on stack
+	CASE [SC11-9] AT [CALL.PUSH.11.9.000]	; done here, case on mask<11:9>
+
+CALL.PUSH.8.6.101:
+	;---------------------------------------; sc<8:6> = 101:
+	MEM (VAP)&, [WBUS] <-- [G.6], LONG,	; push R6 on stack
+	GOTO [CALL.PUSH.8.6.100]		; go push R8
+
+CALL.PUSH.8.6.110:
+	;---------------------------------------; sc<8:6> = 110:
+	MEM (VAP)&, [WBUS] <-- [G.7], LONG,	; push R7 on stack
+	GOTO [CALL.PUSH.8.6.100]		; go push R8
+
+CALL.PUSH.8.6.111:
+	;---------------------------------------; sc<8:6> = 111:
+	MEM (VAP)&, [WBUS] <-- [G.6], LONG,	; push R6 on stack
+	GOTO [CALL.PUSH.8.6.110]		; go push R7 and R8
+
+;	CALLx, continued.
+;	Process mask bits<11:9> = SC<11:9> (R11 to R9).
+
+;	At this point:
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	CALL/PUSHR flag
+
+;= ALIGNLIST 000*	(CALL.PUSH.11.9.000,	CALL.PUSH.11.9.001,
+;=			 CALL.PUSH.11.9.010,	CALL.PUSH.11.9.011,
+;=			 CALL.PUSH.11.9.100,	CALL.PUSH.11.9.101,
+;=			 CALL.PUSH.11.9.110,	CALL.PUSH.11.9.111)
+
+CALL.PUSH.11.9.001:
+	;---------------------------------------; sc<11:9> = 001:
+	MEM (VAP)&, [WBUS] <-- [G.9], LONG,	; push R9 on stack
+	GOTO [CALL.PUSH.11.9.000]		; go to next group
+
+CALL.PUSH.11.9.010:
+	;---------------------------------------; sc<11:9> = 010:
+	MEM (VAP)&, [WBUS] <-- [G.10], LONG,	; push R10 on stack
+	GOTO [CALL.PUSH.11.9.000]		; go to next group
+
+CALL.PUSH.11.9.011:
+	;---------------------------------------; sc<11:9> = 011:
+	MEM (VAP)&, [WBUS] <-- [G.9], LONG,	; push R9 on stack
+	GOTO [CALL.PUSH.11.9.010]		; go push R10
+
+CALL.PUSH.11.9.100:
+	;---------------------------------------; sc<11:9> = 100:
+	MEM (VAP)&, [WBUS] <-- [G.11], LONG,	; push R11 on stack
+	GOTO [CALL.PUSH.11.9.000]		; go to next group
+
+CALL.PUSH.11.9.101:
+	;---------------------------------------; sc<11:9> = 101:
+	MEM (VAP)&, [WBUS] <-- [G.9], LONG,	; push R9 on stack
+	GOTO [CALL.PUSH.11.9.100]		; go push R11
+
+CALL.PUSH.11.9.110:
+	;---------------------------------------; sc<11:9> = 110:
+	MEM (VAP)&, [WBUS] <-- [G.10], LONG,	; push R10 on stack
+	GOTO [CALL.PUSH.11.9.100]		; go push R11
+
+CALL.PUSH.11.9.111:
+	;---------------------------------------; sc<11:9> = 111:
+	MEM (VAP)&, [WBUS] <-- [G.9], LONG,	; push R9 on stack
+	GOTO [CALL.PUSH.11.9.110]		; go push R10 and R11
+
+
+;	CALLx, continued.
+;	Stack frame complete.
+;	Update PC, PSW.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.S2	=	address of procedure entry
+;		MD.T3	=	new SP
+;		STATE<1:0> =	new dv.iv
+;		STATE<2> =	CALL/PUSHR flag
+
+CALL.PUSH.11.9.000:
+	;---------------------------------------; sc<11:9> = 000:
+	END OPTIMIZED WRITE,			; turn off packed writes
+	DL <-- WORD,				; set kdl = 2 for updating PC
+	CASE [STATE2-0] AT [CALL.SET.NEW.PC]	; case on whether CALL or PUSHR
+
+;= ALIGNLIST 011*	(CALL.SET.NEW.PC,  	PUSHR.CONT)
+
+CALL.SET.NEW.PC:
+	;---------------------------------------; state<2> = 0:
+	[WBUS] <-- [MD.S2] + [KDL],		; update PC with entry + 2 (dl = word)
+	LOAD VIBA AND PC,			; >> load PC, no decode for two cycles
+	ENABLE IB PREFETCH			; turn on prefetch
+
+	;---------------------------------------;
+	SC&, [PSL] <-- [PSL] ANDNOT 000000[0EF],; clear out old PSW except for PSL<t>
+						; >> PSL read, not written in prev cycle
+						; >> PSL write, no decode in next cycle
+	CASE [STATE2-0] AT [CALL.DV.IV.00]	; case on dv.iv
+
+;= ALIGNLIST 100*	(CALL.DV.IV.00,		CALL.DV.IV.01,
+;=			 CALL.DV.IV.10,		CALL.DV.IV.11)
+
+CALL.DV.IV.01:
+	;---------------------------------------; state<1:0> = 01:
+	[PSL] <-- [SC] OR 000000[20],		; or in new dv.iv
+						; >> PSL write, no decode in next cycle
+	GOTO [CALL.DV.IV.00]			; go update FP
+
+CALL.DV.IV.10:
+	;---------------------------------------; state<1:0> = 10:
+	[PSL] <-- [SC] OR 000000[80],		; or in new dv.iv
+						; >> PSL write, no decode in next cycle
+	GOTO [CALL.DV.IV.00]			; go update FP
+
+CALL.DV.IV.11:
+	;---------------------------------------; state<1:0> = 11:
+	[PSL] <-- [SC] OR 000000[0A0],		; or in new dv.iv
+						; >> PSL write, no decode in next cycle
+	GOTO [CALL.DV.IV.00]			; go update FP
+
+;	CALLx, continued.
+;	Update FP, AP, SP.
+
+;	At this point,
+;		MD.S1	=	arg list (CALLG), # args (CALLS)
+;		MD.T3	=	new SP
+
+CALL.DV.IV.00:
+	;---------------------------------------; state<1:0> = 00:
+	[FP] <-- [MD.T3],			; replace FP with new top of stack
+	CASE [OPCODE2-0] AT [CALLG.SET.AP]	; case on CALLG vs CALLS
+
+;= ALIGNLIST *10*	(CALLG.SET.AP,		CALLS.SET.AP)
+;  Opcodes = FA, FB --> opcode<2:0> = 01?
+
+CALLG.SET.AP:
+	;---------------------------------------; opcode<2:0> = 010 (CALLG):
+	[AP] <-- [MD.S1],			; new AP is 1st operand
+	GOTO [SET.SP.MD3.LAST.CYCLE]		; finish up
+
+CALLS.SET.AP:
+	;---------------------------------------; opcode<2:0> = 011 (CALLS):
+	[AP] <-- [SP] - 4,			; new AP is on the stack
+	GOTO [SET.SP.MD3.LAST.CYCLE]		; finish up
+
+SET.SP.MD3.LAST.CYCLE:
+RET.LOAD.11.9.000:
+	;---------------------------------------; sc<11:9> = 000: CASE shouldn't get here!
+	[SP] <-- [MD.T3],			; replace SP with new top of stack
+	LAST CYCLE				; decode next instruction
+
+.nobin
+.TOC	"	RET"
+
+;	This instruction returns from a procedure called by CALLG or CALLS.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----	--	--------   -----
+;	RET		04	return from procedure			0	--	--	RET	   --
+;
+;	Entry conditions from initial decode:
+;		FP	=	base of stack frame
+;
+;	Exit conditions:
+;		The procedure stack frame has been removed from the stack.
+;		SP points to the new top of stack.
+;		PSW<7:0>, PC, FP, AP are restored from the stack frame.
+;		R0...R11 are restored from the stack frame, if specified by the mask.
+;
+;	Condition codes:
+;		N <-- saved PSW<3>
+;		Z <-- saved PSW<2>
+;		V <-- saved PSW<1>		[Integer overflow trap disabled by default iiip map.]
+;		C <-- saved PSW<0>
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:
+;		The code is optimized for a RET from CALLS.
+;
+.bin
+
+;	RET operation:
+;
+;		Pop the SPA/S0/mask/PSW longword from the stack.
+;		Check the stack for read access.
+;		Calculate new SP.
+;		Pop AP, FP, and PC.
+;		Pop R0...R11 as specified by the mask.
+;		Adjust the PSW traps, update PC and SP, exit.
+
+RET..:
+	;********** Hardware dispatch **********;
+	[MD.T4] <-- MEM ([FP] + 4), LONG,	; [1] read SPA/S0/mask/PSW longword to MD4
+	DISABLE IB PREFETCH,			; turn off prefetch
+						; 1-cycle wait for data on cache hit
+ 						; >> no CALL during first cycle
+		sim addr [sp] [0]
+
+	;---------------------------------------;
+	[MD.T0] <-- [FP] + 000000[20.]		; [2] 5th lw in common stack frame
+						; + # args (CALLS) = 20 bytes
+
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] AND [20]000000,	; [3] test for CALLG/CALLS
+	LONG,					;
+		sim wbus.nzvc <-- [callret.0z00]
+
+	;---------------------------------------;
+	[SC] <-- ZEXT.[MD.T4] RSH [16.],	; [4] get mask into SC<11:0> for casing
+		sim sc <-- register mask 11-0
+
+	;---------------------------------------;
+	[MD.T1] <-- ZEXT.[SC] RSH [14.]		; [5] SPA to MD1<1:0> for address alignment
+						; get mask onto BBUS for register count
+
+	;---------------------------------------;
+	[MD.T0] <-- [MASK.BITS.SET*4] + [MD.T0],; [6] first frame = common stack + 
+						;                   mask registers
+	CASE [WBUS.NZV] AT [RET.S]		; case on CALLG vs CALLS
+
+;	RET, continued.
+;	Read check the first stack address.
+;	For CALLG, the first stack address = the first frame address.
+;	For CALLS, the first stack address = the location of # args.
+
+;	At this point,
+;		MD.T0	=	first frame address
+;		MD.T1	=	SPA in bits<1:0>
+;		MD.T4	=	SPA/S0/mask/PSW
+;		SC	=	mask
+;		DL	=	byte
+
+;= ALIGNLIST *0**	(RET.S,		RET.G)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+RET.S:
+	;---------------------------------------; wbus.z = 0:
+	[MD.T3] <-- MEM ([MD.T0] + [MD.T1]),	; [7] add in SPA, read check, get # of args
+	LEN(DL),				; dl is byte
+	CALL [RET.TEST.MBZ],			; test mbz bits
+		sim addr [ret.sp] [0]
+
+	;---------------------------------------;
+	[MD.T1] <-- [MD.T3] LSH [2.],		; [9] convert # args to bytes
+	HOLD WBUS CC,				; this path one instruction more than RET.G
+	GOTO [RET.MERGE]			; go calculate new SP
+
+;	One-line subroutine to test the mbz bits in the PSW.
+
+RET.TEST.MBZ:
+	;---------------------------------------;
+	[WBUS] <-- [MD.T4] AND 0000[0FF]00,	; [8] test PSW<15:8> for mbz
+	RETURN,
+		sim wbus.nzvc <-- k[4]
+
+RET.G:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T6] <-- MEM ([MD.T0] - 4),		; [7] dummy read to MD6 for access checking
+	LONG,					; read instead of probe to avoid latency
+						; wait one cycle for VAP to get updated
+	CALL [RET.TEST.MBZ],			; test mbz bits, returns to RET.MERGE
+		sim addr [ret.sp] [0]
+
+;	RET, continued.
+;	Read from first stack address succeeded.
+;	Generate new SP.
+;	Pop standard registers, pop general registers under mask control.
+
+;	At this point,
+;		MD.T1	=	RET.G: SPA
+;				RET.S: #args*4
+;		MD.T4	=	SPA/S0/mask/PSW
+;		MD.T6	=	dummy read destination, not yet touched
+;		SC	=	mask
+;		VAP	=	top of stack frame
+
+RET.MERGE:
+	;---------------------------------------;
+	[MD.T3] <-- [VAP] + [MD.T1],		; RET.G: VAP + SPA     = new SP
+						; RET.S: VAP + #args*4 = new SP
+	DL <-- QUAD				; used to get kdl = 8
+
+	;---------------------------------------;
+	[MD.T0] <-- MEM ([FP] + [KDL]), LONG,	; pop AP from stack @(FP + 8)
+	STATE3-0 <-- 0,				; RET/POPR flag
+		sim addr [sp.plus] [4]
+
+	;---------------------------------------;
+	[MD.T1] <-- MEM (VAP), LONG,		; pop FP from stack
+	CASE [WBUS.NZV] AT [RET.RSRV.OPER]	; case on PSW<15:8> zero
+
+;= ALIGNLIST *0**	(RET.RSRV.OPER,		RET.READ.PC)
+;  WBUS.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+RET.RSRV.OPER:
+	;---------------------------------------; wbus.z = 0:
+	RESERVED OPERAND FAULT			; PSW<15:8> not zero, reserved operand fault
+
+RET.READ.PC:
+	;---------------------------------------; wbus.z = 1:
+	[MD.T5] <-- MEM (VAP), LONG,		; pop PC from stack
+	ACCESS B[MD.T6],			; paranoia, previous read assures MD.T6 done
+	CASE [SC2-0] AT [RET.POP.2.0.000]	; case on mask bits<2:0>
+
+;	RET, continued.
+;	Get here from either RET or POPR.
+;	Process mask bits<2:0> = SC<2:0> (R0 to R2).
+;	Pop stack.
+
+;	At this point,
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.POP.2.0.000,	RET.POP.2.0.001,
+;=			 RET.POP.2.0.010,	RET.POP.2.0.011,
+;=		         RET.POP.2.0.100,	RET.POP.2.0.101,
+;=			 RET.POP.2.0.110,	RET.POP.2.0.111)
+
+RET.POP.2.0.000:
+	;---------------------------------------; sc<2:0> = 000:
+	CASE [SC5-3] AT [RET.POP.5.3.000]	; no regs, case on mask bits<5:3>
+
+RET.POP.2.0.001:
+	;---------------------------------------; sc<2:0> = 001:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R0 from stack
+	CASE [SC2-0] AT [RET.LOAD.2.0.000]	; done here, case into load routine
+
+RET.POP.2.0.010:
+	;---------------------------------------; sc<2:0> = 010:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R1 from stack
+	CASE [SC2-0] AT [RET.LOAD.2.0.000]	; done here, case into load routine
+
+RET.POP.2.0.011:
+	;---------------------------------------; sc<2:0> = 011:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R0 from stack
+	GOTO [RET.POP.2.0.010]			; go pop R1
+
+RET.POP.2.0.100:
+	;---------------------------------------; sc<2:0> = 100:
+	[MD.TMP] <-- MEM (VAP), LONG,		; pop R2 from stack
+	CASE [SC2-0] AT [RET.LOAD.2.0.000]	; done here, case into load routine
+
+RET.POP.2.0.101:
+	;---------------------------------------; sc<2:0> = 101:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R0 from stack
+	GOTO [RET.POP.2.0.100]			; go pop R2
+
+RET.POP.2.0.110:
+	;---------------------------------------; sc<2:0> = 110:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R1 from stack
+	GOTO [RET.POP.2.0.100]			; go pop R2
+
+RET.POP.2.0.111:
+	;---------------------------------------; sc<2:0> = 111:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R0 from stack
+	GOTO [RET.POP.2.0.110]			; go pop R1 and R2
+
+;	RET, continued.
+;	Process mask bits<2:0> = SC<2:0> (R0 to R2).
+;	Load GPRs with popped data.
+
+;	At this point,
+;		MD.T2	=	R0 data if popped
+;		MD.T6	=	R1 data if popped
+;		MD.TMP	=	R2 data if popped
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.LOAD.2.0.000,	RET.LOAD.2.0.001,
+;=			 RET.LOAD.2.0.010,	RET.LOAD.2.0.011,
+;=		         RET.LOAD.2.0.100,	RET.LOAD.2.0.101,
+;=			 RET.LOAD.2.0.110,	RET.LOAD.2.0.111)
+
+RET.LOAD.2.0.001:
+	;---------------------------------------; sc<2:0> = 000:
+	[G.0] <-- [MD.T2],			; update R0
+	CASE [SC5-3] AT [RET.POP.5.3.000]	; done here, case on mask bits<5:3>
+
+RET.LOAD.2.0.010:
+	;---------------------------------------; sc<2:0> = 010:
+	[G.1] <-- [MD.T6],			; update R1
+	CASE [SC5-3] AT [RET.POP.5.3.000]	; done here, case on mask bits<5:3>
+
+RET.LOAD.2.0.011:
+	;---------------------------------------; sc<2:0> = 011:
+	[G.0] <-- [MD.T2],			; update R0
+	GOTO [RET.LOAD.2.0.010]			; go update R1
+
+RET.LOAD.2.0.100:
+	;---------------------------------------; sc<2:0> = 100:
+	[G.2] <-- [MD.TMP],			; update R2
+	CASE [SC5-3] AT [RET.POP.5.3.000]	; done here, case on mask bits<5:3>
+
+RET.LOAD.2.0.101:
+	;---------------------------------------; sc<2:0> = 101:
+	[G.0] <-- [MD.T2],			; update R0
+	GOTO [RET.LOAD.2.0.100]			; go update R2
+
+RET.LOAD.2.0.110:
+	;---------------------------------------; sc<2:0> = 110:
+	[G.1] <-- [MD.T6],			; update R1
+	GOTO [RET.LOAD.2.0.100]			; go update R2
+
+RET.LOAD.2.0.111:
+	;---------------------------------------; sc<2:0> = 111:
+	[G.0] <-- [MD.T2],			; update R0
+	GOTO [RET.LOAD.2.0.110]			; go update R1 and R2
+
+;	RET, continued.
+;	Process mask bits<5:3> = SC<5:3> (R3 to R5).
+;	Pop stack.
+
+;	At this point,
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.POP.5.3.000,	RET.POP.5.3.001,
+;=			 RET.POP.5.3.010,	RET.POP.5.3.011,
+;=		         RET.POP.5.3.100,	RET.POP.5.3.101,
+;=			 RET.POP.5.3.110,	RET.POP.5.3.111)
+
+RET.POP.5.3.000:
+	;---------------------------------------; sc<5:3> = 000:
+	CASE [SC8-6] AT [RET.POP.8.6.000]	; no regs, case on mask bits<8:6>
+
+RET.POP.5.3.001:
+	;---------------------------------------; sc<5:3> = 001:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R3 from stack
+	CASE [SC5-3] AT [RET.LOAD.5.3.000]	; done here, case into load routine
+
+RET.POP.5.3.010:
+	;---------------------------------------; sc<5:3> = 010:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R4 from stack
+	CASE [SC5-3] AT [RET.LOAD.5.3.000]	; done here, case into load routine
+
+RET.POP.5.3.011:
+	;---------------------------------------; sc<5:3> = 011:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R3 from stack
+	GOTO [RET.POP.5.3.010]			; go pop R4
+
+RET.POP.5.3.100:
+	;---------------------------------------; sc<5:3> = 100:
+	[MD.TMP] <-- MEM (VAP), LONG,		; pop R5 from stack
+	CASE [SC5-3] AT [RET.LOAD.5.3.000]	; done here, case into load routine
+
+RET.POP.5.3.101:
+	;---------------------------------------; sc<5:3> = 101:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R3 from stack
+	GOTO [RET.POP.5.3.100]			; go pop R5
+
+RET.POP.5.3.110:
+	;---------------------------------------; sc<5:3> = 110:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R4 from stack
+	GOTO [RET.POP.5.3.100]			; go pop R5
+
+RET.POP.5.3.111:
+	;---------------------------------------; sc<5:3> = 111:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R3 from stack
+	GOTO [RET.POP.5.3.110]			; go pop R4 and R5
+
+;	RET, continued.
+;	Process mask bits<5:3> = SC<5:3> (R3 to R5).
+;	Load GPRs with popped data.
+
+;	At this point,
+;		MD.T2	=	R3 data if popped
+;		MD.T6	=	R4 data if popped
+;		MD.TMP	=	R5 data if popped
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.LOAD.5.3.000,	RET.LOAD.5.3.001,
+;=			 RET.LOAD.5.3.010,	RET.LOAD.5.3.011,
+;=		         RET.LOAD.5.3.100,	RET.LOAD.5.3.101,
+;=			 RET.LOAD.5.3.110,	RET.LOAD.5.3.111)
+
+RET.LOAD.5.3.001:
+	;---------------------------------------; sc<5:3> = 000:
+	[G.3] <-- [MD.T2],			; update R3
+	CASE [SC8-6] AT [RET.POP.8.6.000]	; done here, case on mask bits<8:6>
+
+RET.LOAD.5.3.010:
+	;---------------------------------------; sc<5:3> = 010:
+	[G.4] <-- [MD.T6],			; update R4
+	CASE [SC8-6] AT [RET.POP.8.6.000]	; done here, case on mask bits<8:6>
+
+RET.LOAD.5.3.011:
+	;---------------------------------------; sc<5:3> = 011:
+	[G.3] <-- [MD.T2],			; update R3
+	GOTO [RET.LOAD.5.3.010]			; go update R4
+
+RET.LOAD.5.3.100:
+	;---------------------------------------; sc<5:3> = 100:
+	[G.5] <-- [MD.TMP],			; update R5
+	CASE [SC8-6] AT [RET.POP.8.6.000]	; done here, case on mask bits<8:6>
+
+RET.LOAD.5.3.101:
+	;---------------------------------------; sc<5:3> = 101:
+	[G.3] <-- [MD.T2],			; update R3
+	GOTO [RET.LOAD.5.3.100]			; go update R5
+
+RET.LOAD.5.3.110:
+	;---------------------------------------; sc<5:3> = 110:
+	[G.4] <-- [MD.T6],			; update R4
+	GOTO [RET.LOAD.5.3.100]			; go update R5
+
+RET.LOAD.5.3.111:
+	;---------------------------------------; sc<5:3> = 111:
+	[G.3] <-- [MD.T2],			; update R3
+	GOTO [RET.LOAD.5.3.110]			; go update R4 and R5
+
+;	RET, continued.
+;	Process mask bits<8:6> = SC<8:6> (R6 to R8).
+;	Pop stack.
+
+;	At this point,
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.POP.8.6.000,	RET.POP.8.6.001,
+;=			 RET.POP.8.6.010,	RET.POP.8.6.011,
+;=		         RET.POP.8.6.100,	RET.POP.8.6.101,
+;=			 RET.POP.8.6.110,	RET.POP.8.6.111)
+
+RET.POP.8.6.000:
+	;---------------------------------------; sc<8:6> = 000:
+	CASE [SC11-9] AT [RET.POP.11.9.000]	; no regs, case on mask bits<11:9>
+
+RET.POP.8.6.001:
+	;---------------------------------------; sc<8:6> = 001:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R6 from stack
+	CASE [SC8-6] AT [RET.LOAD.8.6.000]	; done here, case into load routine
+
+RET.POP.8.6.010:
+	;---------------------------------------; sc<8:6> = 010:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R7 from stack
+	CASE [SC8-6] AT [RET.LOAD.8.6.000]	; done here, case into load routine
+
+RET.POP.8.6.011:
+	;---------------------------------------; sc<8:6> = 011:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R6 from stack
+	GOTO [RET.POP.8.6.010]			; go pop R7
+
+RET.POP.8.6.100:
+	;---------------------------------------; sc<8:6> = 100:
+	[MD.TMP] <-- MEM (VAP), LONG,		; pop R8 from stack
+	CASE [SC8-6] AT [RET.LOAD.8.6.000]	; done here, case into load routine
+
+RET.POP.8.6.101:
+	;---------------------------------------; sc<8:6> = 101:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R6 from stack
+	GOTO [RET.POP.8.6.100]			; go pop R8
+
+RET.POP.8.6.110:
+	;---------------------------------------; sc<8:6> = 110:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R7 from stack
+	GOTO [RET.POP.8.6.100]			; go pop R8
+
+RET.POP.8.6.111:
+	;---------------------------------------; sc<8:6> = 111:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R6 from stack
+	GOTO [RET.POP.8.6.110]			; go pop R7 and R8
+
+;	RET, continued.
+;	Process mask bits<8:6> = SC<8:6> (R6 to R8).
+;	Load GPRs with popped data.
+
+;	At this point,
+;		MD.T2	=	R6 data if popped
+;		MD.T6	=	R7 data if popped
+;		MD.TMP	=	R8 data if popped
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.LOAD.8.6.000,	RET.LOAD.8.6.001,
+;=			 RET.LOAD.8.6.010,	RET.LOAD.8.6.011,
+;=		         RET.LOAD.8.6.100,	RET.LOAD.8.6.101,
+;=			 RET.LOAD.8.6.110,	RET.LOAD.8.6.111)
+
+RET.LOAD.8.6.001:
+	;---------------------------------------; sc<8:6> = 000:
+	[G.6] <-- [MD.T2],			; update R6
+	CASE [SC11-9] AT [RET.POP.11.9.000]	; done here, case on mask bits<11:9>
+
+RET.LOAD.8.6.010:
+	;---------------------------------------; sc<8:6> = 010:
+	[G.7] <-- [MD.T6],			; update R7
+	CASE [SC11-9] AT [RET.POP.11.9.000]	; done here, case on mask bits<11:9>
+
+RET.LOAD.8.6.011:
+	;---------------------------------------; sc<8:6> = 011:
+	[G.6] <-- [MD.T2],			; update R6
+	GOTO [RET.LOAD.8.6.010]			; go update R7
+
+RET.LOAD.8.6.100:
+	;---------------------------------------; sc<8:6> = 100:
+	[G.8] <-- [MD.TMP],			; update R8
+	CASE [SC11-9] AT [RET.POP.11.9.000]	; done here, case on mask bits<11:9>
+
+RET.LOAD.8.6.101:
+	;---------------------------------------; sc<8:6> = 101:
+	[G.6] <-- [MD.T2],			; update R6
+	GOTO [RET.LOAD.8.6.100]			; go update R8
+
+RET.LOAD.8.6.110:
+	;---------------------------------------; sc<8:6> = 110:
+	[G.7] <-- [MD.T6],			; update R7
+	GOTO [RET.LOAD.8.6.100]			; go update R8
+
+RET.LOAD.8.6.111:
+	;---------------------------------------; sc<8:6> = 111:
+	[G.6] <-- [MD.T2],			; update R6
+	GOTO [RET.LOAD.8.6.110]			; go update R7 and R8
+
+;	RET, continued.
+;	Process mask bits<11:9> = SC<11:9> (R9 to R11).
+;	Pop stack.
+
+;	At this point,
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.POP.11.9.000,	RET.POP.11.9.001,
+;=			 RET.POP.11.9.010,	RET.POP.11.9.011,
+;=		         RET.POP.11.9.100,	RET.POP.11.9.101,
+;=			 RET.POP.11.9.110,	RET.POP.11.9.111)
+
+RET.POP.11.9.001:
+	;---------------------------------------; sc<11:9> = 001:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R9 from stack
+	CASE [SC11-9] AT [RET.LOAD.11.9.000]	; done here, case into load routine
+
+RET.POP.11.9.010:
+	;---------------------------------------; sc<11:9> = 010:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R10 from stack
+	CASE [SC11-9] AT [RET.LOAD.11.9.000]	; done here, case into load routine
+
+RET.POP.11.9.011:
+	;---------------------------------------; sc<11:9> = 011:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R9 from stack
+	GOTO [RET.POP.11.9.010]			; go pop R10
+
+RET.POP.11.9.100:
+	;---------------------------------------; sc<11:9> = 100:
+	[MD.TMP] <-- MEM (VAP), LONG,		; pop R11 from stack
+	CASE [SC11-9] AT [RET.LOAD.11.9.000]	; done here, case into load routine
+
+RET.POP.11.9.101:
+	;---------------------------------------; sc<11:9> = 101:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R9 from stack
+	GOTO [RET.POP.11.9.100]			; go pop R11
+
+RET.POP.11.9.110:
+	;---------------------------------------; sc<11:9> = 110:
+	[MD.T6] <-- MEM (VAP), LONG,		; pop R10 from stack
+	GOTO [RET.POP.11.9.100]			; go pop R11
+
+RET.POP.11.9.111:
+	;---------------------------------------; sc<11:9> = 111:
+	[MD.T2] <-- MEM (VAP), LONG,		; pop R9 from stack
+	GOTO [RET.POP.11.9.110]			; go pop R10 and R11
+
+;	RET, continued.
+;	Process mask bits<11:9> = SC<11:9> (R9 to R11).
+;	Load GPRs with popped data.
+
+;	At this point,
+;		MD.T2	=	R9 data if popped
+;		MD.T6	=	R10 data if popped
+;		MD.TMP	=	R11 data if popped
+;		SC	=	mask<11:0>
+;		VAP	=	next stack location for push
+;		STATE<2> =	RET/POPR flag
+
+;= ALIGNLIST 000*	(RET.LOAD.11.9.000,	RET.LOAD.11.9.001,
+;=			 RET.LOAD.11.9.010,	RET.LOAD.11.9.011,
+;=		         RET.LOAD.11.9.100,	RET.LOAD.11.9.101,
+;=			 RET.LOAD.11.9.110,	RET.LOAD.11.9.111)
+
+RET.LOAD.11.9.001:
+	;---------------------------------------; sc<11:9> = 000:
+	[G.9] <-- [MD.T2],			; update R9
+	GOTO [RET.POP.11.9.000]			; go load new PC and exit
+
+RET.LOAD.11.9.010:
+	;---------------------------------------; sc<11:9> = 010:
+	[G.10] <-- [MD.T6],			; update R10
+	GOTO [RET.POP.11.9.000]			; go load new PC and exit
+
+RET.LOAD.11.9.011:
+	;---------------------------------------; sc<11:9> = 011:
+	[G.9] <-- [MD.T2],			; update R9
+	GOTO [RET.LOAD.11.9.010]		; go update R10
+
+RET.LOAD.11.9.100:
+	;---------------------------------------; sc<11:9> = 100:
+	[G.11] <-- [MD.TMP],			; update R11
+	GOTO [RET.POP.11.9.000]			; go load new PC and exit
+
+RET.LOAD.11.9.101:
+	;---------------------------------------; sc<11:9> = 101:
+	[G.9] <-- [MD.T2],			; update R9
+	GOTO [RET.LOAD.11.9.100]		; go update R11
+
+RET.LOAD.11.9.110:
+	;---------------------------------------; sc<11:9> = 110:
+	[G.10] <-- [MD.T6],			; update R10
+	GOTO [RET.LOAD.11.9.100]		; go update R11
+
+RET.LOAD.11.9.111:
+	;---------------------------------------; sc<11:9> = 111:
+	[G.9] <-- [MD.T2],			; update R9
+	GOTO [RET.LOAD.11.9.110]		; go update R10 and R11
+
+;	RET, continued.
+;	Stack frame restored.
+;	Update PC, assume for now that PSL<t> is cleared
+;	Fix up PSL
+
+;	At this point,
+;		MD.T0	=	new AP
+;		MD.T1	=	new FP
+;		MD.T3	=	new SP
+;		MD.T4	=	SPA/S0/mask/PSW
+;		MD.T5	=	new PC
+;		STATE<2> =	RET/POPR flag
+
+RET.POP.11.9.000:
+	;---------------------------------------; sc<11:9> = 000:
+	[SC] <-- [MD.T4] AND 000000[0FF],	; get new PSW into SC
+	CASE [STATE2-0] AT [RET.UPDATE.PC],	; case on whether RET or POPR
+		sim sc <-- [0]
+
+;= ALIGNLIST 011*	(RET.UPDATE.PC,		POPR.CONT)
+
+RET.UPDATE.PC:
+	;---------------------------------------; state<2> = 0:
+	[WBUS] <-- [MD.T5],			; update PC with popped value
+	LOAD VIBA AND PC,			; >> load PC, no decode for two cycles
+	ENABLE IB PREFETCH			; turn on prefetch
+
+RET.LOAD.2.0.000:
+	;---------------------------------------; sc<2:0> = 000: CASE shouldn't get here!
+	[MD.T2] <-- [PSL] ANDNOT 000000[0FF]	; clear PSW in old PSL
+
+RET.LOAD.5.3.000:
+	;---------------------------------------; sc<5:3> = 000: CASE shouldn't get here!
+	[PSL] <-- [MD.T2] OR [SC],		; create new PSL
+	CASE [SC5-3] AT [RET.UPDATE.FP]		; case on PSL<t> set
+						; >> PSL<t> update, must flush before decode
+
+
+;	RET, continued.
+;	If PSL<t> is set, we must flush the IBOX again.
+;	Update FP, AP, and SP, exit.
+
+;	At this point,
+;		MD.T0	=	new AP
+;		MD.T1	=	new FP
+;		MD.T3	=	new SP
+;		MD.T5	=	new PC
+
+;= ALIGNLIST 101*	(RET.UPDATE.FP,		RET.TBIT.SET)
+
+RET.TBIT.SET:
+	;---------------------------------------; sc<4> = 1:
+	[WBUS] <-- [MD.T5],			; PSL<t> set, must flush again before decode
+	LOAD VIBA AND PC			; >> load PC, no decode for two cycles
+
+RET.UPDATE.FP:
+	;---------------------------------------; sc<4> = 0:
+	[FP] <-- [MD.T1]			; update FP
+
+RET.LOAD.8.6.000:
+	;---------------------------------------; sc<8:6> = 000: CASE shouldn't get here!
+	[AP] <-- [MD.T0],			; update AP
+	GOTO [SET.SP.MD3.LAST.CYCLE]		; go set new SP, decode next instruction
+
+;= END CALLRET

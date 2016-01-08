@@ -1,0 +1,649 @@
+NVAX Instruction Timing
+
+<< General description of NVAX pipeline >>
+
+1 I Box Operations
+
+<< General description of calculating operand specifier times.>>
+
+1.1 Specifier Operations
+
+This section details the time required by the I Box to process operand
+specifiers.  Specifier addressing modes are cross-indexed with specifier
+access type:
+
+	r = read
+	a = address
+	v = field
+	m = modify
+	w = write
+
+and data length:
+
+	b = byte
+	w = word
+	l = long or f_floating
+	q = quadword or d_floating or g_floating.
+
+This table covers data lengths byte, word, and long.
+
+addressing mode		   |  r.bwl    av.bwl  m.bwl  w.bwl
+---------------------------+--------------------------------
+not indexed:		   |
+ short literal	#n	   |	
+ register	Rn	   |	
+ register def	(Rn)	   |	
+ autodecrement	-(Rn)	   |	
+ autoincrement	(Rn)+	   |	
+ immediate	i^#n	   |	
+ autoinc def	@(Rn)+	   |	
+ absolute	@#a	   |	
+ displ/relative d(Rn)	   |	
+ displ/rel def	@d(Rn)	   |	
+indexed:		   |
+ short literal		   |	
+ register		   |	
+ register def	(Rn)[Rx]   |	
+ autodecrement	-(Rn)[Rx]  |	
+ autoincrement	(Rn)+[Rx]  |	
+ immediate		   |	
+ autoinc def	@(Rn)+[Rx] |	
+ absolute	@#a[Rx]	   |	
+ displ/relative	d(Rn)[Rx]  |	
+ displ/rel def	@d(Rn)[Rx] |	
+
+This table covers data length quad.  
+
+addressing mode		   |   r.q    av.q     m.q     w.q
+---------------------------+--------------------------------
+not indexed:		   |
+ short literal	#n	   |	
+ register	Rn	   |	
+ register def	(Rn)	   |	
+ autodecrement	-(Rn)	   |	
+ autoincrement	(Rn)+	   |	
+ immediate	i^#n	   |	
+ autoinc def	@(Rn)+	   |	
+ absolute	@#a	   |	
+ displ/relative d(Rn)	   |	
+ displ/rel def	@d(Rn)	   |	
+indexed:		   |
+ short literal		   |	
+ register		   |	
+ register def	(Rn)[Rx]   |	
+ autodecrement	-(Rn)[Rx]  |	
+ autoincrement	(Rn)+[Rx]  |	
+ immediate		   |	
+ autoinc def	@(Rn)+[Rx] |	
+ absolute	@#a[Rx]	   |	
+ displ/relative	d(Rn)[Rx]  |	
+ displ/rel def	@d(Rn)[Rx] |	
+
+1.2 Instruction Specific Operations
+
+This section details the time required by the I Box to preprocess
+certain instructions.
+
+<< CALLx, RET, JMP, JSR, etc >>
+
+2 E Box Operations
+
+E Box operation timing covers the execution time of the current instruction.
+If the current instruction is a branch and cannot be predicted correctly,
+the pipeline idle time caused by this is accounted for in this table.
+
+The standard notation for operand specifiers is:
+
+	 <name>.<access type><data type>
+
+where:
+
+  o Name is a suggestive name for the operand in the context of the instruction.
+    It is the capitalized name of a register or block for implied operands.
+  o Access type is a letter denoting the operand specifier access type.
+
+	a  =	address operand
+	b  =	branch displacement
+	m  =	modified operand (both read and written)
+	r  =	read only operand
+	v  =	field operand
+	w  =	write only operand
+
+  o Data type is a letter denoting the data type of the operand.
+
+	b  =	byte
+	d  =	d_floating
+	f  =	f_floating
+	g  =	g_floating
+	l  =	longword
+	q  =	quadword
+	v  =	field (used only in implied operands)
+	w  =	word
+	*  =	multiple longwords (used only in implied operands)
+
+  o Implied operands, that is, locations that are accessed by the instruction,
+    but not specified in an operand, are denoted by curly braces {}.
+
+2.1 Integer Arithmetic and Logical Instructions
+
+The I Box is shut off throughout EDIV; hence the next instruction
+will encounter a pipeline restart delay of {rst} cycles.
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+58	 ADAWI add.rw, sum.mw				4	sum = reg
+							5+1r+1w	sum = mem
+
+80	 ADDB2 add.rb, sum.mb				1
+C0	 ADDL2 add.rl, sum.ml				1
+A0	 ADDW2 add.rw, sum.mw				1
+
+81	 ADDB3 add1.rb, add2.rb, sum.wb			1
+C1	 ADDL3 add1.rl, add2.rl, sum.wl			1
+A1	 ADDW3 add1.rw, add2.rw, sum.ww			1
+
+D8	 ADWC add.rl, sum.ml				5
+
+78	 ASHL cnt.rb, src.rl, dst.wl			3-4, 4 typ
+79	 ASHQ cnt.rb, src.rq, dst.wq			4-7, 6 typ
+
+8A	 BICB2 mask.rb, dst.mb				1
+CA	 BICL2 mask.rl, dst.ml				1
+AA	 BICW2 mask.rw, dst.mw				1
+
+8B	 BICB3 mask.rb, src.rb, dst.wb			1
+CB	 BICL3 mask.rl, src.rl, dst.wl			1
+AB	 BICW3 mask.rw, src.rw, dst.ww			1
+
+88	 BISB2 mask.rb, dst.mb				1
+C8	 BISL2 mask.rl, dst.ml				1
+A8	 BISW2 mask.rw, dst.mw				1
+
+89	 BISB3 mask.rb, src.rb, dst.wb			1
+C9	 BISL3 mask.rl, src.rl, dst.wl			1
+A9	 BISW3 mask.rw, src.rw, dst.ww			1
+
+93	 BITB mask.rb, src.rb				1
+D3	 BITL mask.rl, src.rl				1
+B3	 BITW mask.rw, src.rw				1
+
+94	 CLRB dst.wb					1
+D4	 CLRL{=F} dst.wl				1
+7C	 CLRQ{=D=G} dst.wq				2
+B4	 CLRW dst.ww					1
+
+91	 CMPB src1.rb, src2.rb				1
+D1	 CMPL src1.rl, src2.rl				1
+B1	 CMPW src1.rw, src2.rw				1
+
+98	 CVTBL src.rb, dst.wl				2
+99	 CVTBW src.rb, dst.wl				2
+F6	 CVTLB src.rl, dst.wb				3
+F7	 CVTLW src.rl, dst.ww				3
+33	 CVTWB src.rw, dst.wb				3
+32	 CVTWL src.rw, dst.wl				2
+
+97	 DECB dif.mb					1
+D7	 DECL dif.ml					1
+B7	 DECW dif.mw					1
+
+86	 DIVB2 divr.rb, quo.mb				15-19, 16 typ
+C6	 DIVL2 divr.rl, quo.ml				39-43, 40 typ
+A6	 DIVW2 divr.rw, quo.mw				23-27, 24 typ
+
+87	 DIVB3 divr.rb, divd.rb, quo.wb			15-19, 16 typ
+C7	 DIVL3 divr.rl, divd.rl, quo.wl			39-43, 40 typ
+A7	 DIVW3 divr.rw, divd.rw, quo.ww			23-27, 24 typ
+
+7B	 EDIV divr.rl, divd.rq, quo.vl, rem.wl		50-54+{rst},
+							52+{rst} typ
+
+7A	 EMUL mulr.rl, muld.rl, add.rl, prod.wq		37
+
+96	 INCB sum.mb					1
+D6	 INCL sum.ml					1
+B6	 INCW sum.mw					1
+
+92	 MCOMB src.rb, dst.wb				1
+D2	 MCOML src.rl, dst.wl				1
+B2	 MCOMW src.rw, dst.ww				1
+
+8E	 MNEGB src.rb, dst.wb				1
+CE	 MNEGL src.rl, dst.wl				1
+AE	 MNEGW src.rw, dst.ww				1
+
+90	 MOVB src.rb, dst.wb				1
+D0	 MOVL src.rl, dst.wl				1
+7D	 MOVQ src.rq, dst.wq				1
+B0	 MOVW src.rw, dst.ww				1
+
+9A	 MOVZBW src.rb, dst.wb				1
+9B	 MOVZBL src.rb, dst.wl				1
+3C	 MOVZWL src.rw, dst.ww				1
+
+84	 MULB2 mulr.rb, prod.mb				14-15, 14 typ
+C4	 MULL2 mulr.rl, prod.ml				38 w/o FPA
+							tbd with FPA
+A4	 MULW2 mulr.rw, prod.mw				21-22, 21 typ
+
+85	 MULB3 mulr.rb, muld.rb, prod.wb		14-15, 14 typ
+C5	 MULL3 mulr.rl, muld.rl, prod.wl		38 w/o FPA
+							tbd with FPA
+A5	 MULW3 mulr.rw, muld.rw, prod.ww		21-22, 21 typ
+
+DD	 PUSHL src.rl, {-(SP).wl}			1
+
+9C	 ROTL cnt.rb, src.rl, dst.wl			2
+
+D9	 SBWC sub.rl, dif.ml				5
+
+82	 SUBB2 sub.rb, dif.mb				1
+C2	 SUBL2 sub.rl, dif.ml				1
+A2	 SUBW2 sub.rw, dif.mw				1
+
+83	 SUBB3 sub.rb, min.rb, dif.wb			1
+C3	 SUBL3 sub.rl, min.rl, dif.wl			1
+A3	 SUBW3 sub.rw, min.rw, dif.ww			1
+
+95	 TSTB src.rb					1
+D5	 TSTL src.rl					1
+B5	 TSTW src.rw					1
+
+8C	 XORB2 mask.rb, dst.mb				1
+CC	 XORL2 mask.rl, dst.ml				1
+AC	 XORW2 mask.rw, dst.mw				1
+
+8D	 XORB3 mask.rb, src.rb, dst.wb			1
+CD	 XORL3 mask.rl, src.rl, dst.wl			1
+AD	 XORW3 mask.rw, src.rw, dst.ww			1
+
+2.2 Address Instructions
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+9E	 MOVAB src.ab, dst.wl				1
+DE	 MOVAL{=F} src.al, dst.wl			1
+7E	 MOVAQ{=D=G} src.aq, dst.wl			1
+3E	 MOVAW src.aw, dst.wl				1
+
+9F	 PUSHAB src.ab, {-(SP).wl}			1
+DF	 PUSHAL{=F} src.al, {-(SP).wl}			1
+7F	 PUSHAQ{=D=G} src.aq, {-(SP).wl}		1
+3F	 PUSHAW src.aw, {-(SP).wl}			1
+
+2.3 Variable Length Bit Field Instructions
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+EC	 CMPV pos.rl, size.rb, base.vb,			9		v = reg
+		{field.rv}, src.rl			13+1r - 16+2r,
+							13+1r typ	v = mem
+ED	 CMPZV pos.rl, size.rb, base.vb,		9		v = reg
+		{field.rv}, src.rl			13+1r - 16+2r,
+							13+1r typ	v = mem
+EE	 EXTV pos.rl, size.rb, base.vb,			8		v = reg
+		{field.rv}, dst.wl			12+1r - 15+2r,
+							12+1r typ	v = mem
+EF	 EXTZV pos.rl, size.rb, base.vb,		8		v = reg
+		{field.rv}, dst.wl			12+1r - 15+2r,
+							12+1r typ	v = mem
+F0	 INSV src.rl, pos.rl, size.rb, base.vb,		11-12, 11 typ	v = reg
+		{field.wv}				12+1r+1w - 13+2r+2w,
+							12+1r+1w typ	v = mem
+EB	 FFC startpos.rl, size.rb, base.vb,		14-18, 16 typ	v = reg
+		{field.rv}, findpos.wl			18+1r - 25+2r,
+							20+1r typ	v = mem
+EA	 FFS startpos.rl, size.rb, base.vb,		13-17, 15 typ	v = reg
+		{field.rv}, findpos.wl			17+1r - 24+2r,
+							19+1r typ	v = mem
+.end lit
+.hl3 Control Instructions****
+
+The number of cycles if for base execution.  For unconditional branches that
+cannot be tracked by the I Box (eg, CASEx), an additional {pfl} cycles must
+be added for the pipeline flush.  For conditional branches mispredicted by
+the I Box, an additional {mpr} cycles must be added for the mispredict.
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+9D	 ACBB limit.rb, add.rb, index.mb, displ.bw	3+{mpr}
+F1	 ACBL limit.rl, add.rl, index.ml, displ.bw	3+{mpr}
+3D	 ACBW limit.rw, add.rw, index.mw, displ.bw	3+{mpr}
+
+F3	 AOBLEQ limit.rl, index.ml, displ.bb		2+{mpr}
+F2	 AOBLSS limit.rl, index.ml, displ.bb		2+{mpr}
+
+1E	 BCC{=BGEQU} displ.bb				1+{mpr}
+1F	 BCS{=BLSSU} displ.bb				1+{mpr}
+13	 BEQL{=BEQLU} displ.bb				1+{mpr}
+18	 BGEQ displ.bb					1+{mpr}
+14	 BGTR displ.bb					1+{mpr}
+1A	 BGTRU displ.bb					1+{mpr}
+15	 BLEQ displ.bb					1+{mpr}
+1B	 BLEQU displ.bb					1+{mpr}
+19	 BLSS displ.bb					1+{mpr}
+12	 BNEQ{=BNEQU} displ.bb				1+{mpr}
+1C	 BVC displ.bb					1+{mpr}
+1D	 BVS displ.bb					1+{mpr}
+
+E1	 BBC pos.rl, base.vb, displ.bb, {field.rv}	5+{mpr}		v = reg
+							6+1r+{mpr}	v = mem
+E0	 BBS pos.rl, base.vb, displ.bb, {field.rv}	5+{mpr}		v = reg
+							6+1r+{mpr}	v = mem
+
+E5	 BBCC pos.rl, base.vb, displ.bb, {field.mv}	5+{mpr}		v = reg
+							6+1r+1w+{mpr}	v = mem
+E3	 BBCS pos.rl, base.vb, displ.bb, {field.mv}	5+{mpr}		v = reg
+							6+1r+1w+{mpr}	v = mem
+E4	 BBSC pos.rl, base.vb, displ.bb, {field.mv}	5+{mpr}		v = reg
+							6+1r+1w+{mpr}	v = mem
+E2	 BBSS pos.rl, base.vb, displ.bb, {field.mv}	5+{mpr}		v = reg
+							6+1r+1w+{mpr}	v = mem
+
+E7	 BBCCI pos.rl, base.vb, displ.bb, {field.mv}	5+{mpr}		v = reg
+							7+1r+1w+{mpr}	v = mem
+E6	 BBSSI pos.rl, base.vb, displ.bb, {field.mv}	5+{mpr}		v = reg
+							7+1r+1w+{mpr}	v = mem
+
+E9	 BLBC src.rl, displ.bb				1+{mpr}
+E8	 BLBS src.rl, displ.bb				1+{mpr}
+
+11	 BRB displ.bb					1
+31	 BRW displ.bw					1
+
+10	 BSBB displ.bb, {-(SP).wl}			1
+30	 BSBW displ.bw, {-(SP).wl}			1
+
+8F	 CASEB selector.rb, base.rb, limit.rb,		9+1r+{pfl}
+		displ.bw-list
+CF	 CASEL selector.rl, base.rl, limit.rl,		9+1r+{pfl}
+		displ.bw-list
+AF	 CASEW selector.rw, base.rw, limit.rw,		9+1r+{pfl}
+		displ.bw-list
+
+17	 JMP dst.ab					1
+
+16	 JSB dst.ab, {-(SP).wl}				1
+
+05	 RSB {(SP)+.rl}					1
+
+F4	 SOBGEQ index.ml, displ.bb			1+{mpr}
+F5	 SOBGTR index.ml, displ.bb			1+{mpr}
+
+2.4 Procedure Call Instructions
+
+In this section, n = number of set register bits in the procedure call mask.
+The I Box is shut off throughout these instruction; hence the next instruction
+will encounter a pipeline restart delay of {rst} cycles.
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+FA	 CALLG arglist.ab, dst.ab, {-(SP).w*}		12-13+(n+4)w+{rst},
+							12+(n+4)w+{rst} typ
+FB	 CALLS numarg.rl, dst.ab, {-(SP).w*}		12-13+(n+5)w+{rst},
+							12+(n+5)w+{rst} typ
+
+04	 RET {(SP)+.r*}					8+(n+2)r+{rst} G
+							9+(n+3)r+{rst} S
+
+2.5 Miscellaneous Instructions
+
+In this section, n = number of set register bits in the register mask.
+The I Box is shut off throughout the POPR and PUSHR instructions; hence the
+next instruction will encounter a pipeline restart delay of {rst} cycles.
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+B9	 BICPSW mask.rw					5
+B8	 BISPSW mask.rw					5
+
+03	 BPT {-(KSP).w*}				exception
+
+00	 HALT {-(KSP).w*}				3
+
+0A	 INDEX subscript.rl, low.rl, high.rl,		6	size  = 1
+	 size.rl, indexin.rl, indexout.wl		39	size <> 1
+
+DC	 MOVPSL dst.wl					3
+
+01	 NOP						1
+
+BA	 POPR mask.rw, {(SP)+.r*}			10+nr+{rst}
+BB	 PUSHR mask.rw, {-(SP).w*}			7+nw+{rst}
+
+FC	 XFC {unspecified operands}			exception
+
+2.6 Queue Instructions
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+5C	 INSQHI entry.ab, header.aq			10+2r+5w
+5D	 INSQTI entry.ab, header.aq			11+3r+6w
+
+0E	 INSQUE entry.ab, pred.ab			3+1r+4w
+
+5E	 REMQHI header.aq, addr.wl			14+3r+3w
+5F	 REMQTI header.aq, addr.wl			16+4r+4w
+
+0F	 REMQUE entry.ab, addr.wl			5+2r+2w
+
+2.7 Character String Instructions
+
+For CMPC3, CMPC5, LOCC, SKPC, SCANC, SPANC, n = characters processed in main
+loop; k = characters processed in fill loop.  For MOVC3, MOVC5, n = LONGWORDS
+processed in main loop;  k = LONGWORDS processed in fill loop.
+
+The I Box is shut off throughout
+these instructions; hence the next instruction will encounter a pipeline
+restart delay of {rst} cycles.
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+29	 CMPC3 len.rw, src1addr.ab, src2addr.ab		8+7n+2nr+{rst}
+2D	 CMPC5 src1len.rw, src1addr.ab, fill.rb,	9+7n+2nr+6k+kr+{rst}
+	       src2len.rw, src2addr.ab
+
+3A	 LOCC char.rb, len.rw, addr.ab			6+6n+nr+{rst}
+
+28	 MOVC3 len.rw, srcaddr.ab, dstaddr.ab		16+3n+nr+nw+{rst}
+2C	 MOVC5 srclen.rw, srcaddr.ab, fill.rb,		30+3n+nr+nw+2k+kw+{rst}
+	 dstlen.rw, dstaddr.ab
+
+2A	 SCANC len.rw, addr.ab, tbladdr.ab, mask.rb	8+9n+2nr+{rst}
+
+3B	 SKPC char.rb, len.rw, addr.ab			6+6n+nr+{rst}
+
+2B	 SPANC len.rw, addr.ab, tbladdr.ab, mask.rb	8+9n+2nr+{rst}
+
+2.8 Operating System Support Instructions
+
+The I Box is shut off throughout the LDPCTX, SVPCTX, and MxPR instructions;
+hence the next instruction will encounter a pipeline restart delay of {rst}
+cycles.
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+BD	 CHME param.rw, {-(ySP).w*}			12+1r+3w
+BC	 CHMK param.rw, {-(ySP).w*}			12+1r+3w
+BE	 CHMS param.rw, {-(ySP).w*}			12+1r+3w
+BF	 CHMU param.rw, {-(ySP).w*}			12+1r+3w
+	 Where y=MINU(x, PSL<current_mode>)
+
+06	 LDPCTX {PCB.r*, -(KSP).w*}			22+24r+2w+{rst}
+							 - 25+24r+2w+{rst}
+
+DB	 MFPR procreg.rl, dst.wl			7-15+{rst},
+							10+{rst} typ
+DA	 MTPR src.rl, procreg.rl			7-15+{rst},
+							8+{rst} typ
+
+0C	 PROBER mode.rb, len.rw, base.ab		11-12, 11 typ
+0D	 PROBEW mode.rb, len.rw, base.ab		11-12, 11 typ
+
+02	 REI {(SP)+.r*}					16-21, 17 typ
+
+07	 SVPCTX {(SP)+.r*, PCB.w*}			8+2r+20w+{rst}
+							- 13+2r+20w+{rst},
+							12+2r+20w+{rst} typ
+
+2.10 Floating Point Instructions
+
+Opcode	 Instruction				Execution Cycles
+------	 -----------				----------------
+
+60	 ADDD2 add.rd, sum.md				tbd
+40	 ADDF2 add.rf, sum.mf				tbd
+40FD	 ADDG2 add.rg, sum.mg				tbd
+
+61	 ADDD3 add1.rd, add2.rd, sum.wd			tbd
+41	 ADDF3 add1.rf, add2.rf, sum.wf			tbd
+41FD	 ADDG3 add1.rg, add2.rg, sum.wg			tbd
+
+71	 CMPD src1.rd, src2.rd				tbd
+51	 CMPF src1.rf, src2.rf				tbd
+51FD	 CMPG src1.rg, src2.rg				tbd
+
+6C	 CVTBD src.rb, dst.wd				tbd
+4C	 CVTBF src.rb, dst.wf				tbd
+4CFD	 CVTBG src.rb, dst.wg				tbd
+68	 CVTDB src.rd, dst.wb				tbd
+76	 CVTDF src.rd, dst.wf				tbd
+6A	 CVTDL src.rd, dst.wl				tbd
+69	 CVTDW src.rd, dst.ww				tbd
+48	 CVTFB src.rf, dst.wb				tbd
+56	 CVTFD src.rf, dst.wd				tbd
+99FD	 CVTFG src.rf, dst.wg				tbd
+4A	 CVTFL src.rf, dst.wl				tbd
+49	 CVTFW src.rf, dst.ww				tbd
+48FD	 CVTGB src.rg, dst.wb				tbd
+33FD	 CVTGF src.rg, dst.wf				tbd
+4AFD	 CVTGL src.rg, dst.wl				tbd
+49FD	 CVTGW src.rg, dst.ww				tbd
+6E	 CVTLD src.rl, dst.wd				tbd
+4E	 CVTLF src.rl, dst.wf				tbd
+4EFD	 CVTLG src.rl, dst.wg				tbd
+6D	 CVTWD src.rw, dst.wd				tbd
+4D	 CVTWF src.rw, dst.wf				tbd
+4DFD	 CVTWG src.rw, dst.wg				tbd
+
+6B	 CVTRDL src.rd, dst.wl				tbd
+4B	 CVTRFL src.rf, dst.wl				tbd
+4BFD	 CVTRGL src.rg, dst.wl				tbd
+
+66	 DIVD2 divr.rd, quo.md				tbd
+46	 DIVF2 divr.rf, quo.mf				tbd
+46FD	 DIVG2 divr.rg, quo.mg				tbd
+
+67	 DIVD3 divr.rd, divd.rd, quo.wd			tbd
+47	 DIVF3 divr.rf, divd.rf, quo.wf			tbd
+47FD	 DIVG3 divr.rg, divd.rg, quo.wg			tbd
+
+72	 MNEGD src.rd, dst.wd				tbd
+72	 MNEGD src.rd, dst.wd				tbd
+52FD	 MNEGG src.rg, dst.wg				tbd
+
+70	 MOVD src.rd, dst.wd				tbd
+50	 MOVF src.rf, dst.wf				tbd
+50FD	 MOVG src.rg, dst.wg				tbd
+
+64	 MULD2 mulr.rd, prod.md				tbd
+44	 MULF2 mulr.rf, prod.mf				tbd
+44FD	 MULG2 mulr.rg, prod.mg				tbd
+
+65	 MULD3 mulr.rd, muld.rd, prod.wd		tbd
+45	 MULF3 mulr.rf, muld.rf, prod.wf		tbd
+45FD	 MULG3 mulr.rg, muld.rg, prod.wg		tbd
+
+62	 SUBD2 sub.rd, dif.md				tbd
+42	 SUBF2 sub.rf, dif.mf				tbd
+42FD	 SUBG2 sub.rg, dif.mg				tbd
+
+63	 SUBD3 sub.rd, min.rd, dif.wd			tbd
+43	 SUBF3 sub.rf, min.rf, dif.wf			tbd
+43FD	 SUBG3 sub.rg, min.rg, dif.wg			tbd
+
+73	 TSTD src.rd					tbd
+53	 TSTF src.rf					tbd
+53FD	 TSTG src.rg					tbd
+
+2.11 Microcode-Assisted Emulated Instructions
+
+The times gives here are for execution of the emulation exception.
+
+Opcode	 Instruction				   Execution Cycles
+------	 -----------				   ----------------
+
+20	 ADDP4 addlen.rw, addaddr.ab, sumlen.rw,	11+1r+8w+{pfl}
+		sumaddr.ab
+21	 ADDP6 add1len.rw, add1addr.ab, add2len.rw,	12+1r+10w+{pfl}
+		add2addr.ab, sumlen.rw, sumaddr.ab
+
+F8	 ASHP cnt.rb, srclen.rw, srcaddr.ab, round.rb,	12+1r+10w+{pfl}
+	      dstlen.rw, dstaddr.ab
+
+35	 CMPP3 len.rw, src1addr.ab, src2addr.ab		9+1r+7w+{pfl}
+37	 CMPP4 src1len.rw, src1addr.ab, src2len.rw,	11+1r+8w+{pfl}
+		src2addr.ab
+
+0B	 CRC tbl.ab, inicrc.rl, strlen.rw, stream.ab	11+1r+8w+{pfl}
+
+F9	 CVTLP src.rl, dstlen.rw, dstaddr.ab		9+1r+7w+{pfl}
+36	 CVTPL srclen.rw, srcaddr.ab, dst.wl		10+1r+7w+{pfl}
+08	 CVTPS srclen.rw, srcaddr.ab, dstlen.rw,	11+1r+8w+{pfl}
+		dstaddr.ab
+09	 CVTSP srclen.rw, srcaddr.ab, dstlen.rw,	11+1r+8w+{pfl}
+		dstaddr.ab
+24	 CVTPT srclen.rw, srcaddr.ab, tbladdr.ab,	11+1r+9w+{pfl}
+	       dstlen.rw, dstaddr.ab
+26	 CVTTP srclen.rw, srcaddr.ab, tbladdr.ab,	11+1r+9w+{pfl}
+	       dstlen.rw, dstaddr.ab
+
+27	 DIVP divrlen.rw, divraddr.ab, divdlen.rw,	12+1r+10w+{pfl}
+		divdaddr.ab, quolen.rw, quoaddr.ab
+38	 EDITPC srclen.rw, srcaddr.ab, pattern.ab,	11+1r+8w+{pfl}
+		dstaddr.ab
+
+39	 MATCHC objlen.rw, objaddr.ab, srclen.rw,	11+1r+8w+{pfl}
+		srcaddr.ab
+
+34	 MOVP len.rw, srcaddr.ab, dstaddr.ab		9+1r+7w+{pfl}
+
+2E	 MOVTC srclen.rw, srcaddr.ab, fill.rb,		12+1r+10w+{pfl}
+		tbladdr.ab, dstlen.rw, dstaddr.ab
+2F	 MOVTUC srclen.rw, srcaddr.ab, esc.rb,		12+1r+10w+{pfl}
+	        tbladdr.ab, dstlen.rw, dstaddr.ab
+
+25	 MULP mulrlen.rw, mulraddr.ab, muldlen.rw,	12+1r+10w+{pfl}
+		muldaddr.ab, prodlen.rw, prodaddr.ab
+
+22	 SUBP4 sublen.rw, subaddr.ab, diflen.rw,	11+1r+8w+{pfl}
+		difaddr.ab
+23	 SUBP6 sublen.rw, subaddr.ab, minlen.rw,	12+1r+10w+{pfl}
+		 minaddr.ab, diflen.rw, difaddr.ab
+
+3 Other Timings
+
+Event						   Execution Cycles
+------						   ----------------
+
+initiate hardware interrupt				22+3r+2w
+
+initiate software interrupt				21+2r+2w
+
+initiate exception					28+2r+2w - 50+2r+8w,
+							35+2r+3w typ
+
+unaligned read operand (word or longword)		1r
+unaligned read operand (quadword)			2r
+unaligned write operand (word or longword)		1w
+unaligned write operand (quadword)			2w
+

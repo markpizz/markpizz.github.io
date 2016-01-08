@@ -1,0 +1,1264 @@
+.TOC	"MULDIV.MIC -- Multiply and Divide Instructions"
+.TOC	"Revision 12.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 12	14-Feb-84	[RMS]	Editorial changes for pass 2
+;	3-Jan-84	[RMS]	Editorial changes
+;	22-Sep-83	[RMS]	Editorial changes
+; 11	31-Aug-83	[RMS]	Rewrote MULxy for simplified SC
+;	19-Aug-83	[RMS]	Fixed race condition in EDIV (code review)
+; 10	10-Aug-83	[RMS]	Revised for SC delayed branches
+;	13-Jun-83	[RMS]	Fixed alignment constraint in divide (RW)
+;	7-Jun-83	[RMS]	Fixed alu cc's on negative multiplier
+;	6-Jun-83	[RMS]	Relaxed alignment constraints in divide
+;	2-Jun-83	[RMS]	Fixed MULBx, MULWx bug
+; 09	1-Jun-83	[RMS]	Removed third at/dl field
+;	1-Jun-83	[RMS]	Fixed DIVBx bug
+;	27-May-83	[RMS]	Code compression
+; 08	16-May-83	[RMS]	Revised mul, div optimization tradeoffs
+; 07	9-May-83	[RMS]	Added FPU integer divide support
+;	8-Apr-83	[RMS]	Relaxed alignment constraints in divide
+; 06	7-Apr-83	[RMS]	Added FPU integer multiply support
+;	1-Apr-83	[RMS]	Eliminated spurious at = m in EDIV
+;	28-Mar-83	[RMS]	Eliminated extra word in divide exception
+;	27-Mar-83	[RMS]	Eliminated unnecessary alignment constraints
+;	17-Mar-83	[RMS]	Revised for new mreq, dl functions
+; 05	13-Mar-83	[RMS]	Major code compression
+;	6-Mar-83	[RMS]	Eliminated .wx ATDL definitions
+;	15-Feb-83	[RMS]	Revised EMODf interface
+;	11-Jan-83	[RMS]	Fixed order of EDIV writes
+;	10-Jan-83	[RMS]	Editorial changes
+;	6-Jan-83	[RMS]	Revised EDIV probe interface
+;	9-Dec-82	[RMS]	Removed extraneous ..e linkages
+;	1-Dec-82	[RMS]	Fixed bug in DIVx overflow (EVKAA)
+;	28-Nov-82	[RMS]	Editorial changes
+; 04	24-Nov-82	[RMS]	Revised allocation limits and constraints
+;	23-Nov-82	[RMS]	Revised for EMODf support
+;	18-Nov-82	[RMS]	Revised for automatic TNV elimination
+;	13-Oct-82	[RMS]	Fixed EMUL allocation problem
+;	12-Oct-82	[RMS]	Revised allocation limits
+;	6-Oct-82	[RMS]	Fixed bugs in EDIV overflow cases
+; 03	27-Sep-82	[RMS]	Revised for new AST.TRAP handling
+;	24-Sep-82	[RMS]	Fixed bug in EDIV trap cases
+;	22-Sep-82	[RMS]	Fixed missing = in alignlist
+;	20-Sep-82	[RMS]	Revised definition of PR[E]
+; 02	14-Sep-82	[RMS]	Eliminated G(SC) references
+;	6-Sep-82	[RMS]	Editorial changes
+;	5-Sep-82	[RMS]	Revised probe interface (again)
+; 01	1-Sep-82	[RMS]	Initial edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN MULDIV
+
+.nobin
+
+;	This module implements integer multiply and divide.
+;	The instructions implemented here are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	86	 DIVB2 divr.rb, quo.mb						* * * 0		iov, idvz
+;	C6	 DIVL2 divr.rl, quo.ml						* * * 0		iov, idvz
+;	A6	 DIVW2 divr.rw, quo.mw						* * * 0		iov, idvz
+;
+;	87	 DIVB3 divr.rb, divd.rb, quo.wb					* * * 0		iov, idvz
+;	C7	 DIVL3 divr.rl, divd.rl, quo.wl					* * * 0		iov, idvz
+;	A7	 DIVW3 divr.rw, divd.rw, quo.ww					* * * 0		iov, idvz
+;
+;	7B	 EDIV divr.rl, divd.rq, quo.wl, rem.wl				* * * 0		iov, idvz
+;
+;	7A	 EMUL mulr.rl, muld.rl, add.rl, prod.wq				* * 0 0
+;
+;	84	 MULB2 mulr.rb, prod.mb						* * * 0		iov
+;	C4	 MULL2 mulr.rl, prod.ml						* * * 0		iov
+;	A4	 MULW2 mulr.rw, prod.mw						* * * 0		iov
+;
+;	85	 MULB3 mulr.rb, muld.rb, prod.wb				* * * 0		iov
+;	C5	 MULL3 mulr.rl, muld.rl, prod.wl				* * * 0		iov
+;	A5	 MULW3 mulr.rw, muld.rw, prod.ww				* * * 0		iov
+;
+
+.TOC	"	MULx2, MULx3"
+
+;	These instructions multiply two integers.
+;	The condition codes are set according to the result.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	MULB2		84	prod.mb <-- mulr.rb * prod.mb		fse	rm/bb	iiii	MULB2
+;	MULW2		A4	prod.mw <-- mulr.rw * prod.mw		fse	rm/ww	iiii	MULW2
+;	MULL2		C4	prod.ml <-- mulr.rl * prod.ml		fse	rm/ll	iiii	MULL2
+;
+;	MULB3		85	prod.wb <-- mulr.rb * muld.rb		fse	rr/bb	aaaa	MULB2
+;	MULW3		A5	prod.ww <-- mulr.rw * muld.rw		fse	rr/ww	aaaa	MULW2
+;	MULL3		C5	prod.wl <-- mulr.rl * muld.rl		fse	rr/ll	aaaa	MULL2
+;
+;	Entry conditions:
+;		W0	=	first operand
+;		W2	=	second operand
+;		VA	=	address of second operand, if not a register 
+;		RN	=	register number of second operand
+;		DL	=	data type of second operand (same as third, if MULx3)
+;
+;	Exit conditions:
+;		(MULx2)
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;		The next microstate is IID.
+;		(MULx3)
+;		The ALU condition codes are set.
+;		The result is in W0.
+;		The next microstate is WDEST.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- integer overflow
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Use of an fre dispatch saves one microcycle in register mode, at the cost of one
+;		word for each dispatch point.
+;
+;		Use of the FPU is a loss in MULBx and only a marginal win in MULWx;  hence it is
+;		used only for MULLx and EMUL.
+;
+.bin
+
+;	MULx2 operation:
+;
+;		dst.mx <-- src.rx * dst.mx
+
+;	MULx3 operation:
+;
+;		dst.wx <-- src1.rx * src2.rx
+
+MULB2..:					; opcode = 84
+;MULB3:						; opcode = 85
+	;********** Hardware dispatch **********;
+	W[0]<--W[0].SHFL.[24.],			; left justify multiplicand in W0
+	CALL[OPT.INTEGER.MULT.BW..]		; W1<31:16> <-- W0<31:24> * W2<7:0>
+
+	;---------------------------------------;
+	W[0]<--ZEXT.W[1].SHFR.[16.]		; extract result to W0<7:0>
+
+	;---------------------------------------;
+	W[1]<--ZEXT.W[1].SHFR.[24.],		; extract sign extension to W1<7:0>
+	GOTO[MULX.TEST]				; go set cc's on result and test for overflow
+
+MULW2..:					; opcode = A4
+;MULW3:						; opcode = A5
+	;********** Hardware dispatch **********;
+	W[0]<--W[0].SHFL.[16.], STATE0<--1,	; left justify multiplicand in W0, flag word
+	CALL[OPT.INTEGER.MULT.BW..]		; W1<31:0> <-- W0<31:16> * W2<15:0>
+
+	;---------------------------------------;
+	W[0]<--ZEXT.W[1], SET.ALUCC, LEN(DL)	; extract result to W0<15:0>, set alu cc's
+
+	;---------------------------------------;
+	W[1]<--ZEXT.W[1].SHFR.[16.],		; extract sign extension to W1<15:0>
+	CASE2[OPCODE3-0].AT.[MULX2.CONTINUE]	; case on MULW2 vs MULW3
+
+MULL2..:					; opcode = C4
+;MULL3:						; opcode = C5
+	;********** Hardware dispatch **********;
+	W[SC]<--W[2], SET.ALUCC, LEN(DL),	; move multiplier to SC, test sign
+	CALL[OPT.INTEGER.MULT.LONG..]		; W1'W0 <-- W0 * SC
+
+MULX.TEST:
+	;---------------------------------------;
+	WBUS<--W[0], SET.ALUCC, LEN(DL),	; test sign of result
+	CASE2[OPCODE3-0].AT.[MULX2.CONTINUE]	; case on MULX2 vs MULX3
+
+;	Result and overflow calculated.
+;	Set condition codes, store result.
+
+;	At this point,
+;		W0<x:0>	=	result
+;		W1<x:0>	=	sign extension of result
+;		VA	=	address of second operand, if memory
+;		RN	=	register number of second operand
+;		alu.n	=	set from result
+
+;= ALIGNLIST *1*0*	(MULX2.CONTINUE,	MULX3.CONTINUE)
+;  Opcodes = x4, x5 --> opcode<3:0> = 010?
+
+;	MULB2, MULW2, MULL2:
+
+MULX2.CONTINUE:
+	;---------------------------------------; mulx2:
+	WBUS<--W[1].XOR.P[SEXT.N],		; does sign extension of result = sign?
+	SET.ALUCC, LEN(DL),			; set alu cc's for proper length
+	IF[RMODE]_[MULX2.RMODE]			; branch out if register mode
+
+	;---------------------------------------;
+	MEM(VA)<--W[0], SET.PSLCC, LEN(DL),	; write result to memory, set psl cc's
+	CASE2[ALU.NZVC].AT.[MULX2.OVERFLOW]	; case on overflow test
+
+MULX2.RMODE:
+	;---------------------------------------;
+	G(RN)<--W[0], SET.PSLCC, LEN(DL),	; write result to register, set psl cc's
+	CASE2[ALU.NZVC].AT.[MULX2.OVERFLOW]	; case on overflow test
+
+;= ALIGNLIST 10***	(MULX2.OVERFLOW,	MULX2.NO.OVERFLOW)
+;  ALU.NZVC set by XOR --> V = C = 0
+
+MULX2.OVERFLOW:
+	;---------------------------------------; alu.z = 0:
+	SET.PSL.V				; overflow, set psl.v
+
+MULX2.NO.OVERFLOW:
+	;---------------------------------------; alu.z = 1:
+	EXECUTE.IID				; decode next next instruction
+
+;	MULB3, MULW3, MULL3:
+
+MULX3.CONTINUE:
+	;---------------------------------------; mulx3:
+	WBUS<--W[1].XOR.P[SEXT.N],		; does sign extension of result = sign?
+	SET.ALUCC, LEN(DL),			; set alu cc's for proper length
+	GOTO[MULX3.EXIT..]			; go set cc's, test alu.z for overflow
+
+.nobin
+.TOC	"	EMUL"
+
+;	This instruction multiplies two longwords to produce a quadword result.
+;	The condition codes are set according to the result.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	EMUL		7A	prod.wq <-- mulr.rl * muld.rl +		fse	rr/ll	iiii	EMULX
+;					    sext(add.rl)
+;
+;	Entry conditions:
+;		W0	=	first (multiplicand) operand
+;		W2	=	second (multiplier) operand
+;		VA	=	address of second operand, if not a register 
+;		RN	=	register number of second operand
+;		DL	=	data type of second operand (same as third, longword)
+;
+;	Exit conditions:
+;		The ALU condition codes are set.
+;		The result is in W0.
+;		The next microstate is WDEST.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- 0
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Use of an fre dispatch saves one microcycle in register mode, at the cost of one word.
+;
+.bin
+
+;	EMUL operation:
+;
+;		prod.wq <-- mulr.rl * muld.rl + sext(add.rl)
+
+;EMUL:						; opcode = 7A
+EMULX..:					; dispatch for opcode = 1A
+	;********** Hardware dispatch **********;
+	W[SC]<--W[2], SET.ALUCC,		; move multiplier to SC, test sign
+	CALL[OPT.INTEGER.MULT.LONG..]		; W1'W0 <-- W0 * SC
+
+	;---------------------------------------;
+	W[2]<--W[0], CALL.CASE.SPEC[GSD..]	; save low order result, get add operand
+
+	;---------------------------------------;
+	WBUS<--W[0], SET.ALUCC			; test add operand, set cc's
+
+	;---------------------------------------;
+	W[6]<--P[SEXT.N]			; sign extend add operand to quad length
+						; result now in W1'W2
+						; adder  now in W6'W0
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.RQ]			; result is quadword (only DL is used)
+
+	;---------------------------------------;
+	W[0]<--W[0]+W[2], SET.ALUCC		; add low order result to adder, set cc's
+
+	;---------------------------------------;
+	W[1]<--W[1]+W[6]+ALU.C,			; add high order result to adder with carry,
+	JMP.CASE.SPEC[WDEST..]			; go write result to memory
+
+.nobin
+.TOC	"	Integer Multiply Subroutines"
+
+;	These subroutines multiply the longword in W0 by the longword in SC to produce
+;	a quadword result in W1'W0.
+;
+;	OPT.INTEGER.MULT.LONG.. is used for true longword multiplication.  It will use
+;	the FPU, if present;  otherwise, it performs a microcoded multiply.
+;
+;	OPT.INTEGER.MULT.BW.. is used for byte/word multiplication.  It always performs a
+;	microcoded multiply.
+;
+;	These subroutines are used by MULx2, MULx3, EMUL, and INDEX.
+;
+;	Entry conditions (BW):
+;		W0	=	multiplicand, left justified
+;		W2	=	multiplier
+;		STATE<3:0> =	000<byte vs word>
+;
+;	Entry conditions (LONG):
+;		W0	=	multiplicand
+;		SC	=	multiplier
+;		STATE<3:0> =	0000
+;		alu cc's =	set from multiplier
+;
+;	Exit conditions:
+;		W1'W0	=	product
+;		SC, STATE<3:0> are trashed!!
+;
+;	Size/performance tradeoffs:
+;		Tbs.
+;
+.bin
+
+;	Integer multiply subroutine operation for bytes and words:
+;
+;		W1'W0 <-- W0 * W2
+
+OPT.INTEGER.MULT.BW..:
+	;---------------------------------------;
+	W[SC]<--W[2], SET.ALUCC, LEN(DL),	; output multiplier to SC, test for negative
+	CASE2[STATE3-0].AT.[MULT.BW.BYTE]	; case on byte vs word
+
+;= ALIGNLIST ***0*	(MULT.BW.BYTE,	MULT.BW.WORD)
+;  STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+MULT.BW.WORD:
+	;---------------------------------------; state<0> = 1:
+	W[1]<--0, CALL[MULT.STEP.7.BITS]	; clear result, do multiply steps for SC<6:0>
+
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step for SC<7>
+	CASE2[ALU.NZVC].AT.[MULT.BW.BYTE.POS]	; case on pos vs negative multiplier
+
+MULT.BW.BYTE:
+	;---------------------------------------; state<0> = 0:
+	W[1]<--0,				; clear result
+	CASE2[ALU.NZVC].AT.[MULT.BW.BYTE.POS]	; case on pos vs negative multiplier
+
+;= ALIGNLIST 01***	(MULT.BW.BYTE.POS,	MULT.BW.BYTE.NEG)
+;  ALU.NZVC set by MOV --> V = C = 0
+
+MULT.BW.BYTE.POS:
+	;---------------------------------------; alu.n = 0:
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step for SC<0>
+	CALL[MULT.STEP.7.BITS]			; do multiply step for SC<7:1>
+
+MULT.BW.BYTE.RETURN:
+	;---------------------------------------;
+	W[0]<--W[SC], RETURN			; return result in W0
+
+MULT.BW.BYTE.NEG:
+	;---------------------------------------; alu.n = 0:
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step for SC<0>
+	CALL[MULT.STEP.7.BITS]			; do multiply step for SC<7:1>
+
+	;---------------------------------------;
+	W[1]<--W[1]-W[0],			; correct result by subtracting multiplicand
+	GOTO[MULT.BW.BYTE.RETURN]		; go return corrected result
+
+;	Integer multiply subroutine for longwords:
+;
+;		W1'W0 <-- W0 * SC
+
+OPT.INTEGER.MULT.LONG..:
+	;---------------------------------------;
+	FPU.CMD<--T[OPCODE],			; assume FPU:  send opcode to FPU
+	IF[NOT.FPU]_[OPT.MULT.LONG.UCODE]	; if no FPU present, do ucoded multiply
+
+	;---------------------------------------;
+	FPU.DATA<--W[SC], STATE1<--1,		; send multiplier to FPU, flag early return
+	CALL[FP.XMIT.MEM.1.LW]			; send multiplicand to FPU, get lo lw to W0
+
+	;---------------------------------------;
+	W[1]<--FPU.DATA, RN<--RN+1,		; get hi lw of result, restore RN
+	RETURN					; exit to caller
+
+OPT.MULT.LONG.UCODE:
+	;---------------------------------------;
+	W[1]<--0, CALL[MULT.STEP.7.BITS]	; clear result, do multiply step for SC<6:0>
+
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step for SC<7>
+	CALL[MULT.STEP.7.BITS]			; do multiply step for SC<14:8>
+
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step for SC<15>
+	CALL[MULT.STEP.7.BITS]			; do multiply step for SC<22:16>
+
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step for SC<23>
+	CASE2[ALU.NZVC].AT.[MULT.BW.BYTE.POS]	; case on pos vs negative multiplier
+
+;	Integer multiply, continued.
+
+;	Nested subroutines to retire seven bits of multiplier.
+
+MULT.STEP.7.BITS:
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step on SC
+	CALL[MULT.STEP.3.BITS]			; call to retire 3 bits, fall thru to retire 3 bits
+
+MULT.STEP.3.BITS:
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step on SC
+	CALL[MULT.STEP.1.BIT]			; call to retire 1 bit, fall thru to retire 1 bit
+
+MULT.STEP.1.BIT:
+	;---------------------------------------;
+	W[1]!!SC<--+(W[1]+(W[0]*SC<0>)!!SC)DIV2,; do multiply step on SC
+	RETURN					; exit
+
+.nobin
+.TOC	"	DIVx2, DIVx3"
+
+;	These instructions divide two integers and return the quotient.
+;	The condition codes are set according to the result.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	DIVB2		86	quo.mb <-- quo.mb / divr.rb		fre	rm/bb	aaaa	DIVB2
+;	DIVW2		A6	quo.mw <-- quo.mw / divr.rw		fre	rm/ww	aaaa	DIVB2
+;	DIVL2		C6	quo.ml <-- quo.ml / divr.rl		fre	rm/ll	aaaa	DIVB2
+;
+;	DIVB3		87	quo.wb <-- divd.rb / divr.rb		fse	rr/bb	aaaa	DIVB3
+;	DIVW3		A7	quo.ww <-- divd.rw / divr.rw		fse	rr/ww	aaaa	DIVB3
+;	DIVL3		C7	quo.wl <-- divd.rl / divr.rl		fse	rr/ll	aaaa	DIVB3
+;
+;	Entry conditions:
+;		W0	=	first operand
+;		W2	=	second operand
+;		VA	=	address of second operand, if not a register 
+;		RN	=	register number of second operand
+;		DL	=	data type of second operand (same as third, if DIVx3)
+;
+;	Exit conditions:
+;		(DIVx2)
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;		The next microstate is IID.
+;		(DIVx3)
+;		The ALU condition codes are set.
+;		The result is in W0.
+;		The next microstate is WDEST.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow or divide by zero
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		DIVx2 uses an fre dispatch for allocation reasons:  otherwise, the inline code
+;		would run into the space allocated for DIVx3.
+;
+;		Use of the FPU is a loss in DIVBx and only a marginal win in DIVWx;  hence it is
+;		used only for DIVLx and EDIV.
+;
+;	Note:	Because the divide instructions can generate potentially two exceptions (overflow and
+;		divide by zero), both of which set alu.v, they cannot use the optimized v-bit trap.
+;
+.bin
+
+;	DIVx2 operation:
+;
+;		quo.mx <-- quo.mx / divr.rx
+
+;***	DIVx2 not RMODE ***
+
+DIVB2..:					; opcode = 86
+;DIVW2:						; opcode = A6
+;DIVL2:						; opcode = C6
+	;********** Hardware dispatch **********;
+	W[SC]<--W[2], SET.ALUCC, LEN(DL),	; move dividend to SC, set alu cc's
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	MEM(VA)<--W[0], SET.PSLCC, LEN(DL),	; write quotient to memory
+	EXECUTE.IID				; decode next instruction
+
+;***	DIVx2 RMODE ***
+
+DIVB2.OP..:
+	;********** Hardware dispatch **********;
+	SC&, W[2]<--G(RN), SET.ALUCC, LEN(DL),	; move dividend to SC, set alu cc's
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	G(RN)<--W[0], SET.PSLCC, LEN(DL),	; write quotient to register
+	EXECUTE.IID				; decode next instruction
+
+;	DIVx3 operation:
+;
+;		quo.wx <-- divd.rx / divr.rx
+
+DIVB3..:					; opcode = 87
+;DIVW3:						; opcode = A7
+;DIVL3:						; opcode = C7
+	;********** Hardware dispatch **********;
+	W[SC]<--W[2], SET.ALUCC, LEN(DL),	; move dividend to SC, set alu cc's
+	CALL[INTEGER.DIVIDE]			; perform integer divide
+
+	;---------------------------------------;
+	JMP.CASE.SPEC[WDEST..]			; go write result to destination
+
+.nobin
+.TOC	"	EDIV"
+
+;	This instruction divides two integers and returns both the quotient
+;	and the remainder.
+;	The condition codes are set according to the quotient.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	EDIV		7B	quo.wl <-- divd.rq / divr.rl		fse	rr/lq	aaaa	EDIV
+;				rem.wl <-- rem(divd.rq,divr.rl)
+;
+;	Entry conditions:
+;		W0	=	first operand
+;		W3'W2	=	second operand
+;		VA	=	address of second operand, if not a register 
+;		RN	=	register number of second operand
+;		DL	=	data type of second operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory locations or registers.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow or divide by zero
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		Use of an fre dispatch saves one microcycle in register mode, at the cost of one word.
+;
+;	Note:	EDIV has two destination operands and must assure the accessibility of both before
+;		writing either.
+;	Note:	Because EDIV can generate potentially two exceptions (overflow and divide by
+;		zero), both of which set alu.v, it cannot use the optimized v-bit trap.
+;
+;
+.bin
+
+;	EDIV operation:
+;
+;		quo.wl <-- divd.rq / divr.rl
+;		rem.wl <-- rem(divd.rq, divr.rl)
+
+EDIV..:						; opcode = 7B
+	;********** Hardware dispatch **********;
+	WBUS<--W[0], SET.ALUCC,			; test sign of divisor
+	CALL[EXTENDED.DIVIDE]			; perform extended divide
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.VL]			; set up AT/DL = .vl for first result
+
+;	EDIV/EMODf common code to store two results.
+
+;	At this point,
+;		W0	=	first result
+;		W3 (W4'W3) =	second result
+;		ATDL	=	.vl
+;		STATE<3:2,0> =	000
+;		STATE<1> =	0 for EDIV, EMODF, 1 for EMODD, EMODG
+;		alu cc's =	properly set for final copy to psl cc's
+
+EDIV.EMODF.WRITE.DOUBLE..:
+	;---------------------------------------;
+	W[1]<--W[0],				; copy first result to W1
+	CALL.CASE.SPEC[GSD..]			; parse address
+
+	;---------------------------------------;
+	SC<--RN,				; start save of register number
+	IF[RMODE]_[EDIV.PARSE.THIRD.RMODE]	; branch out if register mode
+
+	;---------------------------------------;
+	WBUS<--MEM(VA).WCHECK, LEN(DL),		; specifier is memory, prove write access
+	CASE2[STATE3-0].AT.[EDIV.PARSE.FOURTH.LW]	; case on EDIV, EMODF vs EMODD, EMODG
+
+;	First result is register.
+;	Save register number as tho virtual address.
+
+EDIV.PARSE.THIRD.RMODE:
+	;---------------------------------------;
+	W[0]<--W[SC], STATE0<--1,		; save register number, set reg flag
+	CASE2[STATE3-0].AT.[EDIV.PARSE.FOURTH.LW]	; case on EDIV, EMODF vs EMODD, EMODG
+
+;	EDIV/EMODf result store, continued.
+;	First result specifier parsed and proven writeable.
+;	Now parse second result specifier.
+
+;	At this point,
+;		W0	=	address/register number of first result
+;		W1	=	first result
+;		W3 (W4'W3) =	second result
+;		ATDL	=	.vl
+;		STATE<3:2> =	00
+;		STATE<1> =	0 if EDIV, EMODF, 1 if EMODD, EMODG
+;		STATE<0> =	0 if first result is memory, 1 if first result is register
+;		alu cc's =	properly set for final copy to psl cc's
+
+;= ALIGNLIST **01*	(EDIV.PARSE.FOURTH.LW,	EDIV.PARSE.FOURTH.QW)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+EDIV.PARSE.FOURTH.QW:
+	;---------------------------------------; STATE<1> = 1:
+	P[ATDL]<--K[ATDL.VQ]			; set up at/dl for quad second result
+
+EDIV.PARSE.FOURTH.LW:
+	;---------------------------------------; STATE<1> = 0:
+	W[2]<--W[0], CALL.CASE.SPEC[GSD..]	; save addr of first result, get addr of second to W0
+
+	;---------------------------------------;
+	SC<--RN,				; start save of register number
+	IF[RMODE]_[EDIV.PARSE.FOURTH.RMODE]	; branch out if register mode
+
+	;---------------------------------------;
+	WBUS<--MEM(VA).WCHECK, LEN(DL),		; prove writeability of second result
+	GOTO[EDIV.WRITE.THIRD]			; go write first result
+
+;	Second result is register.
+;	Save register number as tho virtual address.
+
+EDIV.PARSE.FOURTH.RMODE:
+	;---------------------------------------;
+	W[0]<--W[SC],				; save register number
+	GOTO[EDIV.WRITE.THIRD]			; go write first result
+
+;	EDIV/EMODf result store, continued.
+
+;	Specifiers parsed, all are writeable.
+;	Now write first result.
+
+;	At this point,
+;		W0 	=	address/register number of second result
+;		W1	=	first result
+;		W2 	=	address/register number of first result
+;		W3 (W4'W3) =	second result
+;		ATDL	=	at/dl for second result
+;		STATE<3:2> =	00
+;		STATE<1> =	0 if EDIV, EMODF, 1 if EMODD, EMODG
+;		STATE<0> =	0 if first result is memory, 1 if first result is register
+;		alu cc's =	properly set for final copy to psl cc's
+
+EDIV.WRITE.THIRD:
+	;---------------------------------------;
+	VA&, W[SC]<--W[2]			; restore addr/reg no of first operand
+
+	;---------------------------------------;
+	W[SC]<--W[0],				; start restore of reg no of second operand
+	RN<--SC,				; finish restore of reg no of first operand
+	CASE2[STATE3-0].AT.[EDIV.WRITE.THIRD.MEM]	; case on memory versus register
+
+;= ALIGNLIST **10*	(EDIV.WRITE.THIRD.MEM,	EDIV.WRITE.THIRD.RMODE)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+EDIV.WRITE.THIRD.MEM:
+	;---------------------------------------; STATE<0> = 0:
+	MEM(VA)<--W[1], LONG,			; write first result to memory (always long)
+	GOTO[EDIV.WRITE.FOURTH]			; go write second result
+
+EDIV.WRITE.THIRD.RMODE:
+	;---------------------------------------; STATE<0> = 1:
+	G(RN)<--W[1], LONG,			; write first result to register (always long)
+	GOTO[EDIV.WRITE.FOURTH]			; go write second result
+
+;	EDIV/EMODf result store, continued.
+
+;	Specifiers parsed, first result written.
+;	Now write second result.
+
+;	At this point,
+;		W0 = SC	=	address/register number of second result
+;		W3 (W4'W3) =	second result
+;		ATDL	=	at/dl for second result
+
+EDIV.WRITE.FOURTH:
+	;---------------------------------------;
+	VA<--W[0], RN<--SC,			; restore addr/reg num of second result
+	IF[RMODE]_[EDIV.WRITE.FOURTH.RMODE]	; branch out if register mode
+
+	;---------------------------------------;
+	MEM(VA)<--W[3],				; second result spec is memory, write
+	SET.PSLCC, LEN(DL),			; copy alu cc's to psl cc's
+	IF(DL.BWL)_IID				; done if longword
+
+WRITE.MEM(VAP).FROM.W4..:
+	;---------------------------------------;
+	MEM(VAP)<--W[4], LONG,			; write rest of second result to memory
+	EXECUTE.IID				; decode next instruction
+
+EDIV.WRITE.FOURTH.RMODE:
+	;---------------------------------------;
+	G(RN)<--W[3], RN<--RN+1,		; store second result in register,
+	SET.PSLCC, LEN(DL),			; copy alu cc's to psl cc's
+	IF(DL.BWL)_IID				; done if longword
+
+WRITE.G(RN).FROM.W4..:
+	;---------------------------------------;
+	G(RN)<--W[4], LONG,			; store rest of second result to register
+	EXECUTE.IID				; decode next instruction
+
+.nobin
+.TOC	"	Integer Divide Subroutine"
+
+;	The integer divide subroutine divides the byte/word/longword in W2 by the
+;	byte/word/longword in W0.
+;
+;	This routine shares a common inner loop and post processing code with Extended Divide.
+;	This inner loop implements a non-restoring divide which executes at the rate of one
+;	bit for every two microcycles.  Quotient bits are generated in true form.
+;
+;	Entry conditions:
+;		W0	=	divisor
+;		W2 = SC	=	dividend
+;		DL	=	data length of operation
+;		alucc's	=	set from dividend via MOVE
+;
+;	Exit conditions:
+;		W0	=	result (quotient if no trap, dividend if trap)
+;		W2	=	dividend
+;		W3	=	remainder
+;		W6, SC	=	trashed!!
+;		STATE<3:0> =	0000
+;		alu cc's =	set from quotient, including alu.v
+;
+.bin
+
+;	Integer divide subroutine operation:
+;
+;		SC	=	W2 / W0
+;		W3	=	remainder (W2, W0)
+
+INTEGER.DIVIDE:
+	;---------------------------------------;
+	WBUS<--W[0], SET.ALUCC, LEN(DL),	; test divisor, set alu cc's
+	STATE.FLAGS<--0,			; make sure flags are zero
+	CASE2[ALU.NZVC].AT.[INTDIV.DIVD.POS]	; case on sign of dividend in SC
+
+;= ALIGNLIST 01***	(INTDIV.DIVD.POS,	INTDIV.DIVD.NEG)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+INTDIV.DIVD.NEG:
+	;---------------------------------------; N = 1:
+	W[SC]<--NEG.W[SC], STATE0<--1		; negate dividend, set flag for later
+
+INTDIV.DIVD.POS:
+	;---------------------------------------; N = 0:
+	W[3]<--0,				; zero high order dividend
+	CASE4[ALU.NZVC].AT.[INTDIV.DIVR.POS]	; case on sign/zero of divisor in W0
+
+;= ALIGNLIST 00***	(INTDIV.DIVR.POS,	INTDIV.DIVR.ZERO,
+;=			 INTDIV.DIVR.NEG,			)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+INTDIV.DIVR.ZERO:
+	;---------------------------------------; N = 0, Z = 1:
+	W[6]<--K[2], GOTO[DIVIDE.TRAP]		; divisor is zero, set trap param and TRAP!
+
+INTDIV.DIVR.NEG:
+	;---------------------------------------; N = 1, Z = 0:
+	W[0]<--NEG.W[0], STATE1<--1		; divisor is negative, negate it, set flag for later
+
+;	Divisor, dividend now both positive.
+;	Check potential optimizations (byte/word length or FPU present).
+
+;	At this point,
+;		W0	=	!divisor!
+;		W2	=	dividend
+;		W3'SC	=	!dividend!
+
+INTDIV.DIVR.POS:
+	;---------------------------------------; N = 0, Z = 0:
+	W[0]<--ZEXT.W[0],			; trim divisor to proper length (zext is implicit len(dl))
+	CASE4[DL].AT.[INTDIV.BYTE]		; case on data length of operation
+
+;= ALIGNLIST 0011*	(INTDIV.BYTE,	INTDIV.WORD,	INTDIV.LONG)
+
+INTDIV.BYTE:
+	;---------------------------------------; DL = byte:
+	W[SC]<--W[SC].SHFL.[24.],		; left justify, ignore high 24 bits
+	GOTO[DIVIDE.8.START]			; start at 24 bits into operation
+
+INTDIV.WORD:
+	;---------------------------------------; DL = word:
+	W[SC]<--W[SC].SHFL.[16.],		; left justify, ignore high 16 bits
+	GOTO[DIVIDE.16.START]			; start at 16 bits into operation
+
+INTDIV.LONG:
+	;---------------------------------------; DL = long:
+	FPU.CMD<--T[OPCODE],			; assume FPU, send divide opcode to FPU
+	IF[NOT.FPU]_[DIVIDE.32.TEST]		; (DIVLx test) if no FPU, do ucode divide
+
+INTDIV.EXTDIV.COMMON:
+	;---------------------------------------;
+	FPU.DATA<--W[0],			; send !divisor! to FPU
+	IF[NOT.FPU]_[DIVIDE.32.START]		; (EDIV test) if no FPU, do ucode divide
+
+	;---------------------------------------;
+	FPU.DATA<--W[SC]			; send low lw of !dividend! to FPU
+
+	;---------------------------------------;
+	FPU.DATA<--W[3],			; send high lw of !dividend! to FPU
+	CALL[FP.XMIT.RETURN.LW]			; wait for completion, get status, quotient
+						; RN has been decremented!!
+
+	;---------------------------------------;
+	W[3]<--FPU.DATA, RN<--RN+1		; get remainder from FPU, restore RN
+
+	;---------------------------------------;
+	W[SC]<--W[0], SET.ALUCC, LONG,		; test quotient, set alu cc's
+	CASE4[STATE3-0].AT.[DIVIDE.STATE.00]	; case on original signs of divisor, dividend
+
+.nobin
+.TOC	"	Extended Divide Subroutine"
+
+;	The extended divide subroutine divides the quadword in W3'W2 by the
+;	longword in W0.
+;
+;	This routine shares a common inner loop and post processing code with Integer Divide.
+;	This inner loop implements a non-restoring divide which executes at the rate of one
+;	bit for every two microcycles.  Quotient bits are generated in true form.
+;
+;	Entry conditions:
+;		W0	=	divisor
+;		W3'W2	=	dividend
+;		alucc's	=	set from divisor via MOVE
+;
+;	Exit conditions:
+;		W0	=	result (quotient if no trap, dividend<31:0> if trap)
+;		W2	=	dividend<31:0>
+;		W3	=	remainder
+;		W6, SC	=	trashed!!
+;		STATE<3:0> =	0000
+;		alu cc's =	set from quotient, including alu.v
+;
+.bin
+
+;	Extended divide subroutine operation:
+;
+;		SC	=	W3'W2 / W0
+;		W3	=	rem (W3'W2, W0)
+
+EXTENDED.DIVIDE:
+	;---------------------------------------;
+	WBUS<--W[3], SET.ALUCC,			; test sign/zero of dividend
+	STATE.FLAGS<--0,			; clear all flags
+	CASE4[ALU.NZVC].AT.[EXTDIV.DIVR.POS]	; case on sign of divisor
+
+;= ALIGNLIST 00***	(EXTDIV.DIVR.POS,	EXTDIV.DIVR.ZERO,
+;=			 EXTDIV.DIVR.NEG,			)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+EXTDIV.DIVR.ZERO:
+	;---------------------------------------; N = 0, Z = 1:
+	W[6]<--K[2], GOTO[DIVIDE.TRAP]		; set up trap number and TRAP!
+
+EXTDIV.DIVR.NEG:
+	;---------------------------------------; N = 1, Z = 0:
+	W[0]<--NEG.W[0], STATE1<--1		; negate divisor, flag for later
+
+EXTDIV.DIVR.POS:
+	;---------------------------------------; N = 0, Z = 0:
+	W[SC]<--W[2], SET.ALUCC,		; move low order dividend to SC, test for zero
+	CASE2[ALU.NZVC].AT.[EXTDIV.DIVD.POS]	; case on sign of high order dividend
+
+;= ALIGNLIST 01***	(EXTDIV.DIVD.POS,	EXTDIV.DIVD.NEG)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+EXTDIV.DIVD.NEG:
+	;---------------------------------------; N = 1:
+	W[SC]<--NEG.W[SC], STATE0<--1,		; start negate of W3'SC, note for later
+	CASE2[ALU.NZVC].AT.[EXTDIV.DIVD.NEG.NZERO]	; case on low order dividend zero
+
+;= ALIGNLIST 10***	(EXTDIV.DIVD.NEG.NZERO, EXTDIV.DIVD.NEG.ZERO)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+EXTDIV.DIVD.NEG.NZERO:
+	;---------------------------------------; Z = 0:
+	W[3]<--NOT.W[3], GOTO[EXTDIV.DIVD.POS]	; complete negate of W3'SC with complement
+
+EXTDIV.DIVD.NEG.ZERO:
+	;---------------------------------------; Z = 1:
+	W[3]<--NEG.W[3], GOTO[EXTDIV.DIVD.POS]	; finish negate of W3'SC with negate
+
+EXTDIV.DIVD.POS:
+	;---------------------------------------; N = 0:
+	WBUS<--W[3]-W[0], SET.ALUCC		; try initial subtraction step of divd - divr
+
+	;---------------------------------------;
+	FPU.CMD<--T[OPCODE],			; assume FPU, send ediv opcode to FPU
+	IF[ALU.N]_[INTDIV.EXTDIV.COMMON]	; if result negative, go do divide (test for FPU)
+
+.TOC	"	Common Divide Code"
+
+;	Here if the divide will or has caused overflow or trap.
+
+;	Set up integer overflow trap if psl<iv> is set.
+
+DIVIDE.OVERFLOW:
+	;---------------------------------------;
+	W[SC]<--T[PSL]				; get microcode copy of psl to SC for test
+
+	;---------------------------------------;
+	W[6]<--K[1],				; just in case we DO trap, set up trap number
+	CASE2[SC7-4].AT.[DIVIDE.RETURN.DIVD]	; case on psl<iv> = SC<5>
+
+;= ALIGNLIST 1101*	(DIVIDE.RETURN.DIVD,	DIVIDE.TRAP)
+
+;	Divide by zero also joins in here, with W[6] set to K[2].
+
+DIVIDE.TRAP:
+	;---------------------------------------; SC<5> = 1:
+	T[AST.TRAP]<--T[AST.TRAP].AND.K[0FF]000	; clear all exc ASTLVL from AST.TRAP
+
+	;---------------------------------------;
+	T[AST.TRAP]<--T[AST.TRAP].OR.W[6],	; merge trap number into AST.TRAP
+	CALL[GENERATE.TRAP.REQUEST..]		; generate VAX trap request
+
+DIVIDE.RETURN.DIVD:
+	;---------------------------------------; SC<5> = 0:
+	W[0]<--W[2], SET.ALUCC, LEN(DL)		; return dividend (or low order 32 bits
+						; thereof) as result, set alu cc's
+
+	;---------------------------------------;
+	W[3]<--0, STATE.FLAGS<--0		; return zero as remainder, clear flags
+
+	;---------------------------------------;
+	SET.ALU.V, RETURN			; set alu.v, exit to caller
+
+;	Here to start actual divide.
+;	Enter at DIVIDE.8/16/32.START for 8-/16-/32-bit divide.
+
+;	For each bit, if the previous alu.n was clear, then subtract, else add.
+;	Shift the dividend left one, shifting in alu.n as the low order bit.
+;	At the end of the divide, the low order dividend will hold the quotient.
+
+;	Note that the hardware does not permit alu.n to be shifted in.
+;	Accordingly, this is faked with an SC misc field on the next sub operation.
+
+;	At this point,
+;		W0	=	!divisor!
+;		W2	=	dividend<31:0>
+;		W3'SC	=	!dividend!
+;		STATE<1:0> =	signs of divisor, dividend
+;		STATE<3:2> =	00
+
+DIVIDE.8.START:
+	;---------------------------------------;
+	W[3]<--W[3]-W[0], SET.ALUCC,		; start with trial subtraction, set alu cc's,
+	CALL[DIVIDE.7.BITS]			; process seven bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.32.SUB]	; case on whether most recent operation set alu.n
+
+DIVIDE.16.START:
+	;---------------------------------------;
+	W[3]<--W[3]-W[0], SET.ALUCC,		; start with trial subtraction, set alu cc's,
+	CALL[DIVIDE.15.BITS]			; process fifteen bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.32.SUB]	; case on whether most recent operation set alu.n
+
+;	For 32-bit divide, a small gamble to save 29 microcycles.
+
+DIVIDE.32.TEST:
+	;---------------------------------------;
+	WBUS<--ZEXT.W[SC].SHFR.[16.], SET.ALUCC	; test dividend<31:16> for zero, set alu cc's
+
+	;---------------------------------------;
+	IF[ALU.Z]_[INTDIV.WORD]			; if dividend<31:16> = 0, treat as divide word
+
+DIVIDE.32.START:
+	;---------------------------------------;
+	W[3]<--W[3]-W[0], SET.ALUCC,		; start with trial subtraction, set alu cc's,
+	CALL[DIVIDE.15.BITS]			; process fifteen bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	IF[ALU.N]_[DIVIDE.16.ADD].ELSE.[DIVIDE.16.SUB]	; test whether recent operation set alu.n
+
+;	First 16 bits processed.
+
+;	Continue with next 16 bits.
+
+DIVIDE.16.SUB:
+	;---------------------------------------; alu.n = 0, most recent operation worked:
+	W[3]<--W[3]-W[0], SET.ALUCC,		; continue with subtraction, set alu cc's,
+	SC<--SC+1,				; shift in quotient bit of 1
+	CALL[DIVIDE.15.BITS]			; process next fifteen bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.32.SUB]	; case on whether most recent operation set alu.n
+
+DIVIDE.16.ADD:
+	;---------------------------------------; alu.n = 1, most recent operation did not work:
+	W[3]<--W[3]+W[0], SET.ALUCC,		; restore with addition, set alu cc's,
+	CALL[DIVIDE.15.BITS]			; process next fifteen bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.32.SUB]	; case on whether most recent operation set alu.n
+
+;	Finish up last extra cycle.
+
+;= ALIGNLIST 0111*	(DIVIDE.32.SUB,	DIVIDE.32.ADD)
+
+DIVIDE.32.SUB:
+	;---------------------------------------; alu.n = 0, most recent operation worked:
+	W[3]<--W[3]-W[0], SET.ALUCC,		; continue with subtraction, set alu cc's
+	SC<--SC+1,				; shift in quotient bit of 1
+	GOTO[DIVIDE.CLEANUP]			; go cleanup remainder
+
+DIVIDE.32.ADD:
+	;---------------------------------------; alu.n = 1, most recent operation did not work:
+	W[3]<--W[3]+W[0], SET.ALUCC		; restore with addition, set alu cc's
+
+DIVIDE.CLEANUP:
+	;---------------------------------------;
+	W[SC]<--W[SC]+W[SC], SET.ALUCC, LEN(DL),	; shift quotient left one BUT NOT REMAINDER
+	IF[ALU.N]_[DIVIDE.REM.FIX]		; if alu.n set then fix quotient
+
+	;---------------------------------------; alu.n = 0:
+	W[SC]<--W[SC]+1, SET.ALUCC, LEN(DL),	; insert last bit of quotient, set alu cc's
+	CASE4[STATE3-0].AT.[DIVIDE.STATE.00]	; case on original signs of divisor, dividend
+
+DIVIDE.REM.FIX:
+	;---------------------------------------; alu.n = 1:
+	W[3]<--W[3]+W[0], 			; fix up remainder for last operation, 
+	CASE4[STATE3-0].AT.[DIVIDE.STATE.00]	; case on original signs of divisor, dividend
+
+;	Quotient and remainder generated.
+;	Adjust signs, check for overflow
+
+;	At this point,
+;		W3	=	remainder
+;		SC	=	quotient
+;		alu cc's =	set from quotient
+;		STATE<1:0> =	sign of divisor, dividend
+;		STATE<3:2> =	00
+
+;= ALIGNLIST **00*	(DIVIDE.STATE.00,	DIVIDE.STATE.01,
+;=			 DIVIDE.STATE.10,	DIVIDE.STATE.11)
+;  STATE<3:2> = 00 --> STATE<3:0> = 00??
+
+DIVIDE.STATE.00:
+	;---------------------------------------; divisor +, dividend +:
+	CASE2[ALU.NZVC].AT.[DIVIDE.NO.OVERFLOW]	; case on divisor geq 0
+
+DIVIDE.STATE.01:
+	;---------------------------------------; divisor +, dividend -:
+	W[SC]<--NEG.W[SC], SET.ALUCC, LEN(DL)	; negate quotient
+
+	;---------------------------------------;
+	W[3]<--NEG.W[3],			; remainder gets sign of dividend
+	CASE2[ALU.NZVC].AT.[DIVIDE.NEG.OVERFLOW]	; case on quotient leq 0
+
+DIVIDE.STATE.10:
+	;---------------------------------------; divisor -, dividend +:
+	W[SC]<--NEG.W[SC], SET.ALUCC, LEN(DL)	; negate quotient
+
+	;---------------------------------------;
+	CASE2[ALU.NZVC].AT.[DIVIDE.NEG.OVERFLOW]	; case on quotient leq 0
+
+DIVIDE.STATE.11:
+	;---------------------------------------; divisor -, dividend -:
+	W[3]<--NEG.W[3],			; remainder gets sign of dividend
+	CASE2[ALU.NZVC].AT.[DIVIDE.NO.OVERFLOW]	; case on divisor geq 0
+
+;	Overflow test cases.
+
+;	Quotient SHOULD BE positive (divisor and dividend had same sign).
+
+;	For DIV, +/+ cannot generate overflow.
+;	For DIV, -/- CAN generate overflow if dividend = largest neg num, divisor = -1.
+;	For EDIV, either case can generate overflow.
+;	In any case, a negative quotient represents OVERFLOW.
+
+;	At this point,
+;		W3	=	remainder, sign adjusted
+;		SC	=	quotient, allegedly geq 0
+;		alu cc's =	set from quotient
+
+;= ALIGNLIST 0111*	(DIVIDE.NO.OVERFLOW,	DIVIDE.OVERFLOW)
+
+DIVIDE.NO.OVERFLOW:
+	;---------------------------------------; same signs, quotient geq 0:
+	W[0]<--ZEXT.W[SC], SET.ALUCC, LEN(DL),	; trim any extra junk, set alu cc's
+	STATE.FLAGS<--0, RETURN			; clear flags, exit to caller
+
+;	Quotient SHOULD BE negative (divisor and dividend had opposite signs).
+
+;	For DIV, -/+ and +/- cannot generate overflow.
+;	For EDIV, either case can generate overflow.
+;	In any case, a positive non-zero quotient represents OVERFLOW.
+
+;	At this point,
+;		W3	=	remainder, sign adjusted
+;		SC	=	quotient, allegedly leq 0
+;		alu cc's =	set from quotient
+
+;= ALIGNLIST 0011*	(DIVIDE.NEG.OVERFLOW,	DIVIDE.NEG.ZERO,
+;=			 DIVIDE.NEG.NO.OVERFLOW,		)
+
+DIVIDE.NEG.OVERFLOW:
+	;---------------------------------------; diff signs, quotient gtr 0:
+	GOTO[DIVIDE.OVERFLOW]			; overflow, go process
+
+DIVIDE.NEG.ZERO:
+	;---------------------------------------; diff signs, quotient eql 0:
+	W[0]<--0, SET.ALUCC, LEN(DL),		; force clean zero
+	STATE.FLAGS<--0, RETURN			; clear flags, exit to caller
+
+DIVIDE.NEG.NO.OVERFLOW:
+	;---------------------------------------; diff signs, quotient lss 0:
+	W[0]<--ZEXT.W[SC], SET.ALUCC, LEN(DL),	; trim any extra junk, set alu cc's
+	STATE.FLAGS<--0, RETURN			; clear flags, exit to caller
+
+;	Subroutine to process fifteen bits of the divide operation.
+
+;	This subroutine is a simple iteration of the main loop, but nested
+;	four levels deep to get maximum code compaction.
+
+DIVIDE.15.BITS:
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend (quotient) left one bit
+	IF[ALU.N]_[DIVIDE.15.ADD].ELSE.[DIVIDE.15.SUB]	; test whether previous operation succeeded
+
+DIVIDE.15.SUB:
+	;---------------------------------------; alu.n = 0, most recent operation worked:
+	W[3]<--W[3]-W[0], SET.ALUCC,		; continue with subtraction, set alu cc's,
+	SC<--SC+1,				; shift in quotient bit of 1
+	CALL[DIVIDE.7.BITS]			; process next seven bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.7.SUB]	; case on whether most recent operation set alu.n
+
+DIVIDE.15.ADD:
+	;---------------------------------------; alu.n = 1, most recent operation did not work:
+	W[3]<--W[3]+W[0], SET.ALUCC,		; restore with addition, set alu cc's,
+	CALL[DIVIDE.7.BITS]			; process next seven bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.7.SUB]	; case on whether most recent operation set alu.n
+
+;	Next level of the tree does only 7 bits:
+
+DIVIDE.7.BITS:
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend (quotient) left one bit
+	CASE2[ALU.NZVC].AT.[DIVIDE.7.SUB]	; test whether previous operation succeeded
+
+;= ALIGNLIST 0111*	(DIVIDE.7.SUB,	DIVIDE.7.ADD)
+
+DIVIDE.7.SUB:
+	;---------------------------------------; alu.n = 0, most recent operation worked:
+	W[3]<--W[3]-W[0], SET.ALUCC,		; continue with subtraction, set alu cc's,
+	SC<--SC+1,				; shift in quotient bit of 1
+	CALL[DIVIDE.3.BITS]			; process next three bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.3.SUB]	; case on whether most recent operation set alu.n
+
+DIVIDE.7.ADD:
+	;---------------------------------------; alu.n = 1, most recent operation did not work:
+	W[3]<--W[3]+W[0], SET.ALUCC,		; restore with addition, set alu cc's,
+	CALL[DIVIDE.3.BITS]			; process next three bits
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.3.SUB]	; case on whether most recent operation set alu.n
+
+;	Next level of the tree does only 3 bits:
+
+DIVIDE.3.BITS:
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend (quotient) left one bit
+	CASE2[ALU.NZVC].AT.[DIVIDE.3.SUB]	; case on whether previous operation succeeded
+
+;= ALIGNLIST 0111*	(DIVIDE.3.SUB, DIVIDE.3.ADD)
+
+DIVIDE.3.SUB:
+	;---------------------------------------; alu.n = 0, most recent operation worked:
+	W[3]<--W[3]-W[0], SET.ALUCC,		; continue with subtraction, set alu cc's,
+	SC<--SC+1,				; shift in quotient bit of 1
+	CALL[DIVIDE.1.BIT]			; process next bit
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.1.SUB]	; case on whether most recent operation set alu.n
+
+DIVIDE.3.ADD:
+	;---------------------------------------; alu.n = 1, most recent operation did not work:
+	W[3]<--W[3]+W[0], SET.ALUCC,		; restore with addition, set alu cc's,
+	CALL[DIVIDE.1.BIT]			; process next bit
+
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend left one bit,
+	CASE2[ALU.NZVC].AT.[DIVIDE.1.SUB]	; case on whether most recent operation set alu.n
+
+;	Final level of the tree processes just 1 bit:
+
+DIVIDE.1.BIT:
+	;---------------------------------------;
+	W[3]!!SC<--(W[3]!!SC)MUL2,		; shift dividend (quotient) left one bit
+	CASE2[ALU.NZVC].AT.[DIVIDE.1.SUB]	; case on whether previous operation succeeded
+
+;= ALIGNLIST 0111*	(DIVIDE.1.SUB, DIVIDE.1.ADD)
+
+DIVIDE.1.SUB:
+	;---------------------------------------; alu.n = 0, most recent operation worked:
+	W[3]<--W[3]-W[0], SET.ALUCC,		; continue with subtraction, set alu cc's,
+	SC<--SC+1,				; shift in quotient bit of 1
+	RETURN					; return to caller, who will shift and case
+
+DIVIDE.1.ADD:
+	;---------------------------------------; alu.n = 1, most recent operation did not work:
+	W[3]<--W[3]+W[0], SET.ALUCC,		; restore with addition, set alu cc's,
+	RETURN					; return to caller, who will shift and case
+
+;= END MULDIV

@@ -1,0 +1,160 @@
+<HTML>
+<HEAD>
+  <!-- Created with AOLpress/2.0 -->
+  <TITLE>MPP</TITLE>
+</HEAD>
+<BODY>
+<H1 ALIGN=Center>
+  MPP (1987)
+</H1>
+<P>
+MPP (Massively Parallel Processor) was an experimental, large-scale SIMD
+(single instruction multiple data) parallel processor. It was targeted at
+providing supercomputer levels of performance in array applications such
+as simulation, fluid dynamics, and imaging. Built out of arrays of simple
+4b processors coupled together by a scalable routing network, with a maximum
+of 65,536 processors, MPP was a direct descendent of the Goodyear SIMD processor
+and a predecessor to the Connection Machine.
+<P>
+MPP consisted of two chip types, both replicable: the MPP PE (processor element)
+chip and the MPP Router chip. They were implemented in DEC's 2u double-metal
+CMOS1 process and ran at 10Mhz.
+<P>
+<TABLE BORDER CELLPADDING="2">
+  <TR>
+    <TD>Name</TD>
+    <TD>Number</TD>
+    <TD>Size</TD>
+    <TD>Transistors</TD>
+    <TD>Comments</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/mpp_pe.jpg">MPP PE</A></TD>
+    <TD>DC540</TD>
+    <TD>408x372</TD>
+    <TD>242,252</TD>
+    <TD>The MPP PE chip implements 32 processors of the MPP array. Key features
+      include:
+      <UL>
+	<LI>
+	  32 4b processors per chip
+	  <UL>
+	    <LI>
+	      4b or 1b arithmetic and logical operations
+	    <LI>
+	      32b selectable size shift register
+	    <LI>
+	      12b selectable size shift register
+	    <LI>
+	      Optimizations to support floating point arithmetic
+	  </UL>
+	<LI>
+	  1Kb of memory per processor
+	  <UL>
+	    <LI>
+	      Accessible in 4b or 1b sizes
+	    <LI>
+	      Local address register for indirect addressing
+	    <LI>
+	      Neighbor mode allows processors to 'borrow' memory
+	  </UL>
+	<LI>
+	  Grid routing network
+	  <UL>
+	    <LI>
+	      North-east-south-west communication on and off chip
+	    <LI>
+	      Row and column broadcast modes
+	  </UL>
+	<LI>
+	  Support for "wire or" of all processing elements in the array
+	<LI>
+	  High performance
+	  <UL>
+	    <LI>
+	      320 million 4b operations per second OR
+	    <LI>
+	      40 million 32b operations per second
+	  </UL>
+	<LI>
+	  Low power
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 0.5W.</TD>
+  </TR>
+  <TR>
+    <TD><A HREF="pics/mpp_route.jpg">MPP Router</A></TD>
+    <TD>DC539</TD>
+    <TD>408x367</TD>
+    <TD>134,520</TD>
+    <TD>The MPP router implements a random routing network over the processor
+      array. Its key features are:
+      <UL>
+	<LI>
+	  64 message inputs switched simultaneously to 64b message outputs
+	<LI>
+	  Configurable as 16 x 16 crossbar or 64 x 16 x 4 router
+	<LI>
+	  Bidirectional operation
+	<LI>
+	  Multiple paths per message for reduced blocking
+	<LI>
+	  Automatic detection and acknowledgement of blocked messages
+	<LI>
+	  Automatic detection and bypassing of broken wires
+	<LI>
+	  160MB/s throughput
+	<LI>
+	  Low power
+	<LI>
+	  Single +5V supply
+      </UL>
+      <P>
+      Power: 1W.</TD>
+  </TR>
+</TABLE>
+<P>
+<P>
+<H3>
+  Personal Narrative
+</H3>
+<P>
+As MicroVAX wound down towards release in late 1984, the team members began
+developing other ideas. Dan Dobberpuhl and Rich Witek explored RISC technology.
+Bob Grondalski, the memory management unit designer, became interested in
+SIMD technology. By early 1985, he had an architecture for, and a performance
+model of, a SIMD system implemented in VLSI CMOS that would perform at (gasp!)
+10 gigaflops per second. Working essentially alone, he produced a behavioral
+model for the core processing chip and went to the RAD Committee (an internal
+funding source for risky new projects) for funding to continue the work.
+The RAD Committee provided enough additional funds to hire a software developer,
+and the project went forward. By the end of the year, Bob had finished the
+logic, circuit, and layout design of both chips essentially single-handedly.
+With part-time help from a layout designer, and after a short delay while
+the fab's mask making facility was offline, the Router taped out in May,
+1986, and the PE chip a month later. Both were functional, at speed, on first
+pass. A second pass of the PE chip in early 1987 added additional features
+and fixed a few bugs.
+<P>
+Lack of funding and resources delayed the system and software effort. A complete
+miniature system, with 8 PE's and 3 Routers, was functional by mid 1987,
+and a system with 64b PE's by September. At that point, the company decided
+to license MPP to Jeff Kalb, formerly the VP of the VLSI Group, who had left
+to do an MPP startup (MassPar). The decision was reversed at the end of the
+year, but the entire project was stalled for more than 3 months; by the end
+of 1987, only a 256 PE system had been assembled. The 512 PE system (16K
+processors) was finished in March, 1988.
+<P>
+Thereafter, the project simply got lost in the company's processes. Although
+approved for product development, changes in direction and competing claims
+for resources prevented any serious MPP productization effort from getting
+off the ground. The project simply faded away, and by 1989 the technology
+had been shelved.
+<P>
+  <HR>
+<P>
+<I><SMALL>Updated 30-Jan-2007 by Bob Supnik (simh AT trailing-edge DOT com - anti-spam encoded)
+</SMALL></I>
+</BODY></HTML>

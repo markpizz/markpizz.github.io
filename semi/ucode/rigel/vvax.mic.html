@@ -1,0 +1,108 @@
+.TOC	"VVAX.MIC -- Virtual VAX Instructions"
+.TOC	"Revision 3.1"
+
+;	Mike Uhler
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1986, 1987, 1988, 1989 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (3)1 24-Aug-87 GMU	Pass 1 code freeze.
+;
+; (2)1 31-Dec-86 GMU	Microcode template.
+
+.bin
+;= BEGIN VVAX
+.nobin
+
+;	This module implements the virtual VAX instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	02FD	 WAIT								0 0 0 0		prv
+;	9AFD	 PROBEVMR mode.rl, base.ab					* * * *		vm, prv
+;	9BFD	 PROBEVMW mode.rl, base.ab					* * * *		vm, prv
+.TOC	"	WAIT"
+
+;	This instruction signals idle processor time in a virtual machine.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	WAIT		02FD	wait for interrupt			 0	 --	--	IE.RSVD.OPCODE.. --
+;
+;	Entry conditions:
+;		None.
+;
+;	Exit conditions:
+;		Reserved instruction fault initiated.
+;
+;	Condition codes:
+;		N <-- 0			(in exception flows)
+;		Z <-- 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	This instruction is implemented as a reserved opcode by the IPLA and is dispatched
+;		directly to IE.RSVD.OPCODE.. in INTEXC.MIC.  It is included here simply for documentation
+;		purposes.
+.TOC	"	PROBEVMx"
+
+;	These instructions probe the accessibility of a byte in a virtual machine.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	PROBEVMR	9AFD	probe vm read accessibility		 2	ra/lb	--	PROBEVMX..	--
+;	PROBEVMW	9BFD	probe vm write accessibility		 2	ra/lb	--	PROBEVMX..	--
+
+;
+;	Entry conditions:
+;		MD.T0	=	first (mode) operand
+;		MD.T2	=	second (base address) operand
+;		DL	=	byte
+;
+;	Exit conditions:
+;		The PSL condition codes reflect the result of the probe test.
+;
+;	Condition codes:
+;		N <-- {access control violation}
+;		Z <-- {reference allowed}
+;		V <-- {translation not valid}	[Integer overflow trap cannot occur.]
+;		C <-- {page not previously modified and PROBEVMW}
+;
+;	Size/performance tradeoffs:
+;		None.
+
+.bin
+
+PROBEVMX..:
+	;********** Hardware Dispatch **********;
+	RESERVED INSTRUCTION FAULT		; dispatch to exception processing
+
+;= END VVAX

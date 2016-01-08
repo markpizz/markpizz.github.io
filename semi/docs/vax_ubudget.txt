@@ -1,0 +1,43 @@
+	processor	MicroVAX	CVAX		Rigel		NVAX
+section
+
+powerup and console	24		28		22		39
+
+memory management	67		72		117		na
+
+specifier decode	160		50		60		na
+
+interrupts and		133		155		150		183
+ exceptions
+
+arithmetic, logical,	104		115		110		83
+ address
+
+variable bit field	79		87		98		95
+
+control			106		82		76		61
+
+multiply/divide		140		111		129		123
+
+procedure call		83		153		153		87
+
+miscellaneous		51		67		78		83
+
+queue			98		113		93		84
+
+operating system	246		286		326		408
+
+character string	94		162		180		186
+
+floating point		136		79		18		6
+
+emulated		58		30		28		39
+
+vector			na		na		35		14
+
+virtual machine		na		na		1		na
+
+test support		20		na		54		na
+
+total			1599		1590		1728		1494
+available		1600		1600		1728		1536

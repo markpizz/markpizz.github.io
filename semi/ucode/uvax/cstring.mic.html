@@ -1,0 +1,948 @@
+.TOC	"CSTRING.MIC -- Character String Instructions"
+.TOC	"Revision 5.1"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984, 1985 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	11-Jun-85	[RMS]	Fixed passive release problem for pass 4.1
+; 05	14-Feb-84	[RMS]	Editorial changes for pass 2
+;	20-Jan-84	[RMS]	Changed STATE7-0..ALUCC to STATE3-0..ALUCC
+;	7-Nov-83	[RMS]	Removed CHAR LOAD VIBA function
+;	22-Sep-83	[RMS]	Editorial changes
+;	16-Jun-83	[RMS]	Fixed bug in MOVC5 fill (AXE)
+;	7-Jun-83	[RMS]	Revised to use restore PC subroutine
+; 04	1-Jun-83	[RMS]	Removed third at/dl field
+;	23-May-83	[RMS]	Revised to clear STATE3 before IID
+;	8-Apr-83	[RMS]	Added char VIBA misc field
+;	31-Mar-83	[RMS]	Relaxed allocation constraints
+;	28-Mar-83	[RMS]	Eliminated word in fill restart
+;	21-Mar-83	[RMS]	Optimized setting zero fill count
+;	17-Mar-83	[RMS]	Revised for new mreq, dl functions
+; 03	13-Mar-83	[RMS]	Major code compression
+;	10-Mar-83	[RMS]	Fixed bug in treating very large move counts (ED)
+;	8-Mar-83	[RMS]	Fixed bug in setting zero fill count (ED)
+;	7-Mar-83	[RMS]	Fixed bug in move backwards (ED)
+;	9-Dec-82	[RMS]	Removed extraneous ..e linkages
+;				Revised packup routine linkage
+;	28-Nov-82	[RMS]	Editorial changes
+; 02	24-Nov-82	[RMS]	Revised allocation limits and constraints
+;	22-Nov-82	[RMS]	Changed to permit code sharing with POLYf
+;	5-Nov-82	[RMS]	Changed interrupt entry point
+; 01	1-Nov-82	[RMS]	Initial edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN CSTRING
+.nobin
+
+;	This module implements the character string instruction class.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	28	 MOVC3 len.rw, srcaddr.ab, dstaddr.ab				0 1 0 0
+;
+;	2C	 MOVC5 srclen.rw, srcaddr.ab, fill.rb,
+;		       dstlen.rw, dstaddr.ab					* * 0 *
+;
+;
+
+;	The microcode makes extensive use of a control block which is kept partially in the general
+;	registers, and partially in the working registers.  In greater detail:
+;
+;	General registers:
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count (minu(srclen, dstlen))
+;		R3	=	initial dstaddr
+;		R4	=	running loop count
+;		R5	=	at packup only:  delta PC, flags, fill character
+;
+;	Working registers:
+;		W1	=	saved PC
+;		W2	=	running srcaddr
+;		W4<31:24> =	fill character
+;		SC	=	running dstaddr
+;
+;	State flags:
+;		<0>	=	set if destination is longword aligned
+;		<2:1>	=	type of move
+;				00 --> forward
+;				01 --> backward
+;				10 --> fill
+;		<3>	=	set for interruptible instruction
+;
+
+.TOC	"	MOVC3, MOVC5"
+
+;	These instructions move a string of characters from one area of memory to another.
+;	The condition codes are set according to the difference is length of the two areas.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC's	Dispatch
+;	--------      ------	---------				----	-----	----	--------
+;	MOVC3		28	M[dstaddr...dstaddr+len-1] <--		fse	ra/wb	jizj	MOVC3
+;					M[srcaddr...srcaddr+len-1]
+;
+;	MOVC5		2C	let len = minu(srclen,dstlen)		fse	ra/wb	jizj	MOVC5
+;				M[dstaddr...dstaddr+len-1] <--
+;					M[srcaddr...srcaddr+len-1]
+;				M[dstaddr+len-1...dstaddr+dstlen-1] <-- fill
+;
+;	Entry conditions:
+;		W0	=	first (source length) operand
+;		W2	=	second (source address) operand
+;		DL	=	data type of second operand (byte)
+;
+;	Exit conditions:
+;		The psl cc's have been updated.
+;		R0 - R5 have been updated to the SRM specified values.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		(MOVC3)				(MOVC5)
+;		N <-- 0				N <-- srclen LSS dstlen
+;		Z <-- 1				Z <-- srclen EQL dstlen
+;		V <-- 0				V <-- 0
+;		C <-- 0				C <-- srclen LSSU dstlen
+;
+;	Size/performance tradeoffs:
+;		Too numerous to mention.
+;
+;	Note:	MOVC3/MOVC5 are interruptible instructions.  If a memory management fault or interrupt
+;		occurs in mid instruction, the outstanding state is packed into R0 - R5, FPD is set,
+;		and the exception is processed.  When the instruction is redecoded, the state is unpacked
+;		and the instruction is resumed at the interruption point.
+;
+;	Note:	MOVC5 sets the condition codes before the accessibility of the fifth operand
+;		specifier is proven.
+;
+.bin
+
+;	MOVC3, MOVC5 operation:
+;
+;		1) Parse specifiers, checking for zero length cases
+;		2) Determine forward or backward move direction
+;		3) Move source to destination
+;		4) If MOVC5 and srclen < dstlen, fill destination
+;		5) Clean up R0 - R5 and exit
+
+MOVC3..:					; opcode = 28
+	;********** Hardware dispatch **********;
+	W[3]<--W[0], 				; save length, 
+	CALL.CASE.SPEC[GSD..]			; parse dstaddr (AT/DL = .ab)
+
+	;---------------------------------------;
+	W[1]<--W[1]-W[1], SET.PSLCC, LEN(DL),	; set fill count to zero, set psl cc's
+						; to 0100, alu cc's to 0101 (so branch below taken)
+						; note:  all bits of W1 are written!
+	GOTO[MOVC.SET.FILLCNT]			; go join common MOVC3/MOVC5 flows
+
+MOVC5..:					; opcode = 2C
+	;********** Hardware dispatch **********;
+	P[ATDL]<--K[ATDL.RB],			; set up AT/DL = .rb for fill character
+	CALL[COPY.W0.TO.W1.GSD..]		; save srclen in W1, parse fill character
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.RW]			; fourth specifier is .rw (must break allocation!)
+
+	;---------------------------------------;
+	W[4]<--W[0].SHFL.[24.],			; save fill character,
+	CALL.CASE.SPEC[GSD..]			; parse dstlen
+
+	;---------------------------------------;
+	W[1]<--W[1]-W[0], SET.PSLCC, LEN(DL)	; compute srclen - dstlen, set cc's
+						; note:  all bits of W1 are written!
+
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.AB],			; fifth specifier is .ab
+	CALL[COPY.W0.TO.W3.GSD..]		; save dstlen in W3, parse dstaddr
+
+MOVC.SET.FILLCNT:
+	;---------------------------------------;
+	G[0]<--W[1],				; save fill count
+	STATE.FLAGS<--0,			; clear all flags for move forward loop
+	IF[ALU.C]_[MOVC.SRC.LONGER]		; if srclen gtru dstlen, branch
+
+;	MOVC3/MOVC5 common setup.
+;	Finish setting up control block in general registers.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		W0	=	dstaddr
+;		W2	=	srcaddr
+;		W3	=	dstlen
+;		W4<31:24> =	fill (MOVC5 only)
+
+	;---------------------------------------;
+	W[3]<--W[3]+G[0]			; dstlen is longer, therefore srclen
+						; controls actual move
+						; W3 = dstlen + srclen - dstlen = srclen
+
+MOVC.SRC.LONGER:
+	;---------------------------------------;
+	SC&, G[3]<--W[0]			; save dstaddr in R3, SC
+
+	;---------------------------------------;
+	W[1]<--G[PC],				; save PC in W1 for fault/interrupt
+	CALL[MOVC.SET.R1.R2.R4]			; set up rest of gpr control block
+						; set alu cc's from W3
+
+	;---------------------------------------;
+	W(6)&, WBUS<--W[2]-W[SC], SET.ALUCC,	; compare srcaddr to dstaddr
+	CASE2[ALU.NZVC].AT.[MOVC.CMP.ADDR]	; if controlling length = zero, skip to fill
+
+;= ALIGNLIST 10***	(MOVC.CMP.ADDR,	MOVC.FILL)
+;  ALU.NZVC set by MOVE --> V = C = 0
+
+MOVC.CMP.ADDR:
+	;---------------------------------------; Z = 0:
+	WBUS<--W[6]+G[2], SET.ALUCC,		; compute srcaddr + movelen - dstaddr
+	IF[ALU.C]_[MOVC.FORWARD]		; if C = 1 (srcaddr >= dstaddr), can move forward
+
+MOVC.BACKWARD.TST:
+	;---------------------------------------; 
+	IF[ALU.C]_[MOVC.BACKWARD]		; if C = 0 (srcaddr + movelen < dstaddr),
+						; can move forward
+
+;	Move main block of data forward.
+;	The source pointer is put in VIBA, and source data is prefetched.
+;	The destination pointer is put in VA, and destination data is
+;	written longword aligned.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count
+;		W1	=	saved PC
+;		W2	=	srcaddr
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	dstaddr
+;		STATE<3:0> =	0000
+
+MOVC.FORWARD:
+	;---------------------------------------;
+	STATE3<--1,				; set flag 3 for interruptible inst
+	CALL.NO.RETURN+1[MOVC.ALIGN.DST]	; go align dstaddr
+						; returns to +2!!
+
+;= AT MOVC.FORWARD+2
+
+	;---------------------------------------;
+	WBUS<--W[2], 				; put srcaddr on Wbus,
+	LOAD.V&PC.GOTO[MOVC.FORWARD.TST.LEN]	; copy to VIBA, PC, flush IB
+
+;	Move forward, continued.
+;	Get next data item.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count - m[kdl]
+;		PC	=	srcaddr
+;		W1	=	saved PC
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC = VA =	dstaddr
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	100
+;		alu cc's =	set from R4
+
+MOVC.FORWARD.MOVE.LEN.DL:
+	;---------------------------------------;
+	W[SC]<--W[SC]+M[KDL],			; increment dstaddr by data item length
+	ID<--IB.LEN(DL).CASE.AT.[MOVC.FORWARD.IB.GOT.DATA]	; case on data in IB
+
+;= ALIGNLIST 00*	(MOVC.FORWARD.IB.GOT.DATA,				,
+;=			 MOVC.FORWARD.IB.STALL,		MOVC.FORWARD.IB.HALTED)
+
+MOVC.FORWARD.IB.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[MOVC.FORWARD.IB.GOT.DATA]	; case on data in IB
+
+MOVC.FORWARD.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, return to [-3] (IB STALL)
+
+MOVC.FORWARD.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	W[6]<--M[ID],				; get data item from IB
+	IF[NO.FPD.INTERRUPTS.PENDING]_[MOVC.FORWARD.NO.INTERRUPTS]	; if interrupt, stop instruction
+
+	;---------------------------------------;
+	GOTO[IE.INTERRUPT..]			; interrupt, enter interrupt fault processor
+
+;	Move forward, continued.
+;	No FPD interrupt pending.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count - m[kdl]
+;		PC	=	srcaddr
+;		W1	=	saved PC
+;		W4<31:24> =	fill (MOVC5 only)
+;		W6	=	current data item
+;		SC	=	dstaddr + m[kdl]
+;		VA	=	dstaddr
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	100
+;		alu cc's =	set from R4
+
+MOVC.FORWARD.NO.INTERRUPTS:
+	;---------------------------------------;
+	MEM(VA)<--W[6], LEN(DL),		; write data to destination
+	IF[ALU.Z]_[MOVC.FORWARD.COMPLETE]	; if length was zero, move done
+
+	;---------------------------------------;
+	G[4]<--G[4]-M[KDL], SET.ALUCC, 		; decrement move length
+	CASE2[STATE3-0].AT.[MOVC.FORWARD.NOT.ALIGNED]	; case on dstaddr longword aligned
+
+;= ALIGNLIST 1**0*	(MOVC.FORWARD.NOT.ALIGNED,	MOVC.FORWARD.ALIGNED)
+;  STATE<3:0> = 100?
+
+MOVC.FORWARD.NOT.ALIGNED:
+	;---------------------------------------; STATE<0> = 0:
+	G[4]<--G[4]+M[KDL], 			; restore erroneous subtraction
+	CALL.NO.RETURN+1[MOVC.ALIGN.DST]	; set up to align destination
+						; returns to +2 (TST.LEN)!!
+
+MOVC.FORWARD.ALIGNED:
+MOVC.FORWARD.TST.LEN:
+	;---------------------------------------; STATE<0> = 1:
+	VA<--W[SC],				; put dstaddr into VA,
+	IF[ALU.N]_[MOVC.FORWARD.DL.TOO.BIG].ELSE.[MOVC.FORWARD.MOVE.LEN.DL]
+						; test whether data item will fit
+
+;	Move forward, continued.
+;	The current data item to be moved is longer than the remaining length
+;	of the destination string.
+;	Cut down the current data length and retry the move.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count - m[kdl]
+;		PC	=	srcaddr
+;		W1	=	saved PC
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	dstaddr
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	100
+
+MOVC.FORWARD.DL.TOO.BIG:
+	;---------------------------------------;
+	P[ATDL]<--P[ATDL]-1			; cut down to next smaller data length
+
+	;---------------------------------------;
+	G[4]<--G[4]+M[KDL], SET.ALUCC, 		; add back half the data length
+	GOTO[MOVC.FORWARD.TST.LEN]		; now see if room to move data item
+
+;	Move forward completed.
+;	Fix up working registers, test for fill.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R2	=	initial loop count
+;		PC	=	final srcaddr
+;		W1	=	saved PC
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	current dstaddr
+;		alu cc's =	010X
+
+MOVC.FORWARD.COMPLETE:
+	;---------------------------------------; Z = 1:
+	W[2]<--G[PC],				; get final srcaddr back into W2
+	CALL[MOVC.SET.R1.R3]			; update R1, R3 in control block
+
+	;---------------------------------------;
+	WBUS<--W[1],				; restore PC,
+	LOAD.V&PC.GOTO[MOVC.FILL]		; go fill
+
+;	Move main block of data backward.
+;	Source data is fetched unaligned.
+;	Destination data is written longword aligned.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count
+;		W1	=	saved PC
+;		W2	=	srcaddr
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	dstaddr
+
+MOVC.BACKWARD:
+	;---------------------------------------;
+	W[SC]<--W[SC]+G[4],			; calculate END dstaddr
+	STATE.FLAGS<--0				; clear all flags
+
+MOVC.BACKWARD.1:
+	;---------------------------------------;
+	W[2]<--W[2]+G[4],			; calculate END srcaddr
+	CALL.NO.RETURN+1[MOVC.ALIGN.DST]	; set up to align dstaddr
+						; returns to +2!!
+
+;= AT MOVC.BACKWARD.1+2
+
+	;---------------------------------------;
+	P[STATE3-0..ALUCC]<--P[STATE3-0..ALUCC].OR.K[0A0],	; set flags 1 and 3
+	GOTO[MOVC.BACKWARD.TST.LEN]		; go test for data item fit
+
+;	Move backward, continued.
+;	Get next data item.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count - m[kdl]
+;		W1	=	saved PC
+;		W2 = VA	=	srcaddr - m[kdl]
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	dstaddr
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	101
+;		alu cc's =	set from R4
+
+MOVC.BACKWARD.MOVE.LEN.DL:
+	;---------------------------------------;
+	W[6]<--MEM(VA), LEN(DL),		; read data item at srcaddr
+	IF[NO.FPD.INTERRUPTS.PENDING]_[MOVC.BACKWARD.NO.INTERRUPTS]	; check for interrupts
+
+	;---------------------------------------;
+	GOTO[IE.INTERRUPT..]			; interrupt, enter interrupt fault processor
+
+MOVC.BACKWARD.NO.INTERRUPTS:
+	;---------------------------------------;
+	VA&, W[SC]<--W[SC]-M[KDL]		; VA&, dstaddr <-- dstaddr - m[kdl]
+
+	;---------------------------------------;
+	MEM(VA)<--W[6], LEN(DL),		; write data item to memory
+	IF[ALU.Z]_[MOVC.BACKWARD.COMPLETE]	; branch out if move is complete
+
+;	Move backward, continued.
+;	Break outs for dstaddr aligned at start of this iteration.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count - m[kdl]
+;		W1	=	saved PC
+;		W2	=	srcaddr - m[kdl]
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	dstaddr - m[kdl]
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	101
+;		alu cc's =	set from R4
+
+	;---------------------------------------;
+	G[4]<--G[4]-M[KDL], SET.ALUCC, 		; decrement loop count by data length
+	CASE2[STATE3-0].AT.[MOVC.BACKWARD.NOT.ALIGNED]	; case on dstaddr aligned
+
+;= ALIGNLIST 1*10*	(MOVC.BACKWARD.NOT.ALIGNED,	MOVC.BACKWARD.ALIGNED)
+;  STATE<3:0> = 101?
+
+MOVC.BACKWARD.NOT.ALIGNED:
+	;---------------------------------------; STATE<0> = 0:
+	G[4]<--G[4]+M[KDL], 			; undo erroneous subtraction
+	CALL.NO.RETURN+1[MOVC.ALIGN.DST]	; try again to align destination
+						; returns to +2 (TST.LEN)!!
+
+MOVC.BACKWARD.ALIGNED:
+MOVC.BACKWARD.TST.LEN:
+	;---------------------------------------; STATE<0> = 1:
+	VA&, W[2]<--W[2]-M[KDL],		; VA&, srcaddr <-- srcaddr - m[kdl]
+	IF[ALU.N]_[MOVC.BACKWARD.DL.TOO.BIG].ELSE.[MOVC.BACKWARD.MOVE.LEN.DL]
+						; test whether data item will fit
+
+;	Move backward, continued.
+;	The current data item to be moved is longer than the remaining length
+;	of the destination string.
+;	Cut down the current data length and retry the move.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	loop count - m[kdl]
+;		W1	=	saved PC
+;		W2	=	srcaddr - m[kdl]
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	dstaddr
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	101
+
+MOVC.BACKWARD.DL.TOO.BIG:
+	;---------------------------------------;
+	VA&, W[2]<--W[2]+M[KDL]			; undo erroneous subtraction of srcaddr
+
+	;---------------------------------------;
+	P[ATDL]<--P[ATDL]-1			; cut current data item length in half
+
+	;---------------------------------------;
+	G[4]<--G[4]+M[KDL], SET.ALUCC, 		; add half of data item length back in
+	GOTO[MOVC.BACKWARD.TST.LEN]		; go see if room to move
+
+;	Move backward completed.
+;	Fix up working registers, test for fill.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		W1	=	saved PC
+;		W2	=	final (= initial) srcaddr
+;		W4<31:24> =	fill (MOVC5 only)
+;		SC	=	final (= initial) dstaddr
+;		alu cc's =	010X
+
+MOVC.BACKWARD.COMPLETE:
+	;---------------------------------------; Z = 1:
+	W[2]<--W[2]+G[2]			; update srcaddr to end of src block
+
+	;---------------------------------------;
+	W[SC]<--W[SC]+G[2],			; update dstaddr to end of dst block
+	CALL[MOVC.SET.R1.R3]			; update R1, R3 in control block
+						; fall through to fill
+
+;	Main move completed, test for fill.
+
+;	At this point,
+;		R0	=	srclen - dstlen
+;		R1 = W2	=	final srcaddr
+;		R3 = SC =	current dstaddr
+;		W1	=	saved PC
+;		W4<31:24> =	fill (MOVC5 only)
+
+MOVC.FILL:
+	;---------------------------------------;
+	W[3]<--G[0], SET.ALUCC			; get fill length
+
+	;---------------------------------------;
+	G[4]<--NEG.W[3],			; negate to get fill count
+	IF[ALU.N]_[MOVC.FILL.SETUP].ELSE.[MOVC.COMPLETE]	; if negative, fill, else done
+
+;	Also enter here on fill restart.
+
+MOVC.FPD.FILL:
+MOVC.FILL.SETUP:
+	;---------------------------------------; N = 1:
+	G[0]<--0, STATE.FLAGS<--0		; zero out fill length and flags
+
+	;---------------------------------------;
+	P[STATE3-0..ALUCC]<--P[STATE3-0..ALUCC].OR.K[0C0]	; set flags 2 and 3
+
+	;---------------------------------------;
+	W[6]<--ZEXT.W[4].SHFR.[8.]		; duplicate fill character
+
+	;---------------------------------------;
+	W[6]<--W[6].OR.W[4]			; W6 now contains word of fill
+
+MOVC.FILL.NON.ZERO:
+	;---------------------------------------;
+	W[0]<--ZEXT.W[6].SHFR.[16.],		; duplicate fill word
+	CALL.NO.RETURN+1[MOVC.ALIGN.DST]	; set up for fill operation
+
+;= AT MOVC.FILL.NON.ZERO+2
+
+	;---------------------------------------;
+	W[6]<--W[6].OR.W[0],			; W6 now contains longword of fill
+	GOTO[MOVC.FILL.TST.LEN]			; go test for fit
+
+;	Move fill, continued.
+;	Write next byte/word/longword of fill.
+
+;	At this point,
+;		R1	=	final srcaddr
+;		R3 = SC	=	running dstaddr
+;		R4	=	loop count - m[kdl]
+;		W1	=	saved PC
+;		W6	=	fill longword
+;		STATE<0> =	set if aligned
+;		STATE<3:1> =	110
+;		alu cc's =	set from R4
+
+MOVC.FILL.MOVE.LEN.DL:
+	;---------------------------------------;
+	MEM(VA)<--W[6], LEN(DL),		; write byte/word/longword of fill
+	IF[NO.FPD.INTERRUPTS.PENDING]_[MOVC.FILL.NO.INTERRUPTS]	; if interrupt, stop instruction
+
+	;---------------------------------------;
+	GOTO[IE.INTERRUPT..]			; interrupt, enter interrupt fault processor
+
+MOVC.FILL.NO.INTERRUPTS:
+	;---------------------------------------;
+	SC&, G[3]<--G[3]+M[KDL],		; increment dstaddr by length
+	IF[ALU.Z]_[MOVC.COMPLETE]		; if length was zero, move done
+
+	;---------------------------------------;
+	G[4]<--G[4]-M[KDL], SET.ALUCC, 		; decrement move length
+	CASE2[STATE3-0].AT.[MOVC.FILL.NOT.ALIGNED]	; case on dstaddr longword aligned
+
+;= ALIGNLIST 11*0*	(MOVC.FILL.NOT.ALIGNED,	MOVC.FILL.ALIGNED)
+;  STATE<3:0> = 110?
+
+MOVC.FILL.NOT.ALIGNED:
+	;---------------------------------------; STATE<0> = 0:
+	G[4]<--G[4]+M[KDL], 			; restore erroneous subtraction
+	CALL.NO.RETURN+1[MOVC.ALIGN.DST]	; set up to align destination
+						; returns to +2 (TST.LEN)!!
+
+MOVC.FILL.ALIGNED:
+MOVC.FILL.TST.LEN:
+	;---------------------------------------; STATE<0> = 1:
+	VA&, WBUS<--G[3],			; put dstaddr into VA,
+	IF[ALU.N]_[MOVC.FILL.DL.TOO.BIG].ELSE.[MOVC.FILL.MOVE.LEN.DL]
+						; test whether data item will fit
+
+;	Move fill, continued.
+;	The current data item to be moved is longer than the remaining length
+;	of the destination string.
+;	Cut down the current data length and retry the move.
+
+;	At this point,
+;		R1	=	final srcaddr
+;		R3 = SC	=	running dstaddr
+;		R4	=	loop count - m[kdl]
+;		W1	=	saved PC
+;		W6	=	fill longword
+;		STATE<0> =	set if aligned
+
+MOVC.FILL.DL.TOO.BIG:
+	;---------------------------------------;
+	P[ATDL]<--P[ATDL]-1			; cut down to next smaller data length
+
+	;---------------------------------------;
+	G[4]<--G[4]+M[KDL], SET.ALUCC, 		; add back half the data length
+	GOTO[MOVC.FILL.TST.LEN]			; now see if room to move data item
+
+;	MOVC3 or MOVC5 completed.
+;	Clean up general registers and exit.
+
+;	At this point,
+;		R0	=	srclen - dstlen or 0
+;		R1	=	final srcaddr
+;		R3	=	final dstaddr
+
+MOVC.COMPLETE:
+	;---------------------------------------; N = 0:
+	G[5]<--0, STATE.FLAGS<--0		; clear R5, clear STATE<3> before IID
+
+POLYG.CLEAR.R4.R2:
+	;---------------------------------------;
+	G[4]<--0				; clear R4
+
+POLYF.CLEAR.R2:
+	;---------------------------------------;
+	G[2]<--0, EXECUTE.IID			; clear R2, decode next instruction
+
+.TOC	"	Packup Routine"
+
+;	This routine is invoked by the exception processor (INTEXC.MIC)
+;	if an interrupt or exception occurs during a MOVC3 or MOVC5
+;	It packs up the current instruction state into the general
+;	registers, sets FPD, and returns to the exceptions processor.
+
+;	At this point,
+;		R0	=	srclen - dstlen or 0
+;		R1	=	srcaddr
+;		R2	=	initial loop count
+;		R3	=	dstaddr
+;		R4	=	current loop count
+;		W1	=	saved PC
+;		W4<31:24> =	fill character
+;		STATE<2:1> =	type of move
+
+MOVC.PACK..:
+	;---------------------------------------;
+	G[4]<--G[4]+M[KDL],			; restore loop count for predecrement
+						; by data length
+	CALL[PACK.PC.SET.FPD..]			; pack up PC, set psl<fpd>
+
+	;---------------------------------------;
+	W[4]<--P[STATE3-0..ALUCC]!!W[4].SHFR.[16.]	; concatonate flags, fill into W4<23:8>
+
+	;---------------------------------------;
+	W[1]<--W[1]!!W[4].SHFL.[24.]		; concatonate delta PC, flags, fill into W1
+
+	;---------------------------------------;
+	G[5]<--W[1], 				; store packed result in R5
+	GOTO[IE.CLEANUP.FINISH..]		; go finish cleanup routine
+
+;	Routine to calculate delta PC, set psl<fpd>.
+
+PACK.PC.SET.FPD..:
+	;---------------------------------------;
+	T[PSL]<--T[PSL].OR.K[08]000,		; set psl<fpd> in microcode psl
+	CALL[RESTORE.PC..]			; restore PC from backup PC
+
+	;---------------------------------------;
+	WBUS<--G[PC],				; for interrupt passive release
+	LOAD.V&PC				; load PC, VIBA, flush IB
+
+	;---------------------------------------;
+	W[1]<--W[1]-G[PC],			; calculate delta PC in W1
+	GOTO[UPDATE.PSL.HWRE.COPY.SC..]		; update hardware psl, return from there to caller
+
+.TOC	"	Unpack Routine"
+
+;	This routine is invoked by the FPD processor (INTEXC.MIC)
+;	to restart a MOVC3 or MOVC5 following an interrupt or exception.
+;	It unpacks the current instruction state from the general
+;	registers, clears FPD, and returns to the caller.
+
+MOVC.FPD..:
+	;---------------------------------------;
+	W[4]<--G[5],				; get delta PC, flags, fill
+	CALL[UNPACK.PC.CLEAR.FPD..]		; restore PC to W1, clear psl<fpd>
+
+	;---------------------------------------;
+	W[SC]<--ZEXT.W[4].SHFR.[8.]		; restore flags to SC for test
+
+	;---------------------------------------;
+	W[4]<--W[4].SHFL.[24.]			; restore fill character
+
+	;---------------------------------------;
+	G[2]<--G[2].ANDNOT.11K[0]0		; guarantee initial loop count of 16 bits max
+
+	;---------------------------------------;
+	G[4]<--G[4].ANDNOT.11K[0]0		; guarantee current loop count of 16 bits max
+
+	;---------------------------------------;
+	W[SC]<--G[3],				; restore dstaddr (for MOVC.ALIGN.DST)
+	CASE4[SC7-4].AT.[MOVC.FPD.FORWARD]	; case on SC<6:5> = STATE<2:1>
+
+;	Routine to restore PC, clear psl<fpd>.
+
+UNPACK.PC.CLEAR.FPD..:
+	;---------------------------------------;
+	W[1]<--ZEXT.W[4].SHFR.[24.],		; isolate delta PC
+	CALL[RESTORE.PC..]			; restore original PC (IID may have incr PC)
+
+	;---------------------------------------;
+	W[1]<--W[1]+G[PC],			; add delta PC onto PC,
+	LOAD.V&PC				; load PC, VIBA, flush IB
+
+	;---------------------------------------;
+	T[PSL]<--T[PSL].ANDNOT.K[08]000,	; clear psl<fpd> in microcode psl,
+	GOTO[UPDATE.PSL.HWRE.COPY.SC..]		; go update hardware psl and return from there
+
+;	Unpack, continued.
+
+;	Restart forward move operation.
+
+;= ALIGNLIST 1001*	(MOVC.FPD.FORWARD,	MOVC.FPD.BACKWARD,
+;=			 MOVC.FPD.FILL,		MOVC.FPD.ERROR)
+
+MOVC.FPD.FORWARD:
+	;---------------------------------------; SC<6:5> = 00:
+	W[2]<--G[2],				; get initial loop count
+	STATE.FLAGS<--0				; clear STATE<3:0>
+
+	;---------------------------------------;
+	W[2]<--W[2]-G[4]			; calculate initial count - current count
+						; = offset into move block
+
+	;---------------------------------------;
+	W[SC]<--W[SC]+W[2]			; update dstaddr pointer to current location
+
+	;---------------------------------------;
+	W[2]<--W[2]+G[1],			; update srcaddr pointer to current location
+	GOTO[MOVC.FORWARD]			; go re-enter move forward loop
+
+;	State upon returning to move forward:
+;		R0	=	srclen - dstlen
+;		R1	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3	=	initial dstaddr
+;		R4	=	current loop count
+;		W2	=	current srcaddr
+;		W1	=	saved PC
+;		W4<31:24> =	fill character
+;		SC	=	current dstaddr
+;		STATE<3:0> =	0000
+;
+;	The move forward code then sets:
+;		R4	=	loop count - m[kdl]
+;		PC	=	current srcaddr
+;		STATE<3:0> =	1000
+;		alu cc's =	set from R4
+
+;	Unpack, continued.
+
+;	Restart move backward operation.
+
+MOVC.FPD.BACKWARD:
+	;---------------------------------------; SC<6:5> = 01:
+	W[2]<--G[1],				; restore srcaddr to W2
+	GOTO[MOVC.BACKWARD]			; go rejoin move backward code
+
+;	State upon returning to move backward:
+;		R0	=	srclen-dstlen
+;		R1 = W2	=	initial srcaddr
+;		R2	=	initial loop count
+;		R3 = SC	=	initial dstaddr
+;		R4	=	current loop count
+;		W1	=	saved PC
+;		W4<31:24> =	fill character
+;		SC	=	initial dstaddr
+;
+;	The move backward code then sets:
+;		R4	=	loop count - m[kdl]
+;		W2	=	initial srcaddr + current loop count
+;		SC	=	initial dstaddr + current loop count
+;		STATE<3:0> =	1010
+;		alu cc's =	set from R4
+
+;	Unpack, continued.
+
+;	Restart fill operation.
+
+;MOVC.FPD.FILL:
+	;---------------------------------------; SC<6:5> = 10:
+						; rejoin fill code at MOVC.FILL.SETUP
+
+;	State upon returning to fill:
+;		R1	=	final srcaddr
+;		R3 = SC	=	current dstaddr
+;		R4	=	remaining loop count
+;		W1	=	saved PC
+;		W4<31:24> =	fill character
+;		alu cc's =	set from W3
+;
+;	The fill code then sets:
+;		R0	=	0
+;		R4	=	loop count - m[kdl]
+;		W6	=	fill longword
+;		STATE<3:0> =	1100
+;		alu cc's =	set from R4
+
+
+
+;	Unknown state code.
+
+MOVC.FPD.ERROR:
+	;---------------------------------------; SC<6:5> = 11:
+	GOTO[RSRV.OPER.FLT..]			; user mucked with registers
+						; give reserved operand fault
+
+.TOC	"	Other Routines"
+
+;	Subroutine to set up for destination alignment.
+;	Note that if dstaddr<1:0> = 01 (moving forward) or
+;	11 (moving backward), this will take two iterations.
+
+;	Entry conditions:
+;		R4	=	minu(srclen, dstlen) > 0
+;		SC 	=	dstaddr
+
+;	Exit conditions:
+;		R4	=	initial R4 - m[kdl]
+;		SC	=	dstaddr
+;		DL	=	data length for next move
+;		alu cc's =	set from R4
+
+;	Returns to CALL + 2!!
+
+MOVC.ALIGN.DST:
+	;---------------------------------------;
+	P[ATDL]<--K[ATDL.RL],			; assume we will move a longword
+	CASE4[SC3-0].AT.[MOVC.ALIGN.DST.00]	; case on alignment of dstaddr
+
+;= ALIGNLIST 1100*	(MOVC.ALIGN.DST.00,	MOVC.ALIGN.DST.01,
+;=			 MOVC.ALIGN.DST.10,	MOVC.ALIGN.DST.11)
+
+MOVC.ALIGN.DST.00:
+	;---------------------------------------; SC<1:0> = 00:
+	G[4]<--G[4]-M[FOUR], SET.ALUCC,		; test to see if we can move specified length
+	STATE0<--1,				; set flag to indicate dstaddr aligned
+	RETURN[+1]				; return to caller
+
+MOVC.ALIGN.DST.01:
+	;---------------------------------------; SC<1:0> = 01:
+	G[4]<--G[4]-1, SET.ALUCC, 		; test to see if we can move specified length
+	DL<--BYTE,				; force dl to BYTE
+	RETURN[+1]				; return to caller
+
+MOVC.ALIGN.DST.10:
+	;---------------------------------------; SC<1:0> = 10:
+	G[4]<--G[4]-M[TWO], SET.ALUCC,		; test to see if we can move specified length
+	DL<--WORD,				; force dl to WORD
+	RETURN[+1]				; return to caller
+
+MOVC.ALIGN.DST.11:
+	;---------------------------------------; SC<1:0> = 11:
+	G[4]<--G[4]-1, SET.ALUCC, 		; test to see if we can move specified length
+	DL<--BYTE,				; force dl to BYTE
+	RETURN[+1]				; return to caller
+
+;	Routine to store variables in general registers.
+
+;	Entry conditions:
+;		W2	=	srcaddr
+;		W3	=	loop count
+;		SC	=	dstaddr
+;
+;	Exit conditions:
+;		R1	=	srcaddr
+;		R2	=	loop count
+;		R3	=	dstaddr
+;		R4	=	loop count
+;		alu cc's =	set from W3
+
+MOVC.SET.R1.R2.R4:
+	;---------------------------------------;
+	G[2]<--W[3], SET.ALUCC			; save loop count in R2, test for zero
+
+	;---------------------------------------;
+	G[4]<--W[3], GOTO[MOVC.SET.R1]		; save loop count in R4
+
+MOVC.SET.R1.R3:
+	;---------------------------------------;
+	G[3]<--W[SC]				; save dstaddr in R3
+
+MOVC.SET.R1:
+	;---------------------------------------;
+	G[1]<--W[2], RETURN			; save srcaddr in R1, return to caller
+
+;= END CSTRING

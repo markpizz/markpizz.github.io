@@ -1,0 +1,1671 @@
+.TOC 	"INTEXC.MIC -- Interrupts and Exceptions"
+.TOC	"Revision 4.3"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987, 1988 BY				    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	28-Mar-88	[RMS]	Fixed bug in MFPR non-existent to memory (AJB)
+;	26-Mar-87	[RMS]	Fixed microcode restriction violation (VMS)
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 04	25-Sep-86	[RMS]	Revised FPD, packup for POLYf, string changes
+; 03	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	24-Jun-86	[RMS]	Documented additional PSL restriction (ECO 6JUN18DWA.1)
+;	21-May-86	[RMS]	Revised to clear write buffers in main flows (ECO 6MAY14RMS.2)
+;	14-May-86	[RMS]	Fixed trashing of RESTART in machine check (SDP)
+;	31-Mar-86	[RMS]	Editorial changes
+;	28-Mar-86	[RMS]	Revised for enable prefetch restriction (ECO 6MAR28DWA.1)
+;	24-Feb-86	[RMS]	Editorial changes
+;	19-Feb-86	[RMS]	Editorial changes
+;	16-Feb-86	[RMS]	Restored SPEC.RN (ECO rescinded)
+;	31-Jan-86	[RMS]	Changed SPEC.RN (ECO 6JAN31DWA.2)
+;	31-Jan-86	[RMS]	Removed MSER.HIGH (ECO 6JAN30PIR.1) and ATDL (ECO 6JAN31DWA.1)
+;	3-Jan-86	[RMS]	Documented misc RN+/-1 restriction (ECO 6JAN03DWA.1)
+;	29-Dec-85	[RMS]	Fixed bug in machine check, separated ASTLVL and TRAP
+;	8-Oct-85	[RMS]	Fixed bug in interrupt fault
+;	5-Sep-85	[RMS]	Documented additional PSL<cur_mode> restriction (ECO 5SEP05AO.1)
+;	2-Sep-85	[RMS]	Revised to remove write ipr bus error (ECO 5AUG28PIR.1)
+;	22-Aug-85	[RMS]	Added in exceptions from SPEC module
+; 02	29-Jul-85	[RMS]	Revised to push additional state during machine check
+;	26-Jul-85	[RMS]	Documented additional PSL, HSIR restrictions
+;	8-Jul-85	[RMS]	Revised to save cycle in vectored interrupt flows
+;	24-Jun-85	[RMS]	Fixed bug in FPD restart
+;	17-Jun-85	[RMS]	Removed passive release exception (ECO 5JUN17PIR.3)
+;			[RMS]	Enlarged interrupt vector to 16b (ECO 5JUN17PIR.2)
+; 01	20-Mar-85	[RMS]	Revised for second pass model
+; 00	11-May-83	[RMS]	Initial edit for CVAX
+
+.bin
+
+;= BEGIN INTX
+
+.nobin
+;	Interrupts and exceptions fall into three basic classes:  traps, faults, and aborts.
+;	In each case the PC and the PSL	are pushed onto the stack.  In certain cases,
+;	parameters are also pushed.  Traps occur at the end of the instruction that
+;	caused the exception.  Faults occur during an instruction but leave the registers
+;	and memory such that elimination of the fault condition and restarting the instruction
+;	will give correct results.  Aborts occur during an instruction but leave the 
+;	registers and memory such that the instruction cannot necessarily be restarted.
+;
+;	The following table lists all entry points into module INTEXC both from hardware
+;	dispatches and from other microcode modules.
+;
+;	Hardware dispatches:
+;
+;	Entry Point		From			Comments
+;	-----------		----			--------
+;	IE.COND.BRANCH		microtrap		conditional branch taken
+;	IE.INTOV		microtrap		integer overflow
+;	IE.BUSERR.READ.VIRT	microtrap		read virtual bus error
+;	IE.BUSERR.READ.PHYS	microtrap		read physical bus error
+;	IE.BUSERR.READ.IPR	microtrap		read ipr bus error
+;	IE.BUSERR.WRITE.VIRT	microtrap		write virtual bus error
+;	IE.BUSERR.WRITE.PHYS	microtrap		write physical bus error
+;	IE.BUSERR.INT.VEC	microtrap		interrupt vector bus error
+;
+;	IE.VAX.TRACE.TRAP	initial DEC.NEXT	trace trap
+;	IE.VAX.INTERRUPT	initial DEC.NEXT	interrupt
+;	IE.VAX.ARITH.TRAP	initial DEC.NEXT	arith trap, TRAP = trap code
+;	IE.IID.STALL		initial DEC.NEXT	prefetcher stalled
+;
+;	BPT			initial DEC.NEXT	BPT instruction
+;	XFC			initial DEC.NEXT	XFC instruction
+;	FPD			initial DEC.NEXT	FPD set in PSL
+;	XFD			initial DEC.NEXT	XFD instruction
+;	RSRV.INST.FLT		initial DEC.NEXT	reserved instruction fault
+;				or OPSYS.MIC		privileged instruction fault
+;
+;	DEC.NEXT.STALL		DEC.NEXT		prefetcher stalled
+;	DEC.NEXT.HALTED		DEC.NEXT		prefetcher halted
+;
+;	Microcode dispatches:
+;
+;	Entry Point		From			Comments
+;	-----------		----			--------
+;	ID.LOAD.HALTED		various			prefetcher halted
+;	RSRV.ADDR.FLT		SPEC.MIC		reserved addressing fault
+;	FP.ARITH.FLT		FPOINT.MIC		fp arith fault, W5 = fault code
+;	RSRV.OPER.FLT		various			reserved operand fault
+;	MACHINE.CHECK		various			machine check fault, TMMGT = fault code
+;	IE.ACV			FMEMMGT.MIC		ACV fault, TMMGT = fault code
+;	IE.TNV			FMEMMGT.MIC		TNV fault, TMMGT = fault code
+;	IE.INTERRUPT		various			interrupt in mid instruction (treat as fault)
+;	IE.CHM.EXCEPT		OPSYS.MIC		CHM exception,
+;							  W1 = minu(opcode<1:0>, PSL<cur_mode>)
+;							  W4 = sp_W1
+;							  W5 = sext(operand)
+;							  VA = SCB vector address
+
+;	Implementation dependent decisions in INTEXC:
+;
+;	    1.	Vector<1:0> neq 1 during machine check or ksnv is IGNORED.
+;		The exception is processed on the interrupt stack, and
+;		the IPL is forced to 1F.
+;
+;	    2.	Vector<1:0> neq 0 during CHMx is IGNORED.
+;
+;	    3.	Vector<1:0> = 2 during any interrupt or other exception
+;		causes a console restart (code = ERR.WCSVEC).
+;
+;	    4.	Vector<1:0> = 3 during any interrupt or other exception
+;		causes a console restart (code = ERR.ILLVEC).
+;
+;	    5.  ACV/TNV during kernel stack not valid or
+;		machine check causes a console restart.
+;
+;	    6.  Machine check during any exception causes
+;		a console restart.
+;
+
+;	This is a list of machine checks in the microcode:
+;
+;	Mnemonic		Dispatched From
+;	--------		---------------
+;	MCHK.TBM.PPTE.P0	FMEMMGT --	MBOX.STATUS showed PPTE in P0 space
+;	MCHK.TBM.PPTE.P1	FMEMMGT --	MBOX.STATUS showed PPTE in P1 space
+;	MCHK.M0.PPTE.P0		FMEMMGT --	MBOX.STATUS showed PPTE in P0 space
+;	MCHK.M0.PPTE.P1		FMEMMGT --	MBOX.STATUS showed PPTE in P1 space
+;	MCHK.INT.IPL.VALUE	INTEXC --	INT.ID returned undefined value
+;	MCHK.BUSERR.READ.VIRT	INTEXC --	read virtual bus error
+;	MCHK.BUSERR.READ.PHYS	INTEXC --	read physical bus error
+;	MCHK.BUSERR.WRITE.VIRT	INTEXC --	write virtual bus error
+;	MCHK.BUSERR.WRITE.PHYS	INTEXC --	write physical bus error
+;	MCHK.MOVC.STATUS	CSTRING --	undefined MOVCx state
+;	MCHK.FP.STATUS.0	FPOINT --	FPA protocol error
+;	MCHK.FP.STATUS.1	FPOINT --	FPA reserved instruction
+;	MCHK.FP.STATUS.6	FPOINT --	FPA unknown error
+;	MCHK.FP.STATUS.7	FPOINT --	FPA unknown error
+;
+;	This is a list of console restarts in the microcode:
+;
+;	Mnemonic		Dispatched From
+;	--------		---------------
+;	ERR.HLTPIN		INTEXC --	HALT L asserted
+;	ERR.PWRUP		POWERUP --	power up
+;	ERR.INTSTK		INTEXC --	interrupt stack not valid during exception
+;	ERR.IE0			INTEXC --	ACV/TNV during machine check exception
+;	ERR.IE1			INTEXC --	ACV/TNV during kernel stack not valid exception
+;	ERR.DOUBLE		INTEXC --	machine check during normal exception
+;	ERR.IE2			INTEXC --	machine check during machine check exception
+;	ERR.IE3			INTEXC --	machine check during kernel stack not valid
+;	ERR.HALT		MISC --		HALT instruction in kernel mode
+;	ERR.ILLVEC		INTEXC --	SCB vector<1:0> = 3
+;	ERR.WCSVEC		INTEXC --	SCB vector<1:0> = 2
+;	ERR.CHMFI		OPSYS --	CHMx executed on interrupt stack
+;	ERR.IE.PSL26-24.101	INTEXC --	PSL<26:24> = 101 during interrupt or exception
+;	ERR.IE.PSL26-24.110	INTEXC --	PSL<26:24> = 110 during interrupt or exception
+;	ERR.IE.PSL26-24.111	INTEXC --	PSL<26:24> = 111 during interrupt or exception
+;	ERR.REI.PSL26-24.101	OPSYS --	PSL<26:24> = 101 during REI
+;	ERR.REI.PSL26-24.110	OPSYS --	PSL<26:24> = 110 during REI
+;	ERR.REI.PSL26-24.111	OPSYS --	PSL<26:24> = 111 during REI
+
+.TOC	"	Conditional Branch Microtrap"
+
+;	To achieve a one cycle branch not taken, conditional branch taken is
+;	implemented with a microtrap.
+;
+;	The conditional branch microinstruction issues a conditional load PC/VIBA
+;	and trap micro order.  If the branch is not taken, PC and VIBA are unchanged,
+;	and instruction decoding continues down the branch not taken path.  If the
+;	branch is taken, PC and VIBA are loaded, the instruction buffer is flushed,
+;	and a microtrap occurs.  The sole purpose of the microtrap is to ENOP the
+;	microinstructions which were decoded on the branch not taken path.  By
+;	the time this microroutine is reached, the instruction buffer has been
+;	loaded with new instruction stream data, and decoding can resume.
+;
+;	Entry conditions:
+;		none
+;
+;	Resources available:
+;		W1, W5
+;
+;	Exit conditions:
+;		decoding restarted
+;
+.bin
+
+;	Conditional branch microtrap.
+
+IE.COND.BRANCH:
+	;*********** Microtrap entry ***********;
+	DEC.NEXT				; decode next instruction
+
+.nobin
+.TOC	"	Initial DEC.NEXT Dispatches -- FPD, XFD, IE.IID.STALL"
+
+;	Special initial DEC.NEXT dispatch conditions are processed here.
+;
+;	FPD is reached from initial DEC.NEXT if PSL<fpd> = 1.
+;	This signals continuation of a suspendable instruction
+;	or resumption of an emulated instruction.  The microcode
+;	parses the opcode and dispatches to the appropriate
+;	microcode routine.  Note that the hardware has already
+;	filtered out all illegal (undefined) opcodes.
+;
+;	XFD is reached from initial DEC.NEXT if the opcode
+;	register is 0FD.  The microcode performs another
+;	DEC.NEXT to dispatch to the appropriate microcode routine.
+;
+;	IE.IID.STALL is reached from initial DEC.NEXT if there is
+;	insufficient data in the prefetch buffer for the next
+;	decoding operation.  The microcode simply redispatches.
+;
+;	Note that for all dispatches, the PSL CC map defaults
+;	to iiip, disabling the optimized integer overflow trap.
+;
+;	Entry conditions from initial decode:
+;		none
+;
+;	Resources available:
+;		all chip resources
+;
+;	Exit conditions (FPD):
+;		The next microstate is the opcode dependant
+;		instruction restart routine.
+;		(XFD, IE.IID.STALL):
+;		The next microstate is the opcode dependant
+;		first instruction.
+;
+.bin
+
+;	PSL<fpd> set.
+;	Entered from initial DEC.NEXT, dispatch to opcode dependant restart routine.
+
+FPD:
+	;********** Hardware dispatch **********;
+	[W0]<--MXPS0[OPCODE],			; get opcode register to W0
+						; >>spur read, prev cycle was DEC.NEXT
+	STATE3-0<--0				; clear STATE flags
+
+	;---------------------------------------;
+	SC&, [WBUS]<--[W0].AND.K[0FA]		; mask opcode down to bits<7:3,1>
+
+	;---------------------------------------;
+	[WBUS]<--[SC].XOR.K[028],		; test masked opcode for MOVCx/CMPCx
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	SC&, [WBUS]<--[W0].AND.K[0DF],		; mask opcode down to bits<7:6,4:0>
+	CASE2[ALU.NZV].AT.[FPD.TEST]		; case on previous opcode test
+
+;= ALIGNLIST *0**	(FPD.TEST,	MOVC.CMPC.FPD)
+;  ALU.NZVC set by XOR, bit<31> = 0 in both operands --> N = V = C = 0
+
+FPD.TEST:
+	;---------------------------------------; alu.z = 0:
+	[WBUS]<--[SC].XOR.K[055],		; test masked opcode for POLYf
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	[W0]<--[W0].AND.K[0EE],			; mask opcode down to bits<7:5,3:1>
+	CASE2[ALU.NZV].AT.[FPD.TEST.1]		; case on previous opcode test
+
+;= ALIGNLIST *0**	(FPD.TEST.1,	POLY.FPD)
+;  ALU.NZVC set by XOR, bit<31> = 0 in both operands --> N = V = C = 0
+
+FPD.TEST.1:
+	;---------------------------------------; alu.z = 0:
+	[WBUS]<--[W0].XOR.K[02A],		; test for SCANC/SPANC/LOCC/SKPC
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[G1],			; copy srcaddr to VA
+	CASE2[ALU.NZV].AT.[EMULATE.FPD]		; case on previous opcode test
+
+;= ALIGNLIST *0**	(EMULATE.FPD,	SCANC.LOCC.FPD)
+;  ALU.NZVC set by XOR, bit<31> = 0 in both operands --> N = V = C = 0
+
+;	0FD opcode.
+;	Entered from initial DEC.NEXT, dispatch to opcode dependant first instruction.
+
+XFD:
+	;********** Hardware dispatch **********;
+	DEC.NEXT				; decode rest of opcode
+
+;	Prefetcher stalled.
+;	Entered from initial DEC.NEXT, dispatch to opcode dependant first instruction.
+
+IE.IID.STALL:
+	;********** Hardware dispatch **********;
+	DEC.NEXT				; decode next instruction
+
+.nobin
+.TOC	"	Prefetch Exceptions"
+
+;	Prefetcher stalled, prefetcher halted.
+;
+;	Interaction with DEC.NEXT --
+;
+;		If the prefetch mechanism is stalled, all DEC.NEXT commands dispatch
+;		to DEC.NEXT.STALLED, which simply redispatches.
+;
+;		If the prefetch mechanism is halted, all DEC.NEXT commands dispatch
+;		to DEC.NEXT.HALTED, which reads the current I stream word to resolve
+;		any faults, and then restarts prefetch.
+;
+;	Interaction with ID.LOAD --
+;
+;		If the prefetch mechanism is stalled, all ID.LOAD cases force utest<1:0>
+;		to 01.  This causes the microcode to branch to a special location, which
+;		simply redispatches.
+;
+;		If the prefetch mechanism is halted, all ID.LOAD cases force utest<1:0>
+;		to 11.  This causes the microcode to branch to a special location, which
+;		calls a subroutine which reads the current I stream word to resolve
+;		any faults, and then restarts prefetch.
+;
+.bin
+
+;	DEC.NEXT prefetch halted.
+
+DEC.NEXT.HALTED:
+	;********** Hardware dispatch **********;
+	VA&, [TMMGT]<--B.[VIBA],		; copy VIBA to VA, TMMGT
+						; hardware forces VIBA<1:0> to 00
+	CASE2[MREF.STATUS].AT.[DEC.NEXT.HALTED.RESTART]	; case on VIBA fixup flag
+
+;= ALIGNLIST 101*	(DEC.NEXT.HALTED.RESTART,	DEC.NEXT.HALTED.FIX.VIBA)
+
+DEC.NEXT.HALTED.FIX.VIBA:
+	;---------------------------------------; mref.status<1> = 1:
+	[TMMGT]<--[TMMGT]-K[4]			; VIBA incorrectly incremented, decrement
+
+	;---------------------------------------;
+	VA&, [VIBA]<--[TMMGT]			; copy fixed value to VA, VIBA
+						; do NOT flush IB or pipeline
+
+DEC.NEXT.HALTED.RESTART:
+	;---------------------------------------; mref.status<1> = 0:
+	[WBUS]<--MEM(VA), LONG,			; read and discard I stream data
+	RESTART.PREFETCH,			; clear prefetch disables
+						; >>enable pf, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+;	DEC.NEXT prefetch stalled.
+
+DEC.NEXT.STALL:
+	;********** Hardware dispatch **********;
+	DEC.NEXT				; decode next instruction
+
+;	ID.LOAD prefetch halted.  VA must be saved/restored, as required, by
+;	the caller.
+
+ID.LOAD.HALTED:
+	;---------------------------------------;
+	VA&, [TMMGT]<--B.[VIBA],		; copy VIBA to VA, TMMGT
+						; hardware forces VIBA<1:0> to 00
+	CASE2[MREF.STATUS].AT.[ID.LOAD.HALTED.RESTART]	; case on VIBA fixup flag
+
+;= ALIGNLIST 101*	(ID.LOAD.HALTED.RESTART,	ID.LOAD.HALTED.FIX.VIBA)
+
+ID.LOAD.HALTED.FIX.VIBA:
+	;---------------------------------------; mref.status<1> = 1:
+	[TMMGT]<--[TMMGT]-K[4]			; VIBA incorrectly incremented, decrement
+
+	;---------------------------------------;
+	VA&, [VIBA]<--[TMMGT]			; copy fixed value to VA, VIBA
+						; do NOT flush IB or pipeline
+
+ID.LOAD.HALTED.RESTART:
+	;---------------------------------------; mref.status<1> = 0:
+	[WBUS]<--MEM(VA), LONG,			; read and discard I stream data
+	RESTART.PREFETCH,			; clear prefetch disables
+						; >>enable pf, no decode in next cycle
+	GOTO[WAIT.ONE.CYCLE]			; stall one cycle and return to caller
+
+.nobin
+.TOC	"	Double Parameter Exceptions -- ACV, TNV"
+
+;	These memory management exceptions push two parameters on the stack:
+;	the virtual address of the faulting access, and a fault type code.
+;
+;	An ACV exception results from an attempt to access a page with
+;	insufficient privilege.
+;
+;	A TNV exception results from an attempt to access a page which
+;	has PTE.V = 0.
+;
+;	Both exceptions are faults and cause the currently executing
+;	instruction to be packed up (interruptible instructions) or
+;	backed up (all others).  The exception flows are entered from
+;	the Memory Management routines.
+;
+;	Entry conditions:
+;		TMMGT	=	fault code
+;		STATE<4> =	1 if inside exception flows
+;		STATE<5> =	1 if inside ksnv or mach check flows
+;
+;	Resources available:
+;		W1, W5
+;
+;	Exit conditions:
+;		Current instruction has been packed up or backed up.
+;		Exception taken through ACV or TNV vector in SCB.
+;		Stack frame =	fault code/ VA/ PC/ PSL
+;
+.bin
+
+;	ACV or TNV exception.
+;	Entered from Memory Management flows.
+
+IE.ACV:
+	;---------------------------------------; mmgt.status<2> = 0:
+	[W1]<--K[SCB.ACV],			; offset into SCB for ACV
+	DISABLE.IB.PREFETCH,			; turn off prefetch
+	CASE4[STATE5-3].AT.[IE.ACV.TNV.NEW]	; see if we've been here before
+
+IE.TNV:
+	;---------------------------------------; mmgt.status<2> = 1:
+	[W1]<--K[SCB.TNV],			; offset into SCB for TNV
+	DISABLE.IB.PREFETCH,			; turn off prefetch
+	CASE4[STATE5-3].AT.[IE.ACV.TNV.NEW]	; see if we've been here before
+
+;= ALIGNLIST 001*	(IE.ACV.TNV.NEW,	IE.ACV.TNV.SNV,
+;=			 IE.ACV.TNV.MACH.CHK,	IE.ACV.TNV.DOUBLE.ERROR)
+
+;	STATE<5:4> = 00, new exception, process.
+
+IE.ACV.TNV.NEW:
+	;---------------------------------------; STATE<5:4> = 00:
+	[W5]<--[TMMGT],				; save fault parameter to push as parameter
+	CALL[IE.CLEANUP]			; pack up or back up current instruction
+						; micromachine free, PSL<tp>, STATE<3:0> = 0
+
+	;---------------------------------------;
+	[W4]<--B.[VA],				; save faulting addr to push as parameter
+	STATE3-0<--0,				; clear STATE<3:0>
+	CALL[IE.INTEXC1]			; call common exception handling routine
+
+IE.ACV.TNV.PUSH.W4.W5:
+	;---------------------------------------;
+	VA&, [SP]<--[SP]-K[4]			; decrement sp for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W4], LONG,			; write fault address to stack
+	GOTO[IE.ARITH.PUSH.W5]			; go push fault parameter and exit
+
+;	ACV, TNV continued.
+;	Nested ACV, TNV within exception flows (STATE<5:4> neq 00).
+
+;	STATE<5:4> = 01, ACV or TNV while writing to kernel or interrupt stack.
+;		Initiate kernel stack not valid exception (kernel stack)
+;		or interrupt stack not valid console restart (interrupt stack).
+
+;	The PSL<is> bit is updated in IE.INTEXC1 before any virtual
+;	stack writes are attempted and is therefore valid at this point.
+
+;	Prefetching is disabled.
+
+IE.ACV.TNV.SNV:					
+	;---------------------------------------; STATE<5:4> = 01:
+	STATE5<--1,				; flag error to prevent further nesting
+	STATE3-0<--0,				; clear STATE<3:0>
+	CASE2[PSL26-24].AT.[IE.KSNV]		; case on PSL<is>
+
+;= ALIGNLIST 011*	(IE.KSNV,	IE.ISNV)
+
+IE.ISNV:
+	;---------------------------------------; PSL<is> = 1:
+	CONSOLE.HALT[ERR.INTSTK]		; interrupt stack not valid, invoke console
+	
+;	STATE<5:4> = 10, ACV or TNV while inside the machine check flows.
+;		This is not recoverable, force a console restart.
+
+IE.ACV.TNV.MACH.CHK:
+	;---------------------------------------; STATE<5:4> = 10:
+	CONSOLE.HALT[ERR.IE0]			; ACV/TNV in machine check, invoke console
+
+;	STATE<5:4> = 11, ACV or TNV while inside the kernel stack not valid flows.
+;		This is not recoverable, force a console restart.
+
+IE.ACV.TNV.DOUBLE.ERROR:
+	;---------------------------------------; STATE<5:4> = 11:
+	CONSOLE.HALT[ERR.IE1]			; ACV/TNV in ker stk invalid, invoke console
+
+.nobin
+.TOC	"	Single Parameter Exceptions -- Arithmetic Traps and Faults"
+
+;	These arithmetic exceptions push one parameter on the stack:
+;	the trap/fault type code.
+;
+;	Arithmetic traps result from arithmetic errors in integer instructions,
+;	and from a subscript range error in INDEX.
+;
+;	Arithmetic faults result from arithmetic errors in floating point
+;	instructions.
+;
+;	Arithmetic traps only occur between instructions and do not require
+;	cleanup.  Arithmetic faults occur in mid instruction and require
+;	the currently executing instruction to be packed up (interruptible
+;	instructions) or backed up (all others).
+;
+;	The arithmetic traps are reached from initial DEC.NEXT via a VAX TRAP REQUEST
+;	dispatch or from normal flows via an optimized integer overflow microtrap.
+;
+;	The arithmetic faults are reached from the floating point flows.
+;
+;	Entry conditions (arithmetic traps):
+;		TRAP	=	trap code
+;
+;	Entry conditions (arithmetic faults):
+;		W5	=	fault code
+;
+;	Resources available (traps):
+;		all chip resources
+;
+;	Resources available (faults):
+;		W1, W5
+;
+;	Exit conditions:
+;		If fault, current instruction has been packed up or backed up.
+;		Exception taken through arithmetic exception vector in SCB.
+;		Stack frame =	fault code/ PC/ PSL
+;
+.bin
+
+;	Optimized integer overflow.
+;	Entered from first microinstruction of next instruction, all resources available.
+
+IE.INTOV:
+	;********** Microtrap entry ************;
+	[W5]<--K[1],				; force trap code of 1
+	DISABLE.IB.PREFETCH,			; disable prefetch
+	GOTO[IE.ARITH.COMMON]			; join common code
+
+;	VAX trap requests.
+;	Entered from initial DEC.NEXT, TRAP = trap code, all resources available.
+
+IE.VAX.ARITH.TRAP:
+    	;********** Hardware dispatch **********;
+	[W5]<--[TRAP],				; get trap code
+	DISABLE.IB.PREFETCH,			; disable prefetch
+	GOTO[IE.ARITH.COMMON]			; join common code
+
+;	Floating point arithmetic fault.
+;	Entered from floating point flows, W5 = fault code.
+;	Instruction in progress, pack up or back up.
+
+FP.ARITH.FLT:
+	;---------------------------------------;
+	DISABLE.IB.PREFETCH,			; disable prefetch
+	CALL[IE.CLEANUP]			; pack up or back up current instruction
+						; micromachine free, PSL<tp>, STATE<3:0> = 0
+
+IE.ARITH.COMMON:
+	;---------------------------------------;
+	[W1]<--K[SCB.ARITH],			; get SCB vector for arithmetic exception
+	STATE3-0<--0,				; clear STATE<3:0>
+	CALL[IE.INTEXC1]			; call standard exception processing routine
+
+IE.ARITH.PUSH.W5:
+	;---------------------------------------;
+	VA&, [SP]<--[SP]-K[4]			; decrement stack ptr for push
+
+IE.ARITH.WRITE.W5:
+	;---------------------------------------;
+	MEM(VA)<--[W5], LONG,			; write trap code to stack
+	GOTO[IE.EXCEPT2]			; go finish rest of the exception
+
+.nobin
+.TOC	"	Zero Parameter Exceptions -- Instruction Faults, Trace Trap, Kernel Stack Not Valid Abort"
+
+;	These instruction-related exceptions push no parameters on the stack:
+;	the SCB vector provides sufficient information to process the exception.
+;
+;	A reserved instruction fault results from decoding an invalid instruction,
+;	or from executing a privileged instruction not in kernel mode.
+;
+;	A reserved addressing fault results from decoding an invalid specifier mode
+;	or combination.
+;
+;	A reserved operand fault results from processing an invalid operand in an
+;	instruction.
+;
+;	A BPT or XFC fault results from decoding the specified instructions, both
+;	of which are defined to fault.
+;
+;	A trace trap occurs if TP is set at initial DEC.NEXT.
+;
+;	A kernel stack not valid abort results from an ACV or TNV microtrap inside
+;	an exception.
+;
+;	All exceptions (except kernel stack not valid and trace) are faults and
+;	cause the currently executing instruction to be packed up (interruptible
+;	instructions) or backed up (all others).  The exception flows are entered
+;	via initial DEC.NEXT dispatch, microtrap dispatch, or normal microflows.
+;
+;	Entry conditions:
+;		none
+;
+;	Resources available:
+;		W1, W5
+;
+;	Exit conditions:
+;		If fault, current instruction has been packed up or backed up.
+;		Exception taken through specified vector in SCB.
+;		Stack frame =	PC/ PSL
+;
+.bin
+
+;	Reserved instruction fault.
+;	Entered via microcode dispatch or from normal flows.
+
+RSRV.INST.FLT:
+	;********* Hardware dispatch ***********;
+	[W1]<--K[SCB.RESPRIV],			; offset into SCB for reserved instruction
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	GOTO[IE.FAULT.COMMON]			; go join common code
+
+;	Reserved addressing fault.
+;	Entered from specifier flows.
+
+RSRV.ADDR.FLT:
+	;---------------------------------------;
+	[W1]<--K[SCB.RESADD],			; offset into SCB for reserved addressing mode
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	GOTO[IE.FAULT.COMMON]			; go join common code
+
+;	Reserved operand fault.
+;	Entered from execution flows.
+
+RSRV.OPER.FLT:
+	;---------------------------------------;
+	[W1]<--K[SCB.RESOP],			; offset into SCB for reserved operand
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	GOTO[IE.FAULT.COMMON]			; go join common code
+
+;	BPT instruction fault.
+;	Entered from initial DEC.NEXT.
+
+BPT:
+	;********* Hardware dispatch ***********;
+	[W1]<--K[SCB.BPT],			; offset into SCB for BPT instruction
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	GOTO[IE.FAULT.COMMON]			; go join common code
+
+;	XFC instruction fault.
+;	Entered from initial DEC.NEXT.
+
+XFC:
+	;********* Hardware dispatch ***********;
+	[W1]<--K[SCB.XFC],			; offset into SCB for XFC instruction
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	GOTO[IE.FAULT.COMMON]			; go join common code
+
+;	Trace trap.
+;	Entered from initial DEC.NEXT, must clear PSL<tp>.
+
+IE.VAX.TRACE.TRAP:
+	;********* Hardware dispatch ***********;
+	[W1]<--K[SCB.TP],			; offset into SCB for trace trap
+	DISABLE.IB.PREFETCH			; turn off prefetch
+
+	;---------------------------------------;
+	[PSL]<--[PSL].ANDNOT.K[40]000,		; clear PSL<tp>
+						; >>PSL read, not written in prev cycle
+						; >>PSL update, no decode for two cycles
+	STATE3-0<--0,				; clear STATE<3:0>
+	GOTO[IE.TRAP.COMMON]			; join common flows
+
+;	Kernel stack not valid abort.
+;	Entered from ACV/TNV exceptions flows.
+
+;	At this point,
+;		W2	=	original PSL
+;		STATE<5:0> =	110000
+
+IE.KSNV:
+	;---------------------------------------; PSL<is> = 0:
+	VA&, [WBUS]<--[SCBB]+K[SCB.KSNV],	; set up SCB address for ksnv abort
+	CALL[IE.INTEXC1.ABORT]			; call severe exception handling routine
+
+	;---------------------------------------;
+	[WBUS]<--[W1].ANDNOT.K[3],		; Wbus <-- vector with bits<1:0> = 00
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[IE.EXIT]				; exit exception flows
+
+.nobin
+.TOC	"	CHMx Exception"
+
+;	This routine does the final exception processing for a valid CHMx instruction.
+;	It is reached from the CHMx instruction flows.
+;
+;	Entry conditions:
+;		W1	=	minu(opcode<1:0>, PSL<cur_mode>)
+;		W4	=	W1_sp
+;		W5	=	sext (operand)
+;		VA	=	SCB vector address
+;
+;	Exit conditions:
+;		Exception taken through CHMx vector in SCB.
+;		Stack frame =	sext (operand)/ PC/ PSL
+;
+.bin
+
+;	Complete CHMx processing.
+
+IE.CHM.EXCEPT:
+	;---------------------------------------;
+	STATE4<--1,				; flag start of exception flows
+	CLEAR.VAX.TRAP.REQUEST,			; clear trap request
+	DISABLE.IB.PREFETCH			; turn off prefetching in case still on
+
+	;---------------------------------------;
+	[W0]<--[W1].SHFL.[24.],			; W0<26:24> = new PSL<is,curmod> = 0'W1<1:0>
+	CALL[READ.SCB.VECTOR.COPY.PSL]		; read vector, get current PSL
+
+	;---------------------------------------;
+	[SP]<--B.[W4],				; load new SP
+	STATE3-0<--0,				; clear STATE<3:0>
+	CALL[IE.INTEXC1.CHMX]			; call common exception handling routine
+
+	;---------------------------------------;
+	VA&, [SP]<--[SP]-K[4],			; prepare to push parameter on stack
+	GOTO[IE.ARITH.WRITE.W5]			; go finish up in standard processing
+
+;	Subroutine to read SCB vector, get current PSL.
+;
+;	Entry conditions:
+;		VA	=	address of SCB vector
+;
+;	Exit conditions:
+;		W1 = SC	=	SCB vector
+;		W2	=	current PSL
+
+READ.SCB.VECTOR.COPY.PSL:
+	;---------------------------------------;
+	SC&, [W1]<--MEM(VA).PHYS, LONG,		; read the SCB vector
+	GOTO[COPY.PSL.TO.W2]			; go get current PSL and return
+
+.nobin
+.TOC	"	Bus Error Microtraps"
+
+;	These microtraps result from an external environmental error, such
+;	as a bus timeout or parity error.
+;
+;	A bus error may occur in almost any context, and is treated as a
+;	potentially recoverable machine check.
+;
+;	Entry conditions:
+;		VAP	=	virtual address (+4?) of erring location
+;
+;	Exit conditions:
+;		If interrupt, interrupt processing is terminated, and decoding resumes.
+;		If register, the error is interpreted as register not implemented.
+;		Otherwise:
+;		TMMGT	=	machine check code
+;		continue in machine check flows
+;
+.bin
+
+;	Bus error during data mreq.
+;	Initiate machine check.
+
+IE.BUSERR.READ.VIRT:
+	;*********** Microtrap entry ***********;
+	MACHINE.CHECK[MCHK.BUSERR.READ.VIRT]	; parameter = read virtual
+
+IE.BUSERR.READ.PHYS:
+	;*********** Microtrap entry ***********;
+	MACHINE.CHECK[MCHK.BUSERR.READ.PHYS]	; parameter = read physical
+
+IE.BUSERR.WRITE.VIRT:
+	;*********** Microtrap entry ***********;
+	MACHINE.CHECK[MCHK.BUSERR.WRITE.VIRT]	; parameter = write virtual
+
+IE.BUSERR.WRITE.PHYS:
+	;*********** Microtrap entry ***********;
+	MACHINE.CHECK[MCHK.BUSERR.WRITE.PHYS]	; parameter = write physical
+
+;	Bus error during ipr read mreq.
+;	Complete MFPR instruction with zero data.
+
+IE.BUSERR.READ.IPR:
+	;*********** Microtrap entry ***********;
+	[SC]<--K[0],				; mfpr, result is 0,
+	CLEAR.MMGT.TD,				; reenable mem mgt traps
+	GOTO[MFPR.RETURN.FROM.TRAP]		; rejoin main flows and store result
+
+;	Bus error during int vec mreq.
+;	Terminate interrupt processing, resume instruction decoding.
+
+IE.BUSERR.INT.VEC:
+	;*********** Microtrap entry ***********;
+	CLEAR.MMGT.TD,				; reenable mem mgt traps
+	GOTO[IE.EXIT]				; exit interrupt flows
+
+.nobin
+.TOC	"	Machine Check Exception"
+
+;	This exception represents a system error.  Except for a few recoverable
+;	cases (eg, read bus error), the current process and, possibly, the
+;	current operating system environment, may be lost.
+;
+;	A machine check results from an internally detected consistency error,
+;	eg, microcode reaches an "impossible" state, or an externally detected
+;	hardware error, eg, memory parity.
+;
+;	A machine check is technically an ABORT.  The current instruction is unwound,
+;	but there is no guarantee that the instruction can be properly restarted.
+;	As much diagnostic information as possible is pushed on the stack, and the
+;	rest is left to the operating system.
+;
+;	Entry conditions:
+;		TMMGT	=	fault code
+;		STATE<5> =	1 if inside ksnv or mach check flows
+;		STATE<4> =	1 if inside exception flows
+;		prefetching is disabled
+;
+;	Resources available:
+;		W1, W5
+;
+;	Exit conditions:
+;		Exception taken through machine check vector in SCB.
+;		Stack frame =	#bytes/ fault code/ old VAP/ machine state/ machine state/ PC/ PSL
+;
+.bin
+
+;	Machine check exception.
+;	We're in REAL trouble now.
+
+MACHINE.CHECK:
+	;---------------------------------------;
+	ZAP.TB,					; clear the TB
+	CLEAR.MMGT.TD,				; turn on memory mgt traps if disabled
+	CASE4[STATE5-3].AT.[IE.MACHCHK.NEW]	; see if we've been here before
+
+;= ALIGNLIST 001*	(IE.MACHCHK.NEW,	IE.MACHCHK.DOUBLE.ERROR,
+;=			 IE.MACHCHK.MCHK,	IE.MACHCHK.KSNV)
+
+;	STATE<5:4> = 01, machine check inside normal exception flows:
+
+IE.MACHCHK.DOUBLE.ERROR:
+	;---------------------------------------; STATE<5:4> = 01:
+	CONSOLE.HALT[ERR.DOUBLE]		; nested machine check, invoke console
+
+;	STATE<5:4> = 10, machine check inside machine check flows:
+
+IE.MACHCHK.MCHK:
+	;---------------------------------------; STATE<5:4> = 10:
+	CONSOLE.HALT[ERR.IE2]			; nested machine check, invoke console
+
+;	STATE<5:4> = 11, machine check inside kernel stack not valid flows:
+
+IE.MACHCHK.KSNV:
+	;---------------------------------------; STATE<5:4> = 11:
+	CONSOLE.HALT[ERR.IE3]			; nested machine check, invoke console
+
+;	Machine check, continued.
+;	STATE<5:4> = 00, new exception, process.
+;	Put together first longword of saved state.
+
+;	At this point,
+;		TMMGT	=	machine check parameter
+
+IE.MACHCHK.NEW:
+	;---------------------------------------; STATE<5:4> = 00:
+	[W1]<--MXPS1[EBOX.CCS],			; get restart bit, alu cc's
+						; >>spur read, prev dst was WBUS
+	CALL[IE.MACHCHK.SHIFT.STATUS.W5]	; W5 has restart+cc's/xx/xx/xx
+
+	;---------------------------------------;
+	[W1]<--MXPS1[EBOX.STATE],		; get STATE<5:0>
+						; >>spur read, prev dst was W5
+	CALL[IE.MACHCHK.SHIFT.STATUS.W5]	; W5 has state/restart+cc's/xx/xx
+
+	;---------------------------------------;
+	[W5]<--[SC]!![W5].SHFR.[8.]		; W5 has SC/state/restart+cc's/xx
+
+	;---------------------------------------;
+	[W1]<--[PC],				; get current PC
+						; >>PC read, not written in prev cycle
+	CALL[IE.CLEANUP]			; pack up or back up current instruction
+						; micromachine free, PSL<tp>, STATE<3:0> = 0
+
+	;---------------------------------------;
+	STATE5<--1, PC<--BPC,			; flag exception, restore BPC
+	CLEAR.VAX.TRAP.REQUEST,			; clear trap request
+	DISABLE.IB.PREFETCH			; disable prefetching
+
+	;---------------------------------------;
+	[W4]<--[TMMGT]				; save machine check parameter
+
+	;---------------------------------------;
+	[W1]<--(-[PC]+[W1]),			; calculate delta PC
+						; >>PC read, not written in prev cycle
+	CALL[IE.MACHCHK.SHIFT.STATUS.W5]	; W5 has delta PC/SC/state/restart+cc's
+
+	;---------------------------------------;
+	[W5]<--[W5].ROTL.[8.]			; W5 has SC/state/restart+cc's/delta PC
+
+;	Machine check, continued.
+;	Put together second longword of saved state.
+
+;	At this point,
+;		W5	=	SC/state/restart+cc's/delta PC
+
+	;---------------------------------------;
+	[W1]<--MXPS0[MSER],			; get MSER register
+						; >>spur read, prev dst was W5
+	CALL[IE.MACHCHK.SHIFT.STATUS.W3]	; W3 has mser/xx/xx/xx
+
+	;---------------------------------------;
+	[W1]<--MXPS1[CADR],			; get CADR register
+						; >>spur read, prev dst was W3
+	CALL[IE.MACHCHK.SHIFT.STATUS.W3]	; W3 has cadr/mser/xx/xx
+
+	;---------------------------------------;
+	[W1]<--MXPS0[HSIR],			; get HSIR register
+						; >>spur read, prev dst was W3
+	CALL[IE.MACHCHK.SHIFT.STATUS.W3]	; W3 has hsir/cadr/mser/xx
+
+	;---------------------------------------;
+	[W1]<--MXPS0[OPCODE],			; get OPCODE register
+						; >>spur read, prev dst was W3
+	CALL[IE.MACHCHK.SHIFT.STATUS.W3]	; W3 has opcode/hsir/cadr/mser
+
+	;---------------------------------------;
+	[Q]<--B.[VAP],				; save current VAP register
+						; >>Q write, not read in next cycle
+	STATE3-0<--0,				; clear state flags
+	CALL[COPY.PSL.TO.W2]			; get current PSL for exception flows
+
+;	Machine check, continued.
+;	Parameters set up, create stack frame.
+
+;	At this point,
+;		W2	=	current PSL
+;		W3	=	opcode/hsir/cadr/mser
+;		W4	=	machine check parameter
+;		W5	=	SC/state/restart+cc's/delta PC
+;		Q	=	VAP
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[SCBB]+K[SCB.MACHCHK],	; set up SCB address for machine check
+	CALL[IE.INTEXC1.ABORT]			; call severe exception handling routine
+
+	;---------------------------------------;
+	VA&, [SP]<--[SP]-K[4]			; decrement SP, copy to VA
+
+	;---------------------------------------;
+	MEM(VA)<--[W5], LONG,			; write internal state word to stack
+	CALL[DECREMENT.SP]			; decrement SP, copy to VA
+
+	;---------------------------------------;
+	MEM(VA)<--[W3], LONG,			; write internal state word to stack
+	CALL[DECREMENT.SP]			; decrement SP, copy to VA
+
+	;---------------------------------------;
+	MEM(VA)<--[Q], LONG			; write old VAP to stack
+						; >>Q read, not written in prev cycle
+
+	;---------------------------------------;
+	[W5]<--K[16.],				; put parameter byte count in W5
+	GOTO[IE.ACV.TNV.PUSH.W4.W5]		; go push W4, W5 on stack and exit
+
+;	One line subroutines to shift in next byte of status.
+
+IE.MACHCHK.SHIFT.STATUS.W3:
+	;---------------------------------------;
+	[W3]<--[W1]!![W3].SHFR.[8.],		; shift in next byte of status
+	RETURN					; return to caller
+
+IE.MACHCHK.SHIFT.STATUS.W5:
+	;---------------------------------------;
+	[W5]<--[W1]!![W5].SHFR.[8.],		; shift in next byte of status
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	Interrupts"
+
+;	An interrupt differs from a zero parameter exception only in
+;	the selection of the SCB vector (based on the interrupt level
+;	or an external vector) and the value of the final IPL (set to
+;	the level of the interrupt).
+;
+;	The interrupt flows are entered from initial DEC.NEXT as a trap,
+;	or from interruptible instructions as a fault.  The fault entry
+;	causes the currently executing instruction to be packed or backed up.
+;
+;	Entry conditions:
+;		INT.ID	=	highest priority oustanding interrupt
+;
+;	Resources available (initial DEC.NEXT dispatch):
+;		all chip resources
+;
+;	Resources available (fault):
+;		W1, W5
+;
+;	Exit conditions:
+;		If fault, current instruction has been packed up or backed up.
+;		Exception taken through hardware interrupt vector in SCB.
+;		Stack frame =	PC/ PSL
+;
+.bin
+
+;	Interrupt pending during interruptible instruction.
+;	Entered from interruptible instruction flows (STATE<3> = 1).
+
+IE.INTERRUPT:
+	;---------------------------------------;
+	DISABLE.IB.PREFETCH,			; turn off prefetching
+	CALL[IE.CLEANUP]			; pack up or back up current instruction
+						; micromachine free, PSL<tp>, STATE<3:0> = 0
+						; PSL<fpd> is set, prev dst was gen reg
+
+;	Interrupt pending between instructions.
+;	Entered from initial DEC.NEXT.
+
+IE.VAX.INTERRUPT:
+	;**********Hardware dispatch************;
+	SC&, [W3]<--MXPS0[INT.ID]		; get interrupt id
+						; >>spur read, prev cycle was DEC.NEXT or NOP
+
+	;---------------------------------------;
+	[W3]<--[W3].AND.K[1F],			; mask interrupt id to five bits
+	SET.ALUCC, LONG,			; set alu cc's
+	DL<--WORD				; set dl = word for vector read
+
+	;---------------------------------------;
+	VAP&, [W1]<--[W3].SHFL.[2],		; change request number to SCB offset
+	CASE4[SC5-3].AT.[IE.SWRE.INT]		; case on swre vs vectored vs hardwired intr
+
+;= ALIGNLIST 100*	(IE.SWRE.INT,	IE.SWRE.INT.1,
+;=			 IE.DEVICE.INT,	IE.HARDWIRE.INT)
+
+;	Software interrupt processing.
+
+;	At this point,
+;		W1<6:2> =	interrupt id, masked
+;		W3<4:0> =	interrupt id (new IPL), masked
+;		SC<7:0>	=	interrupt id, unmasked
+
+;	Note that only SC<4:0> are used to control the shifter.
+
+IE.SWRE.INT:
+	;---------------------------------------; SC<4:3> = 00:
+	[W5]<--[K1].SHFL.(SC),			; form mask to clear highest SISR request
+	STATE3-0<--0,				; clear STATE flags
+	CASE2[ALU.NZV].AT.[IE.SWRE.DELIVERY]	; check for zero interrupt request
+
+;= ALIGNLIST *0**	(IE.SWRE.DELIVERY,	IE.EXIT)
+;  ALU.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+;	Note that on many paths leading here, PC was updated in the previous cycle,
+;	precluding DEC.NEXT in this cycle.
+
+IE.EXIT:
+	;---------------------------------------; alu.z = 1:
+	STATE5-4<--0,				; clear all permanent state flags
+	RESTART.PREFETCH,			; re-enable prefetching
+						; >>enable pf, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+IE.SWRE.INT.1:
+	;---------------------------------------; SC<4:3> = 01:
+	[W5]<--[K1].SHFL.(SC),			; form mask to clear highest SISR request
+	STATE3-0<--0				; clear STATE flags
+
+IE.SWRE.DELIVERY:
+	;---------------------------------------; alu.z = 0:
+	[SISR]<--[SISR].ANDNOT.[W5],		; clear bit in SISR
+	CALL[IE.UPDATE.HSIR]			; calculate highest outstanding swre req
+						; >>HSIR update, no decode for two cycles
+
+	;---------------------------------------;
+	[W1]<--[W1]+K[SCB.IPLSOFT]		; add SCB offset to SCB vector block base
+
+IE.INT.DELIVERY:
+	;---------------------------------------;
+	[W3]<--[W3].SHFL.[16.],			; position interrupt id for flows
+	STATE1<--1,				; flag interrupt processing
+	GOTO[IE.INT.CONT]			; go join common interrupt flows
+
+;	Vectored interrupt processing.
+
+;	At this point,
+;		VAP<6:2> =	interrupt id, masked
+;		W3<4:0> =	interrupt id (new IPL), masked
+
+IE.DEVICE.INT:
+	;---------------------------------------; SC<4:3> = 10:
+	SC&, [W1]<--MEM(VAP).INTVEC, LEN(DL)	; read int vec into <15:0>, copy to SC
+						; on error, microtrap, dismiss interrupt
+
+	;---------------------------------------;
+	[W3]<--[W3].SHFL.[16.],			; position interrupt id for flows
+	STATE3-0<--0				; clear STATE flags
+
+	;---------------------------------------;
+	[W1]<--[W1].ANDNOT.K[3],		; clear vector<1:0>
+	STATE1<--1,				; flag interrupt processing
+	CASE2[SC2-0].AT.[IE.INT.CONT]		; case on real bus vs Q bus interrupt
+
+;= ALIGNLIST 110*	(IE.INT.CONT,	IE.INT.QBUS)
+
+IE.INT.QBUS:
+	;---------------------------------------; SC<0> = 1:
+	[W3]<--K[17]00,				; Qbus, force new IPL to IPL17
+	GOTO[IE.INT.CONT]			; continue interrupt flows
+
+;	Merge point for zero parameter exceptions.
+
+IE.FAULT.COMMON:
+	;---------------------------------------;
+	CALL[IE.CLEANUP]			; pack up or back up current instruction
+						; micromachine free, PSL<tp>, STATE<3:0> = 0
+
+IE.TRAP.COMMON:
+IE.INT.CONT:
+	;---------------------------------------; SC<0> = 0:
+	STATE4<--1, PC<--BPC,			; flag exception, restore PC
+	CLEAR.VAX.TRAP.REQUEST,			; clear trap request
+	DISABLE.IB.PREFETCH,			; turn off prefetching in case still on
+	CALL[IE.INTEXC1.INTR]			; call common interrupt processor
+
+IE.EXCEPT2:
+	;---------------------------------------;
+	[WBUS]<--[W1].ANDNOT.K[3],		; Wbus <-- vector with bits<1:0> = 00
+	LOAD.V&PC,				; load PC, VIBA, flush IB
+						; >>PC update, no decode in next cycle
+	GOTO[IE.EXIT]				; exit exception flows
+
+;	Hardwired interrupt processing.
+
+;	At this point,
+;		W3<4:0> =	interrupt id (new IPL), masked
+;		SC<7:0>	=	interrupt id, unmasked
+
+IE.HARDWIRE.INT:
+	;---------------------------------------; SC<4:3> = 11:
+	[W1]<--K[SCB.INTTIM],			; assume interrupt is IPL1C
+	STATE3-0<--0,				; clear STATE flags
+	CASE8[SC2-0].AT.[IE.INT.IPL18]		; case on all hardwired levels
+
+;= ALIGNLIST 000*	(IE.INT.IPL18,	IE.INT.IPL19,	IE.INT.IPL1A,	IE.INT.IPL1B,
+;=			 IE.INT.IPL1C,	IE.INT.IPL1D,	IE.INT.IPL1E,	IE.INT.IPL1F)
+
+IE.INT.IPL18:
+	;---------------------------------------; SC<2:0> = 000:
+	MACHINE.CHECK[MCHK.INT.IPL.VALUE]	; no such interrupt level, machine check
+
+IE.INT.IPL19:
+	;---------------------------------------; SC<2:0> = 001:
+	MACHINE.CHECK[MCHK.INT.IPL.VALUE]	; no such interrupt level, machine check
+
+IE.INT.IPL1A:
+	;---------------------------------------; SC<2:0> = 010:
+	[W1]<--K[SCB.CRD],			; set up SCB offset for CRD interrupt
+	GOTO[IE.INT.DELIVERY]			; go finish interrupt setup
+
+IE.INT.IPL1B:
+	;---------------------------------------; SC<2:0> = 011:
+	MACHINE.CHECK[MCHK.INT.IPL.VALUE]	; no such interrupt level, machine check
+
+IE.INT.IPL1C:
+	;---------------------------------------; SC<2:0> = 100
+	[W3]<--K[16]00,				; interval timer is really IPL 16
+	STATE1<--1,				; flag interrupt processing
+	GOTO[IE.INT.CONT]			; go join common interrupt flows
+
+IE.INT.IPL1D:
+	;---------------------------------------; SC<2:0> = 101:
+	[W1]<--K[SCB.MEMERR],			; set up SCB offset for MEMERR interrupt
+	GOTO[IE.INT.DELIVERY]			; go finish interrupt setup
+
+IE.INT.IPL1E:
+	;---------------------------------------; SC<2:0> = 110:
+	[W1]<--K[SCB.PWRFL],			; set up SCB offset for power fail interrupt
+	GOTO[IE.INT.DELIVERY]			; go finish interrupt setup
+
+IE.INT.IPL1F:
+	;---------------------------------------; SC<2:0> = 111:
+	CONSOLE.HALT[ERR.HLTPIN]		; HALT L asserted, invoke console
+
+.nobin
+.TOC	"	Common Interrupt and Exception Processing Subroutines"
+
+;	IE.INTEXC1 -- standard interrupt and exception processing.
+;
+;	Alternate entry points:
+;
+;		IE.INTEXC1.INTR  -- interrupt, do not copy BPC to PC or set STATE<4>
+;		IE.INTEXC1.ABORT -- machine check or kernel stack not valid, force int stack processing
+;		IE.INTEXC1.CHMX  -- CHMX instruction, do not process vector<1:0>
+;
+;	Entry conditions (IE.INTEXC1):
+;		W1	=	offset in SCB
+;		W3<20:16> =	new IPL, masked (interrupt only)
+;		STATE<2:0> =	0<exception vs interrupt>0
+;		MMGT.TD	=	unknown
+;
+;	Entry conditions (IE.INTEXC1.INTR):
+;		PC restored from backup PC, if necessary
+;		W1	=	offset in SCB
+;		W3<20:16> =	new IPL, masked (interrupt only)
+;		STATE<2:0> =	0<exception vs interrupt>0
+;		STATE<4> =	1
+;		MMGT.TD	=	unknown
+;
+;	Entry conditions (IE.INTEXC1.ABORT):
+;		PC restored from backup PC, if necessary
+;		W2	=	PSL to push on stack
+;		VA	=	vector address in SCB
+;		STATE<2:0> =	000
+;		STATE<5> =	1
+;		MMGT.TD	=	unknown
+;
+;	Exit conditions:
+;		W1	=	SCB vector
+;		W2	=	original PSL
+;		W0, SC	=	trashed
+;		PSL, PC		pushed on interrupt or kernel stack
+;		STATE<4> =	1 (interrupts and normal exceptions)
+;		MMGT.TD	=	clear
+;
+;	Algorithm:
+;		fetch SCB vector
+;		examine bits <1:0> for exception action
+;		build new PSL
+;		swap to new stack, if necessary
+;		push PSL, PC on new stack
+;
+.bin
+
+;	Standard entry point for normal exceptions only.
+
+IE.INTEXC1:
+	;---------------------------------------;
+	STATE4<--1, PC<--BPC,			; set STATE<4>, restore PC
+	CLEAR.VAX.TRAP.REQUEST,			; clear any trap request
+	DISABLE.IB.PREFETCH			; turn off prefetching
+
+;	Special entry point for hardware interrupts.
+;	Prefetching must be off.
+
+IE.INTEXC1.INTR:
+	;---------------------------------------;
+	VA&, [WBUS]<--[SCBB]+[W1],		; calculate actual SCB vector address
+	CALL[READ.SCB.VECTOR.COPY.PSL]		; read SCB vector, get current PSL
+
+	;---------------------------------------;
+	SC&, [SP]<--[SP]+K[0],			; set VAX can't restart bit, get current SP
+	CASE4[SC2-0].AT.[IE.INTEXC1.KS]		; case on old SC<1:0> = SCB vector <1:0>
+
+;	Special entry point for severe exceptions.
+;	Prefetching must be off.
+
+IE.INTEXC1.ABORT:
+	;---------------------------------------;
+	[W1]<--MEM(VA).PHYS, LONG		; read SCB vector
+
+	;---------------------------------------;
+	SC&, [SP]<--[SP]+K[0],			; set VAX can't restart bit, get current SP
+	GOTO[IE.INTEXC1.IS]			; force processing on interrupt stack
+
+;	Common interrupt/exception processing, continued.
+;	Process on interrupt/kernel stack.
+
+;	At this point,
+;		W1 	=	SCB vector
+;		W2	=	current PSL
+;		W3<20:16> =	new IPL, masked (interrupts only)
+;		SC	=	current SP
+;		STATE<2:0> =	0<exc vs int>0
+
+;= ALIGNLIST 100*	(IE.INTEXC1.KS,		IE.INTEXC1.IS,
+;=			 IE.INTEXC1.WCS,	IE.INTEXC1.RES)
+
+;	Vector<1:0> = 00, process on kernel stack.
+
+IE.INTEXC1.KS:
+	;---------------------------------------; SC<1:0> = 00:
+	[W0]<--K[0],				; new PSL<26:24> = 000 unless on int stack
+	CASE8[PSL26-24].AT.[IE.SWAP.STACK.FROM.KS]	; swap stacks if necessary
+
+;	Vector<1:0> = 01, process on interrupt stack.
+;	If exception, raise IPL to 1F.
+
+IE.INTEXC1.IS:
+	;---------------------------------------; SC<1:0> = 01:
+	[W0]<--K[4]000,				; new PSL<26:24> = 100
+	STATE0<--1,				; flag interrupt stack processing
+	CASE8[PSL26-24].AT.[IE.SWAP.STACK.FROM.KS]	; swap stacks if necessary
+
+;	Vector<1:0> = 10, process in WCS, gonzo for CVAX.
+	
+IE.INTEXC1.WCS:
+	;---------------------------------------; SC<1:0> = 10:
+	CONSOLE.HALT[ERR.WCSVEC]		; invalid vector, invoke console
+	
+;	Vector<1:0> = 11, process nowhere, gonzo for everybody.
+
+IE.INTEXC1.RES:
+	;---------------------------------------; SC<1:0> = 11:
+	CONSOLE.HALT[ERR.ILLVEC]		; invalid vector, invoke console
+
+;	Common interrupt/exception processing, continued.
+;	Here to swap stacks, if necessary.
+
+;	At this point,
+;		W0<26:24> =	new PSL<is'cur_mode>
+;		W1	=	SCB vector
+;		W2	=	current PSL
+;		W3<20:16> =	new IPL, masked (interrupts only)
+;		SC	=	current SP
+;		STATE<2:0> =	0<exc vs int><ker stk vs int stk>
+
+;= ALIGNLIST 000*	(IE.SWAP.STACK.FROM.KS,	IE.SWAP.STACK.FROM.ES,
+;=			 IE.SWAP.STACK.FROM.SS,	IE.SWAP.STACK.FROM.US,
+;=			 IE.SWAP.STACK.ON.IS,	IE.SWAP.STACK.101,
+;=			 IE.SWAP.STACK.110,	IE.SWAP.STACK.111)
+
+IE.SWAP.STACK.FROM.KS:
+	;---------------------------------------; PSL<26:24> = 000:
+	[KSP]<--B.[SC],				; save SP in KSP register
+	CLEAR.WRITE.BUFFER,			; clear write buffers for mode change
+	CASE2[STATE2-0].AT.[IE.SWAP.STACK.TO.KS]	; case on new stk kernel vs int
+
+IE.SWAP.STACK.FROM.ES:
+	;---------------------------------------; PSL<26:24> = 001:
+	[ESP]<--B.[SC],				; save SP in ESP register
+	CLEAR.WRITE.BUFFER,			; clear write buffers for mode change
+	CASE2[STATE2-0].AT.[IE.SWAP.STACK.TO.KS]	; case on new stk kernel vs int
+
+IE.SWAP.STACK.FROM.SS:
+	;---------------------------------------; PSL<26:24> = 010:
+	[SSP]<--B.[SC],				; save SP in SSP register
+	CLEAR.WRITE.BUFFER,			; clear write buffers for mode change
+	CASE2[STATE2-0].AT.[IE.SWAP.STACK.TO.KS]	; case on new stk kernel vs int
+
+IE.SWAP.STACK.FROM.US:
+	;---------------------------------------; PSL<26:24> = 011:
+	[USP]<--B.[SC],				; save SP in USP register
+	CLEAR.WRITE.BUFFER,			; clear write buffers for mode change
+	CASE2[STATE2-0].AT.[IE.SWAP.STACK.TO.KS]	; case on new stk kernel vs int
+
+IE.SWAP.STACK.ON.IS:
+	;---------------------------------------; PSL<26:24> = 100:
+	[W0]<--K[4]000,				; new psl<26:24> = 100
+	CLEAR.WRITE.BUFFER,			; clear write buffers for mode change
+	CASE4[STATE2-0].AT.[IE.EXCEPT1.KS]	; case on exc vs int, ker stk vs int stk
+
+;	Common interrupt/exception processing, continued.
+;	Current PSL is invalid, invoke console.
+
+IE.SWAP.STACK.101:
+	;---------------------------------------; PSL<26:24> = 101:
+	CONSOLE.HALT[ERR.IE.PSL26-24.101]	; on interrupt stack in exec mode, die
+
+IE.SWAP.STACK.110:
+	;---------------------------------------; PSL<26:24> = 110:
+	CONSOLE.HALT[ERR.IE.PSL26-24.110]	; on interrupt stack in super mode, die
+
+IE.SWAP.STACK.111:
+	;---------------------------------------; PSL<26:24> = 111:
+	CONSOLE.HALT[ERR.IE.PSL26-24.111]	; on interrupt stack in user mode, die
+
+;	Common interrupt/exception processing, continued.
+;	Load new stack pointer, if not interrupt stack.
+
+;	At this point,
+;		W0<26:24> =	new PSL<is'cur_mode>
+;		W1	=	SCB vector
+;		W2	=	current PSL
+;		W3<20:16> =	new psl<ipl>, masked (interrupt only)
+;		STATE<2:0> =	0<exc vs int><ker stk vs int stk>
+
+;= ALIGNLIST 110*	(IE.SWAP.STACK.TO.KS,	IE.SWAP.STACK.TO.IS)
+
+IE.SWAP.STACK.TO.KS:
+	;---------------------------------------; STATE<0> = 0:
+	[SC]<--[KSP],				; get the kernel stack as new SP
+	GOTO[IE.SWAP.STACK.NEW.SP]		; go load SP
+
+IE.SWAP.STACK.TO.IS:
+	;---------------------------------------; STATE<0> = 1:
+	[SC]<--[IS]				; get the interrupt stack as new SP
+
+IE.SWAP.STACK.NEW.SP:
+	;---------------------------------------;
+	[SP]<--B.[SC],				; load new value into SP
+	CASE4[STATE2-0].AT.[IE.EXCEPT1.KS]	; case on exc vs int, ker stk vs int stk
+
+;	Common interrupt/exception processing, continued.
+;	Finish building new PSL.
+
+;	At this point,
+;		W0<26:24> =	new PSL<is'cur_mode>
+;		W1	=	SCB vector
+;		W2	=	current PSL
+;		W3<20:16> =	new PSL<ipl>, masked (interrupt only)
+;		STATE<2:0> =	0<exc vs int><ker stk vs int stk>
+
+;= ALIGNLIST 100*	(IE.EXCEPT1.KS,	IE.EXCEPT1.IS,
+;=			 IE.INTERR1.KS,	IE.INTERR1.IS)
+
+IE.INTEXC1.CHMX:
+IE.EXCEPT1.KS:
+	;---------------------------------------; STATE<1:0> = 00:
+	SC&, [WBUS]<--[W2].AND.K[1F]00		; isolate PSL<ipl>
+
+	;---------------------------------------;
+	[W0]<--[W0].OR.[SC],			; or ipl into new PSL
+	CASE4[PSL26-24].AT.[IE.EXCEPT1.PRVMODE.00]	; case on curr mode to set previous
+
+IE.EXCEPT1.IS:
+	;---------------------------------------; STATE<1:0> = 01:
+	[W0]<--[W0].OR.K[1F]00,			; int stk exception, or in new ipl = 1F
+	CASE4[PSL26-24].AT.[IE.EXCEPT1.PRVMODE.00]	; case on curr mode to set previous
+
+IE.INTERR1.KS:
+	;---------------------------------------; STATE<1:0> = 10:
+	[W0]<--[W0].OR.[W3],			; ker stk interrupt, or in new ipl
+	GOTO[IE.INTEXC1.BROADCAST.PSL]		; PSL is finished, go broadcast
+
+IE.INTERR1.IS:
+	;---------------------------------------; STATE<1:0> = 11:
+	[W0]<--[W0].OR.[W3],			; int stk interrupt, or in new ipl
+	GOTO[IE.INTEXC1.BROADCAST.PSL]		; PSL is finished, go broadcast
+
+;	Common interrupt/exception processing, continued.
+;	New PSL built except for previous mode (if exception)
+
+;	At this point,
+;		W0	=	new PSL
+;		W1	=	SCB vector
+;		W2	=	current PSL
+
+;= ALIGNLIST 100*	(IE.EXCEPT1.PRVMODE.00,	IE.EXCEPT1.PRVMODE.01,
+;=			 IE.EXCEPT1.PRVMODE.10,	IE.EXCEPT1.PRVMODE.11)
+
+IE.EXCEPT1.PRVMODE.01:
+	;---------------------------------------; PSL<25:24> = 01:
+	[W0]<--[W0].OR.K[40]00,			; set previous mode = current
+	GOTO[IE.EXCEPT1.PRVMODE.00]		; join common code
+
+IE.EXCEPT1.PRVMODE.10:
+	;---------------------------------------; PSL<25:24> = 10:
+	[W0]<--[W0].OR.K[80]00,			; set previous mode = current
+	GOTO[IE.EXCEPT1.PRVMODE.00]		; join common code
+
+IE.EXCEPT1.PRVMODE.11:
+	;---------------------------------------; PSL<25:24> = 11:
+	[W0]<--[W0].OR.K[0C0]00,		; set previous mode = current
+	GOTO[IE.EXCEPT1.PRVMODE.00]		; join common code
+
+IE.EXCEPT1.PRVMODE.00:
+IE.INTEXC1.BROADCAST.PSL:
+	;---------------------------------------; PSL<25:24> = 00:
+	[PSL]<--B.[W0],				; load new PSL
+						; >>PSL update, no decode for two cycles
+						; >>CM update, no I/O in next cycle
+	CLEAR.MMGT.TD				; re-enable mmgt traps
+
+	;---------------------------------------;
+	VA&, [SP]<--[SP]-K[4]			; decrement the stack for a push
+
+	;---------------------------------------;
+	MEM(VA)<--[W2], LONG,			; push the old PSL
+	CALL[DECREMENT.SP]			; decrement the stack for a push
+
+;	Used as a one line subroutine to write PC to memory.
+;	Caller must assure PC not written in previous cycle.
+
+WRITE.PC:
+	;---------------------------------------;
+	MEM(VA)<--[PC], LONG,			; push the original PC
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	Instruction Cleanup Subroutine"
+
+;	IE.CLEANUP -- back up or pack up current instruction.
+;
+;	Entry conditions:
+;		STATE<3> =	1 for string instruction
+;		RLOG stack =	changes to gpr's during specifier decode
+;
+;	Exit conditions:
+;		STATE<3:0> =	0
+;		PSL<tp>	=	0
+;		all chip resources available, spur idle
+;
+;	Algorithm:
+;		if STATE<3> = 0 then {pop RLOG stack and restore registers}
+;		if STATE<3> = 1 then {goto string instruction packup routine}
+;		clear PSL<tp>
+;		clear STATE<3:0>
+;
+;	Note:	W1, W5 must be preserved by this routine and by all instruction
+;		specific cleanup routines.  In fact, only W0, W4, SC are used.
+;
+.bin
+
+;	Instruction cleanup routine.
+
+IE.CLEANUP:
+	;---------------------------------------;
+	CASE2[STATE5-3].AT.[IE.CLEANUP.REG]	; case on STATE<3> = restartable instr
+
+;= ALIGNLIST 110*	(IE.CLEANUP.REG,	STRING.PACK)
+
+;	We get here when an instruction has to be backed out of.  This means
+;	that any GPR's that were auto-inc'ed/dec'ed must be restored.
+
+;	When we POP the RLOG stack, the hardware loads the following:
+;		W_Bus<3:0> gets the actual register number that was modified.
+;		W_Bus<5:4> gets the length that the register was INC'ed / DEC'ed.
+;		W_Bus<6>   = 0 if it was a decrement; 1 if an increment.
+;		W_Bus<7>   = 0 if not empty, 1 if empty
+;	This code loops, and the only way out of it is when the hardware
+;	sets W_Bus<7> to 1, indicating that the stack is empty.
+
+IE.CLEANUP.REG:
+	;---------------------------------------; STATE<3> = 0:
+	SC&, [W0]<--MXPS1[RLOG.STACK]		; pop RLOG to SC, W0
+						; >>spur read, prev dst was WBUS or GRN
+
+	;---------------------------------------;
+	[SC]<--ZEXT.[SC].SHFR.[2]		; shift SC right 2 to isolate bits<7:6>
+
+	;---------------------------------------;
+	MXPS0[RN]<--[W0],			; stuff reg number into RN register
+	CASE4[SC5-3].AT.[IE.CLEANUP.BYTE]	; case on PREVIOUS SC<5:4> = data length
+
+;	Cleanup, continued.
+
+;	At this point,
+;		SC<5:0>	=	RLOG[top]<7:0> shift right 2
+;		RN	=	restored from SC<3:0>
+
+;= ALIGNLIST 001*	(IE.CLEANUP.BYTE,	IE.CLEANUP.WORD,
+;=			 IE.CLEANUP.LONG,	IE.CLEANUP.QUAD)
+
+IE.CLEANUP.BYTE:
+	;---------------------------------------; SC<5:4> = 00:
+	[SC]<--K[1],				; get length in bytes for data type
+	CASE4[SC5-3].AT.[IE.CLEANUP.REG.DEC]	; case on RLOG<7:6>
+
+IE.CLEANUP.WORD:
+	;---------------------------------------; SC<5:4> = 01:
+	[SC]<--K[2],				; get length in bytes for data type
+	CASE4[SC5-3].AT.[IE.CLEANUP.REG.DEC]	; case on RLOG<7:6>
+
+IE.CLEANUP.LONG:
+	;---------------------------------------; SC<5:4> = 10:
+	[SC]<--K[4],				; get length in bytes for data type
+	CASE4[SC5-3].AT.[IE.CLEANUP.REG.DEC]	; case on RLOG<7:6>
+
+IE.CLEANUP.QUAD:
+	;---------------------------------------; SC<5:4> = 11:
+	[SC]<--K[8.],				; get length in bytes for data type
+	CASE4[SC5-3].AT.[IE.CLEANUP.REG.DEC]	; case on RLOG<7:6>
+
+;	Cleanup, continued.
+
+;	At this point,
+;		SC	=	amount to add/subtract
+;		RN	=	register to restore
+
+;= ALIGNLIST 001*	(IE.CLEANUP.REG.DEC,	IE.CLEANUP.REG.INC,
+;=			 IE.CLEANUP.FINISH,	IE.CLEANUP.FINISH.1)
+
+IE.CLEANUP.REG.DEC:
+	;---------------------------------------; SC<5:4> = 00:
+	[GRN]<--[GRN]+[SC],			; register was decremented, increment it back
+	GOTO[IE.CLEANUP.REG]			; loop till RLOG empty
+
+IE.CLEANUP.REG.INC:
+	;---------------------------------------; SC<5:4> = 01:
+	[GRN]<--[GRN]-[SC],			; register was incremented, decrement it back
+	GOTO[IE.CLEANUP.REG]			; loop till RLOG empty
+
+IE.CLEANUP.FINISH:
+	;---------------------------------------; SC<5:4> = 10:
+	[PSL]<--[PSL].ANDNOT.K[40]000,		; clear PSL<tp>
+						; >>PSL read, not written in prev cycle
+						; >>PSL update, no decode for two cycles
+	STATE3-0<--0,				; clear STATE<3:0>
+	GOTO[WAIT.ONE.CYCLE]			; stall for spur write, return to caller
+
+IE.CLEANUP.FINISH.1:
+	;---------------------------------------; SC<5:4> = 11:
+	[PSL]<--[PSL].ANDNOT.K[40]000,		; clear PSL<tp>
+						; >>PSL read, not written in prev cycle
+						; >>PSL update, no decode for two cycles
+	STATE3-0<--0,				; clear STATE<3:0>
+	GOTO[WAIT.ONE.CYCLE]			; stall for spur write, return to caller
+
+.TOC	"	Software Interrupt Subroutine"
+
+;	IE.UPDATE.HSIR -- update highest outstanding software interrupt request.
+;
+;	Entry conditions:
+;		SISR	=	new software interrupt request register
+;
+;	Exit conditions:
+;		HSIR	=	highest outstanding software interrupt request
+;		W0, RN, alu cc's =	trashed
+;
+;	Microcode must assure that HSIR is given at least two cycles to settle
+;	before DEC.NEXT is issued.
+
+IE.UPDATE.HSIR:
+	;---------------------------------------;
+	[W0]<--[SISR].SHFL.[16.],		; left justify SISR
+	SET.ALUCC, LONG,			; set alu cc's
+	RN<--0					; set RN = 0
+
+;= ALIGNLIST 00**	(IE.UPDATE.HSIR.00,	IE.UPDATE.HSIR.01,
+;=			 IE.UPDATE.HSIR.10,			)
+;  ALU.NZVC set by SHIFT --> V = C = 0
+
+IE.UPDATE.HSIR.00:
+	;---------------------------------------; alu.nz = 00:
+	[W0]<--[W0].SHFL.[1],			; shift swre int mask left
+	SET.ALUCC, LONG,			; set alu cc's
+	RN<--RN-1,				; decrement bit counter
+						; >>RN-1, no recoverable utrap this cycle
+	CASE4[ALU.NZV].AT.[IE.UPDATE.HSIR.00]	; case on prev mask
+
+IE.UPDATE.HSIR.10:
+	;---------------------------------------; alu.nz = 10:
+	[W0]<--MXPS0[SPEC.RN]			; bit set, read bit number in RN<3:0>
+						; >>spur read, prev dst was W0
+
+;	One line subroutine to write HSIR from W0.
+
+WRITE.HSIR.W0:
+IE.UPDATE.HSIR.01:
+	;---------------------------------------; alu.nz = 01:
+	MXPS0[HSIR]<--[W0],			; set new int value (highest or zero)
+						; >>HSIR update, no decode for two cycles
+	RETURN					; return to caller
+
+;= END INTX

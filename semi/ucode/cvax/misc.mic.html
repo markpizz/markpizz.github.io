@@ -1,0 +1,816 @@
+.TOC	"MISC.MIC -- Miscellaneous Instructions"
+.TOC	"Revision 3.2"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1985, 1986, 1987 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+;	2-Apr-87	[RMS]	Fixed bug in POPR to SP (VMS)
+;	8-Jan-87	[RMS]	Updated copyright notice, pass 2 code freeze
+; 03	5-Jul-86	[RMS]	Editorial changes, pass 1 code freeze
+;	25-Feb-86	[RMS]	Relaxed alignment constraint in POPR
+;	31-Jan-86	[RMS]	Revised for additional PSL restriction (ECO 6JAN31DWA.3)
+;	7-Jan-86	[RMS]	Added entry point for queues
+;	3-Jan-86	[RMS]	Moved misc RN+/-1 off mreqs in PUSHR, POPR (ECO 6JAN03DWA.1)
+;	29-Dec-85	[RMS]	Separated ASTLVL and TRAP, revised POPR to save cycles
+;	24-Oct-85	[RMS]	Fixed bug in PUSHR detailed probe (HCORE)
+;	23-Sep-85	[RMS]	Fixed bug in andnot alignlist
+; 02	29-Jul-85	[RMS]	Editorial changes
+;	26-Jul-85	[RMS]	Documented additional PSL restrictions
+;	8-Jul-85	[RMS]	Revised to save word in index trap flows
+;	2-Jul-85	[RMS]	Revised HALT, PUSHR to save word
+; 01	20-Mar-85	[RMS]	Revised for second pass model
+; 00	10-May-83	[RMS]	First edit for CVAX
+
+.bin
+
+;= BEGIN MISC
+
+.nobin
+;	This module implements the miscellaneous class instructions.
+;	Instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	B9	 BICPSW mask.rw							* * * *		rsv
+;
+;	B8	 BISPSW mask.rw							* * * *		rsv
+;
+;	03	 BPT {-(KSP).w*}						0 0 0 0
+;
+;	00	 HALT {-(KSP).w*}						- - - -		prv
+;
+;	0A	 INDEX subscript.rl, low.rl, high.rl, size.rl, indexin.rl,	* * 0 0		sub
+;		 indexout.wl
+;
+;	DC	 MOVPSL dst.wl							- - - -
+;
+;	01	 NOP								- - - -
+;
+;	BA	 POPR mask.rw, {(SP)+.r*}					- - - -
+;
+;	BB	 PUSHR mask.rw, {-(SP).w*}					- - - -
+;
+;	FC	 XFC {unspecified operands}					0 0 0 0
+;
+;	Note that BPT and XFC can be found with INTERRUPTS AND EXCEPTIONS.
+;
+.bin
+
+.nobin
+.TOC	"	INDEX"
+
+;	This instruction computes the index into a subscripted array.
+;	The indexin operand is added to the subscript operand and the sum 
+;	multiplied by the size of the operand.  The indexout operand is replaced
+;	by the result.  If the subscript operand is less than the low operand or
+;	greater than the high operand, a subscript range trap is taken.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch   BCOND
+;	--------      ------	---------				----	-----		--	--------   -----
+;	INDEX		0A	indexout.wl <--				6	rrrrrv/llllll	iiii	INDEX	   --
+;					(indexin.rl+subscript.rl)*size.rl
+;					if (subscript.rl LSS lowlimit.rl) OR
+;					   (subscript.rl GTR highlimit.rl) THEN subscript range trap
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (subscript) operand
+;		W2	=	second (low limit) operand
+;		W4	=	third (high limit) operand
+;		SC	=	fourth (size) operand
+;		W3	=	fifth (indexin) operand
+;		W1 = VA	=	address of sixth (indexout) operand, unless register mode
+;		RN	=	register number of sixth specifier
+;		DL	=	data type of sixth operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been stored in the destination memory location or register.
+;		If a subscript range trap occured, a VAX TRAP REQUEST is pending.
+;
+;	Condition codes:
+;		N <-- indexout LSS 0
+;		Z <-- indexout EQL 0
+;		V <-- 0			[Integer overflow trap cannot occur.]
+;		C <-- 0
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	INDEX operation:
+;
+;		indexout.wl <-- (indexin.rl+subscript.rl)*size.rl
+;		if (subscript.rl LSS lowlimit.rl) OR
+;		   (subscript.rl GTR highlimit.rl) THEN subscript range trap
+
+;	index x,x,x,x,x,r --
+
+INDEX.RMODE:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0]-[W2],			; compare subscript:low limit
+	SET.ALUCC, LONG,			; set alu cc's
+	GOTO[INDEX.COMMON]			; join common flows
+
+;	index x,x,x,x,x,m --
+
+INDEX:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0]-[W2],			; compare subscript:low limit
+	SET.ALUCC, LONG				; set alu cc's
+
+INDEX.COMMON:
+	;---------------------------------------;
+	[WBUS]<--[W4]-[W0],			; compare high limit:subscript
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE4[ALU.NZV].AT.[INDEX.LOW.LIMIT.00]	; case on result of low limit check
+
+;= ALIGNLIST 010*	(INDEX.LOW.LIMIT.00,	INDEX.LOW.LIMIT.01,
+;=			 INDEX.LOW.LIMIT.10,	INDEX.LOW.LIMIT.11)
+
+INDEX.LOW.LIMIT.00:
+	;---------------------------------------; alu.nv = 00:
+	[W1]<--K[0],				; clear high order multiply result
+	CASE4[ALU.NZV].AT.[INDEX.HIGH.LIMIT.00]	; low limit ok, case on high limit check
+
+INDEX.LOW.LIMIT.01:
+	;---------------------------------------; alu.nv = 01:
+	[W1]<--K[0],				; clear high order multiply result
+	GOTO[INDEX.HIGH.LIMIT.01]		; skip high limit check
+
+INDEX.LOW.LIMIT.10:
+	;---------------------------------------; alu.nv = 10:
+	[W1]<--K[0],				; clear high order multiply result
+	GOTO[INDEX.HIGH.LIMIT.01]		; skip high limit check
+
+INDEX.LOW.LIMIT.11:
+	;---------------------------------------; alu.nv = 11:
+	[W1]<--K[0],				; clear high order multiply result
+	CASE4[ALU.NZV].AT.[INDEX.HIGH.LIMIT.00]	; low limit ok, case on high limit check
+
+;	INDEX, continued.
+;	Low limit check complete, finish high limit check.
+
+;	At this point,
+;		W0	=	subscript
+;		W1	=	0
+;		W3	=	index in
+;		SC	=	size
+;		W1 = VA	=	address of indexout operand, unless register mode
+;		RN	=	register number of indexout specifier
+
+;= ALIGNLIST 010*	(INDEX.HIGH.LIMIT.00,	INDEX.HIGH.LIMIT.01,
+;=			 INDEX.HIGH.LIMIT.10,	INDEX.HIGH.LIMIT.11)
+
+INDEX.HIGH.LIMIT.00:
+	;---------------------------------------; alu.nv = 00:
+	[Q]<--B.[SC],				; Q <-- size
+						; >>Q write, not read in next cycle
+	SET.ALUCC, LONG,			; set alu cc's
+	GOTO[INDEX.MULTIPLY]			; go finish instruction
+
+INDEX.HIGH.LIMIT.01:
+	;---------------------------------------; alu.nv = 01:
+	[TRAP]<--K[7],				; set trap parameter
+	GOTO[INDEX.TRAP]			; go set trap and finish instruction
+
+INDEX.HIGH.LIMIT.10:
+	;---------------------------------------; alu.nv = 10:
+	[TRAP]<--K[7]				; set trap parameter
+
+INDEX.TRAP:
+	;---------------------------------------;
+	SET.VAX.TRAP.REQUEST			; set trap request flag
+
+INDEX.HIGH.LIMIT.11:
+	;---------------------------------------; alu.nv = 11:
+	[Q]<--B.[SC],				; Q <-- size
+						; >>Q write, not read in next cycle
+	SET.ALUCC, LONG				; set alu cc's
+
+;	INDEX, continued.
+;	Limit checks complete, calculate indexout.
+
+;	At this point,
+;		W0	=	subscript
+;		W1	=	0
+;		W3	=	index in
+;		Q	=	size
+;		W1 = VA	=	address of indexout operand, unless register mode
+;		RN	=	register number of indexout specifier
+
+INDEX.MULTIPLY:
+	;---------------------------------------;
+	[W0]<--[W3]+[W0],			; W0 <-- indexin + subscript
+	CALL[INT.MULT.LONG]			; W1'Q <-- W0 * Q
+
+	;---------------------------------------;
+	[W0]<--[Q],				; get result from Q
+						; >>Q read, not written in prev cycle
+	SET.PSLCC, LONG, MAP.IIII,		; set psl cc's, psl map is iiii
+	CASE2[INT.RM].AT.[WRITE.MEM]		; case on register vs memory
+
+.nobin
+.TOC	"	HALT"
+
+;	This instruction halts the processor if the current mode is kernel.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	----
+;	HALT		00	if (curr mode neq kernel) then		0	x/x	--	HALT		--
+;				   (reserved instruction fault)
+;				   else (halt restart)
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		The next microstate is CONSOLE.HALT (kernel mode)
+;		or RSRV.INST.FLT (non-kernel mode).
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		A direct case on PSL<26:24> would save one microcycle at the cost of one microword.
+;
+.bin
+
+;	HALT operation:
+;
+;		if (current mode neq kernel) then (reserved instruction fault)
+;		   else (halt processor)
+
+HALT:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[PSL].AND.K[03]000,		; test for PSL<cur_mode> = kernel
+						; >>PSL read, prev cycle was DEC.NEXT
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	CONSOLE.HALT.PARAM[ERR.HLTINS],		; set up halt code in case halt allowed
+	CASE2[ALU.NZV].AT.[HALT.ERROR]		; case on processor mode = kernel
+
+;= ALIGNLIST *0**	(HALT.ERROR,	HALT.KERNEL)
+;  ALU.NZVC set by AND with mask<31> = 0 --> N = V = C = 0
+
+HALT.ERROR:
+	;---------------------------------------; alu.z = 0:
+	GOTO[RSRV.INST.FLT]			; not kernel mode, fault
+
+HALT.KERNEL:
+	;---------------------------------------; alu.z = 1:
+	HALT,					; halt the simulator
+	GOTO[CONSOLE.HALT]			; do a power up restart
+
+.nobin
+.TOC	"	NOP"
+
+;	This instruction performs no operation.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	----
+;	NOP		01	no operation				0	x/x	--	NOP		--
+;
+;	Entry conditions from initial decode:
+;		None.
+;
+;	Exit conditions:
+;		None.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	NOP operation:
+;
+;		no operation
+
+NOP:
+	;********** Hardware dispatch **********;
+	DEC.NEXT				; decode next instruction
+
+.nobin
+.TOC	"	BICPSW, BISPSW"
+
+;	These instructions operate on the PSW trap enable and condition code bits.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	BISPSW		B8	psw <-- psw or src.rw			1	r/w	--	BISPSW		--
+;				  if (src.rw<15:8> neq 0) then (reserved operand fault)
+;
+;	BICPSW		B9	psw <-- psw and not src.rw		1	r/w	--	BISPSW		--
+;				  if (src.rw<15:8> neq 0) then (reserved operand fault)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (source) operand
+;		DL	=	data type of first operand (word)
+;
+;	Exit conditions:
+;		PSW<7:0> have been updated.
+;
+;	Condition codes:
+;		(BISPSW)		(BICPSW)
+;		N <-- N or src<3>	N <-- N andnot src<3>
+;		Z <-- Z or src<2>	Z <-- Z andnot src<2>
+;		V <-- V or src<1>	V <-- V andnot src<1>	[Integer overflow trap disabled by default iiip map.]
+;		C <-- C or src<0>	C <-- C andnot src<0>
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BISPSW, BICPSW operation:
+;
+;		psw <-- psw or [andnot] src.rw
+
+BISPSW:
+	;********** Hardware dispatch **********;
+	[WBUS]<--[W0].ANDNOT.K[0FF],		; test for src<15:8> eql 0
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE2[OPCODE2-0].AT.[BISPSW.CONTINUE]	; case on BISPSW vs BICPSW
+
+;= ALIGNLIST **0*	(BISPSW.CONTINUE,	BICPSW.CONTINUE)
+;  Opcode = B8, B9 --> opcode<2:0> = 00?
+
+BISPSW.CONTINUE:
+	;---------------------------------------; opcode<0> = 0:
+	CASE2[ALU.NZV].AT.[BISPSW.RSRV.OPER]	; if src<15:8> neq 0, operand fault
+
+BICPSW.CONTINUE:
+	;---------------------------------------; opcode<0> = 1:
+	CASE2[ALU.NZV].AT.[BICPSW.RSRV.OPER]	; if src<15:8> neq 0, operand fault
+
+;= ALIGNLIST 10**	(BISPSW.RSRV.OPER,	BISPSW.WRITE.PSW)
+;  ALU.NZVC set by ANDNOT --> V = C = 0
+
+BISPSW.RSRV.OPER:
+	;---------------------------------------; alu.z = 0:
+	GOTO[RSRV.OPER.FLT]			; src<15:8> neq 0, operand fault
+
+BISPSW.WRITE.PSW:
+	;---------------------------------------; alu.z = 1:
+	[PSL]<--[PSL].OR.[W0],			; or operand into PSL
+						; >>PSL read, not written in prev cycle
+						; >>PSW update, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+;= ALIGNLIST 10**	(BICPSW.RSRV.OPER,	BICPSW.WRITE.PSW)
+;  ALU.NZVC set by ANDNOT --> V = C = 0
+
+BICPSW.RSRV.OPER:
+	;---------------------------------------; alu.z = 0:
+	GOTO[RSRV.OPER.FLT]			; src<15:8> neq 0, operand fault
+
+BICPSW.WRITE.PSW:
+	;---------------------------------------; alu.z = 1:
+	[PSL]<--[PSL].ANDNOT.[W0],		; bit clear operand into PSL
+						; >>PSL read, not written in prev cycle
+						; >>PSW update, no decode in next cycle
+	GOTO[STALL.1.DECODE]			; stall one cycle and then decode
+
+.nobin
+.TOC	"	MOVPSL"
+
+;	This instruction copies the PSL to a destination operand.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MOVPSL		DC	dst.wl <-- psl				1	v/l	--	MOVPSL		--
+;
+;	Entry conditions from specifier flows:
+;		VA	=	address of first (destination) operand, unless register mode
+;		RN	=	register number of first specifier
+;		DL	=	data type of first operand (longword)
+;
+;	Exit conditions:
+;		The PSL is stored in the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	MOVPSL operation:
+;
+;		dst.wl <-- psl
+
+MOVPSL:
+	;********** Hardware dispatch **********;
+	[W0]<--[PSL],				; copy PSL to working register
+						; >>PSL read, prev cycle was DEC.NEXT
+	CASE2[INT.RM].AT.[WRITE.MEM]		; case on memory vs register
+
+.nobin
+.TOC	"	POPR"
+;
+;	This instruction pops multiple registers off the stack.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	POPR		BA	pop registers based on mask.rw		1	r/w	--	POPR		--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (mask) operand
+;		DL	=	data type of first operand (word)
+;
+;	Exit conditions:
+;		The specified registers have been popped.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		POPR can use the same direct stack pop technique as RET, at the cost of 12 microwords.
+;
+;	Note:	Because POPR does not read the new top of stack, POPR must probe the last longword
+;		that is actually read.
+;
+;	Note:	POPR performs an extended read using VAP to pop the stack.  It uses the same probe
+;		first-probe second-reprobe first protocol used in the cross page flows.
+;
+.bin
+
+;	POPR operation:
+;
+;		pop general registers based on mask.rw
+
+POPR:
+	;********** Hardware dispatch **********;
+	SC&, [WBUS]<--[W0]+[W0],		; copy mask<14:0>'0 to SC<15:0>, zero ext
+	SET.ALUCC, LEN(DL)			; set alu cc's, dl = word
+
+	;---------------------------------------;
+	[VA]<--[SP],				; set up to read stack top
+	DL<--BYTE,				; set dl = byte
+	CASE4[ALU.NZV].AT.[POPR.CONTINUE]	; case on zero mask, SP in mask
+
+;= ALIGNLIST 001*	(POPR.CONTINUE,	POPR.ZERO,	POPR.SP.IN.MASK,	)
+
+POPR.CONTINUE:
+	;---------------------------------------; alu.nz = 00:
+	[WBUS]<--MEM(VA), LEN(DL),		; read top of stack, check access
+	STATE0<--1,				; flag normal case
+	GOTO[POPR.TEST.STOP]			; go test stack top
+
+;	This location is also used to disable integer overflow trapping and decode.
+
+POPR.ZERO:
+MAP.JIZJ.DEC.NEXT:
+	;---------------------------------------; alu.nz = 01:
+	MAP.JIZJ,				; disable integer overflow trapping
+	DEC.NEXT				; decode next instruction
+
+POPR.SP.IN.MASK:
+	;---------------------------------------; alu.nz = 10:
+	[WBUS]<--MEM(VA), LEN(DL),		; read top of stack, check access
+	STATE3-0<--0				; flag SP in mask case
+
+POPR.TEST.STOP:
+	;---------------------------------------;
+	VA&, [WBUS]<--[SP]+K[59.]		; set up to probe worst case stk top (15 lw)
+
+	;---------------------------------------;
+	PROBE.READ.CURMODE			; probe readability of stack top
+
+	;---------------------------------------;
+	[VA]<--[SP],				; set up to read stack top
+	RN<--0,					; set RN = 0
+	CASE2[MREF.STATUS].AT.[POPR.SHIFT]	; check result of previous probe
+
+;	POPR, continued.
+;	Access to new top of stack checked.
+;	Process first two mask bits (R1:R0).
+
+;	At this point,
+;		W0	=	mask
+;		SC	=	mask shifted left 1
+;		VA	=	running stack pointer
+;		RN	=	0
+;		STATE<0> = 	1 if SP not in mask
+
+;= ALIGNLIST 110*	(POPR.SHIFT,	POPR.PROBE.ERROR)
+
+POPR.SHIFT:
+	;---------------------------------------; mref.status<0> = 0:
+	[SC]<--ZEXT.[SC].SHFR.[3],		; shift off two mask bits, plus extra bit
+	SET.ALUCC, LONG,			; test for mask zero
+	RN<--RN+1,				; set RN = 1
+						; >>RN+1, no recoverable utrap this cycle
+	CASE4[SC2-0].AT.[POPR.SC.00]		; case on previous bits<2:1> of mask
+
+;= ALIGNLIST 00**	(POPR.SC.00,	POPR.SC.01,
+;=			 POPR.SC.10,	POPR.SC.11)
+;  Mask left shifted 1 --> mask<2:0> = ??0
+
+POPR.SC.00:
+	;---------------------------------------; SC<2:1> = 00:
+	PROBE.READ.CURMODE			; probe top of stack to complete xpage check
+
+	;---------------------------------------;
+	VAP&, [WBUS]<--B.[VA],			; load VAP with stack top
+	GOTO[POPR.NOTRAP.SHIFT]			; go process rest of mask (can't be zero)
+
+POPR.SC.01:
+	;---------------------------------------; SC<2:1> = 01:
+	[G0]<--MEM(VA), LONG,			; pop R0
+	CASE2[ALU.NZV].AT.[POPR.NOTRAP.SHIFT]	; case on mask zero
+
+POPR.SC.10:
+	;---------------------------------------; SC<2:1> = 10:
+	[G1]<--MEM(VA), LONG,			; pop R1
+	CASE2[ALU.NZV].AT.[POPR.NOTRAP.SHIFT]	; case on mask zero
+
+POPR.SC.11:
+	;---------------------------------------; SC<2:1> = 11:
+	[G0]<--MEM(VA), LONG,			; pop R0
+	GOTO[POPR.NOTRAP.SC.1X]			; go pop second register
+
+;	POPR, continued.
+;	First two mask bits (R1:R0) processed, process rest of mask.
+
+;	At this point,
+;		W0	=	mask
+;		SC	=	mask, bit<15> = 0, shifted right 2
+;		VAP	=	running stack pointer
+;		RN	=	1
+;		STATE<0> = 	1 if SP not in mask
+
+;= ALIGNLIST *0**	(POPR.NOTRAP.SHIFT,	POPR.COMPLETE)
+;  ALU.NZVC set by ZEXT right shift --> N = V = C = 0
+
+POPR.NOTRAP.SHIFT:
+	;---------------------------------------; alu.z = 0:
+	[SC]<--ZEXT.[SC].SHFR.[2],		; shift off two bits of mask
+	SET.ALUCC, LONG,			; test for mask zero
+	RN<--RN+1,				; increment register pointer
+						; >>RN+1, no recoverable utrap this cycle
+	CASE4[SC2-0].AT.[POPR.NOTRAP.SC.00]	; case on previous bits<1:0> of mask
+
+;= ALIGNLIST 100*	(POPR.NOTRAP.SC.00,	POPR.NOTRAP.SC.01,
+;=			 POPR.NOTRAP.SC.10,	POPR.NOTRAP.SC.11)
+
+POPR.NOTRAP.SC.00:
+	;---------------------------------------; SC<1:0> = 00:
+	RN<--RN+1,				; both bits zero, advance RN
+						; >>RN+1, no recoverable utrap this cycle
+	GOTO[POPR.NOTRAP.SHIFT]			; go shift and test again
+
+POPR.NOTRAP.SC.01:
+	;---------------------------------------; SC<1:0> = 01:
+	[GRN]<--MEM(VAP), LONG, 		; pop current register
+	RN<--RN+1,				; advance RN
+						; >>RN+1, no recoverable utrap this cycle
+	CASE2[ALU.NZV].AT.[POPR.NOTRAP.SHIFT]	; case on mask zero
+
+POPR.NOTRAP.SC.10:
+	;---------------------------------------; SC<1:0> = 10:
+	RN<--RN+1,				; advance RN
+						; >>RN+1, no recoverable utrap this cycle
+	GOTO[POPR.NOTRAP.SC.1X]			; go pop register
+
+POPR.NOTRAP.SC.11:
+	;---------------------------------------; SC<1:0> = 11:
+	[GRN]<--MEM(VAP), LONG,			; pop current register
+	RN<--RN+1				; advance RN
+						; >>RN+1, no recoverable utrap this cycle
+
+POPR.NOTRAP.SC.1X:
+	;---------------------------------------;
+	[GRN]<--MEM(VAP), LONG,			; pop current register
+	CASE2[ALU.NZV].AT.[POPR.NOTRAP.SHIFT]	; case on mask zero
+
+;	POPR, continued.
+;	All registers popped, determine final stack pointer.
+
+;	At this point,
+;		VAP	=	running stack pointer
+;		STATE<0> = 	1 if SP not in mask
+
+POPR.COMPLETE:
+	;---------------------------------------; alu.z = 1:
+	CASE2[STATE2-0].AT.[POPR.SP.EXIT]	; case on SP in mask
+
+;= ALIGNLIST **0*	(POPR.SP.EXIT,	POPR.EXIT)
+;  STATE<2:1> = 00 --> STATE<2:0> = 00?
+
+POPR.SP.EXIT:
+	;---------------------------------------; STATE<0> = 0:
+	DEC.NEXT				; decode next instruction
+
+POPR.EXIT:
+	;---------------------------------------; STATE<0> = 1:
+	[SP]<--B.[VAP],				; get VAP to SP
+	DEC.NEXT				; decode next instruction
+
+;	POPR, continued.
+;	Quick stack probe failed.  Either a genuine error exists, or
+;	the quick probe incorrectly crossed a page boundary.  Determine
+;	the exact number of locations to probe and retry.
+
+;	At this point,
+;		W0	=	mask
+;		alu cc's =	set from W5
+
+POPR.PROBE.ERROR:
+	;---------------------------------------; mref.status<0> = 1:
+	[W5]<--[W0].SHFL.[17.],			; left justify mask
+	SET.ALUCC, LONG				; set alu cc's
+
+	;---------------------------------------;
+	VA&, [W1]<--[SP]-1,			; set up VA for detailed probe
+	CALL[RET.PROBE.SHIFT]			; go calculate write VA, probe
+
+	;---------------------------------------;
+	[VA]<--[SP],				; set ptr to stack top
+	GOTO[POPR.SHIFT]			; return to main flows
+
+.nobin
+.TOC	"	PUSHR"
+;
+;	This instruction pushes multiple registers onto the stack.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	PUSHR		BB	push registers based on mask.rw		1	r/w	--	PUSHR		--
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (mask) operand
+;		DL	=	data type of first operand (word)
+;
+;	Exit conditions:
+;		The specified registers have been pushed.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V			[Integer overflow trap disabled by default iiip map.]
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	Because PUSHR writes into the location specified by the new top of stack, PUSHR must
+;		probe the new top of stack.
+;
+.bin
+
+;	PUSHR operation:
+;
+;		push general registers based on mask.rw
+
+PUSHR:
+	;********** Hardware dispatch **********;
+	[W5]<--[W0].SHFL.[17.],			; left justify mask in W5
+	SET.ALUCC, LONG,			; test for zero
+	RN<--0					; RN = 0
+
+	;---------------------------------------;
+	VA&, [WBUS]<--[SP]-K[60.],		; point to worst case new stack top (15 lw)
+	CASE2[ALU.NZV].AT.[PUSHR.CONTINUE]	; if mask zero, exit
+
+;= ALIGNLIST 10**	(PUSHR.CONTINUE,	PUSHR.ZERO)
+;  ALU.NZVC set by shift --> V = C = 0
+
+PUSHR.ZERO:
+	;---------------------------------------; alu.z = 1:
+	DEC.NEXT				; mask zero, decode next instruction
+
+PUSHR.CONTINUE:
+	;---------------------------------------; alu.z = 0:
+	PROBE.WRITE.CURMODE			; probe new top of stack
+
+	;---------------------------------------;
+	[W3]<--[SP],				; set up stack pointer for loop
+	RN<--RN-1,				; RN = 15.
+						; >>RN-1, no recoverable utrap this cycle
+	CASE2[MREF.STATUS].AT.[PUSHR.PROBE.OK]	; case on results of probe
+
+;= ALIGNLIST 110*	(PUSHR.PROBE.OK,	PUSHR.PROBE.ERROR)
+
+PUSHR.PROBE.OK:
+	;---------------------------------------; mref.status<0> = 0:
+	[W5]<--[W5].SHFL.[1],			; shift mask left
+	SET.ALUCC, LONG,			; test for bit set (N) and mask done (Z)
+	RN<--RN-1, 				; decrement register number
+						; >>RN-1, no recoverable utrap this cycle
+	CASE2[ALU.NZV].AT.[PUSHR.SHIFT.LOCATE]	; case on previous test (cannot be zero)
+
+;	PUSHR, continued.
+;	Register push loop.
+
+;	At this point,
+;		W3	=	running stack pointer
+;		W5	=	register mask, left justified
+;		alu cc's =	set from W5
+
+;= ALIGNLIST 01**	(PUSHR.SHIFT.LOCATE,	PUSHR.PUSH)
+;  ALU.NZVC set by SHIFT --> V = C = 0
+
+PUSHR.SHIFT.LOCATE:
+	;---------------------------------------; alu.n = 0:
+	[W5]<--[W5].SHFL.[1],			; shift mask left
+	SET.ALUCC, LONG,			; test for bit set (N) and mask done (Z)
+	RN<--RN-1, 				; decrement register number
+						; >>RN-1, no recoverable utrap this cycle
+	CASE2[ALU.NZV].AT.[PUSHR.SHIFT.LOCATE]	; case on previous test (cannot be zero)
+
+PUSHR.PUSH:
+	;---------------------------------------; alu.n = 1:
+	VA&, [W3]<--[W3]-K[4],			; decrement running stack pointer
+	CASE2[ALU.NZV].AT.[PUSHR.WRITE.NEXT]	; case on mask now zero
+
+;= ALIGNLIST 10**	(PUSHR.WRITE.NEXT,	PUSHR.WRITE.LAST)
+;  ALU.NZVC set by SHIFT --> V = C = 0
+
+PUSHR.WRITE.NEXT:
+	;---------------------------------------; alu.z = 0:
+	MEM(VA)<--[GRN], LONG,			; push register onto stack
+	GOTO[PUSHR.SHIFT.LOCATE]		; go test next mask bit (cannot be zero)
+
+PUSHR.WRITE.LAST:
+	;---------------------------------------; alu.z = 1:
+	MEM(VA)<--[GRN], LONG,			; push register onto stack
+	GOTO[SET.SP.W3.DEC.NEXT]		; go update stack pointer and decode
+
+;	PUSHR, continued.
+;	Quick stack probe failed.  Either a genuine error exists, or
+;	the quick probe incorrectly crossed a page boundary.  Determine
+;	the exact number of locations to probe and retry.
+
+;	At this point,
+;		W0	=	mask, right justified
+;		W5	=	mask, left justified
+;		alu cc's =	set from W5
+
+PUSHR.PROBE.ERROR:
+	;---------------------------------------; mref.status<0> = 1:
+	VA&, [W1]<--[SP],			; set initial probe address
+	CALL[CALL.PROBE.SHIFT]			; calculate right VA for mask, probe
+
+	;---------------------------------------;
+	[W5]<--[W0].SHFL.[17.],			; left justify mask in W5
+	SET.ALUCC, LONG,			; set alu cc's
+	CASE2[MREF.STATUS].AT.[PUSHR.CHECK.OK]	; case on result of detailed probe
+
+;= ALIGNLIST 110*	(PUSHR.CHECK.OK,	PUSHR.CHECK.ERROR)
+
+PUSHR.CHECK.OK:
+	;---------------------------------------; mref.status<0> = 0:
+	[W5]<--[W5].SHFL.[1],			; shift mask left
+	SET.ALUCC, LONG,			; test for bit set (N) and mask done (Z)
+	RN<--RN-1,				; decrement register number
+						; >>RN-1, no recoverable utrap this cycle
+	CASE2[ALU.NZV].AT.[PUSHR.SHIFT.LOCATE]	; case on previous test (cannot be zero)
+
+PUSHR.CHECK.ERROR:
+	;---------------------------------------; mref.status<0> = 1:
+	GOTO[MM.ACV.TNV]			; enter ACV/TNV flows
+
+;= END MISC

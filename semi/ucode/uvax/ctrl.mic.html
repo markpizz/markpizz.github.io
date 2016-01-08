@@ -1,0 +1,1289 @@
+.TOC	"CTRL.MIC -- Control Instructions"
+.TOC	"Revision 7.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1982, 1983, 1984 BY					    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+
+.TOC	"	Revision History"
+
+; 07	14-Feb-84	[RMS]	Editorial changes for pass 2
+;	18-Nov-83	[RMS]	Saved cycle in SOBxxx, BBxy, BLBS
+;	8-Nov-83	[RMS]	Saved cycle in CASEx, ACBx
+; 06	7-Oct-83	[RMS]	Major rewrite of complex branches
+;	22-Sep-83	[RMS]	Editorial changes
+;	19-Aug-83	[RMS]	Editorial changes from code review
+; 05	31-May-83	[RMS]	Removed third at/ld field
+;	27-May-83	[RMS]	Code compression
+;	18-May-83	[RMS]	Revised to disable prefetching during bus lock
+;	27-Mar-83	[RMS]	Fixed SC.LSS.32 bug in BBxx register mode (JW)
+;	17-Mar-83	[RMS]	Revised for new mreq, dl functions
+; 04	13-Mar-83	[RMS]	Major code compression
+;	6-Mar-83	[RMS]	Eliminated .wx ATDL definitions
+;	1-Mar-83	[RMS]	Speed optimization for BLBC
+;	8-Jan-83	[RMS]	Editorial changes
+;	6-Jan-83	[RMS]	Fixed SOBxxx for decreased hardware support
+;	27-Dec-82	[RMS]	Fixed typo in BB subroutine
+;				Fixed G[SP].RLOG problem
+;	9-Dec-82	[RMS]	Removed extraneous ..e linkages
+;				Fixed typo in BBC (EVKAQ)
+;	28-Nov-82	[RMS]	Editorial changes
+; 03	24-Nov-82	[RMS]	Revised allocation limits and constraints
+;	20-Oct-82	[RMS]	Fixed bug in BBxx register mode
+;	14-Oct-82	[RMS]	Editorial changes
+;	12-Oct-82	[RMS]	Fixed commenting error
+;				Revised allocation limits
+;	20-Sep-82	[RMS]	Revised definition of PR[E]
+; 02	14-Sep-82	[RMS]	Revised allocation limits
+;	6-Sep-82	[RMS]	Editorial changes
+;	27-Aug-82	[RMS]	Fixed calls on SPEC.FORCE.IB.READ..
+;	25-Aug-82	[RMS]	Revised for today's spec changes
+;	23-Aug-82	[RMS]	Formatting changes
+;	20-Aug-82	[RMS]	Added complex control instructions
+;	19-Aug-82	[RMS]	Corrected assembly errors
+;	17-Aug-82	[RMS]	Revised for new shift nomenclature
+;				Revised for new pass, zext operations
+;	13-Aug-82	[RMS]	Revised for new GSD
+; 01	12-Aug-82	[RMS]	First edit for MicroVAX
+
+.bin
+;= REGION 2 63F
+;= BEGIN CTRL
+.nobin
+
+;	This module implements the control class instructions.
+;	The instructions in this class are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	9D	 ACBB limit.rb, add.rb, index.mb, displ.bw			* * * -		iov
+;	F1	 ACBL limit.rl, add.rl, index.ml, displ.bw			* * * -		iov
+;	3D	 ACBW limit.rw, add.rw, index.mw, displ.bw			* * * -		iov
+;
+;	F3	 AOBLEQ limit.rl, index.ml, displ.bb				* * * -		iov
+;	F2	 AOBLSS limit.rl, index.ml, displ.bb				* * * -		iov
+;
+;	1E	 BCC{=BGEQU} displ.bb						- - - -
+;	1F	 BCS{=BLSSU} displ.bb						- - - -
+;	13	 BEQL{=BEQLU} displ.bb						- - - -
+;	18	 BGEQ displ.bb							- - - -
+;	14	 BGTR displ.bb							- - - -
+;	1A	 BGTRU displ.bb							- - - -
+;	15	 BLEQ displ.bb							- - - -
+;	1B	 BLEQU displ.bb							- - - -
+;	19	 BLSS displ.bb							- - - -
+;	12	 BNEQ{=BNEQU} displ.bb						- - - -
+;	1C	 BVC displ.bb							- - - -
+;	1D	 BVS displ.bb							- - - -
+;
+;	E1	 BBC pos.rl, base.vb, displ.bb, {field.rv}			- - - -		rsv
+;	E0	 BBS pos.rl, base.vb, displ.bb, {field.rv}			- - - -		rsv
+;
+;	E5	 BBCC pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E3	 BBCS pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E4	 BBSC pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E2	 BBSS pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;
+;	E7	 BBCCI pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;	E6	 BBSSI pos.rl, base.vb, displ.bb, {field.mv}			- - - -		rsv
+;
+;	E9	 BLBC src.rl, displ.bb						- - - -
+;	E8	 BLBS src.rl, displ.bb						- - - -
+;
+;	11	 BRB displ.bb							- - - -
+;	31	 BRW displ.bw							- - - -
+;
+;	10	 BSBB displ.bb, {-(SP).wl}					- - - -
+;	30	 BSBW displ.bw, {-(SP).wl}					- - - -
+;
+;	8F	 CASEB selector.rb, base.rb, limit.rb, displ.bw-list		* * 0 *
+;	CF	 CASEL selector.rl, base.rl, limit.rl, displ.bw-list		* * 0 *
+;	AF	 CASEW selector.rw, base.rw, limit.rw, displ.bw-list		* * 0 *
+;
+;	17	 JMP dst.ab							- - - -
+;
+;	16	 JSB dst.ab, {-(SP).wl}						- - - -
+;
+;	05	 RSB {(SP)+.rl}							- - - -
+;
+;	F4	 SOBGEQ index.ml, displ.bb					* * * -		iov
+;	F5	 SOBGTR index.ml, displ.bb					* * * -		iov
+;
+.bin
+
+.nobin
+.TOC	"	BRx, Bxxx, NOP"
+
+;	The branch instructions perform unconditional or conditional branches.
+;	NOP performs no operation (it is included here to save a microword).
+;	The condition codes are not affected.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	BRB		11	PC <-- PC + sext(displ.bb)		e	x /bb	x	BRB
+;	BRW		31	PC <-- PC + sext(displ.bw)		e	x /ww	x	BRB
+;
+;	BNEQ, BNEQU	12	if Z eql 0, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BEQL, BEQLU	13	if Z eql 1, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BGTR		14	if {N or Z} eql 0,			e	x /bb	x	BRB
+;					PC <-- PC + sext(displ.bb)
+;	BLEQ		15	if {N or Z} eql 1,			e	x /bb	x	BRB
+;					PC <-- PC + sext(displ.bb)
+;	BGEQ		18	if N eql 0, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BLSS		19	if N eql 1, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BGTRU		1A	if {C or Z} eql 0,			e	x /bb	x	BRB
+;					PC <-- PC + sext(displ.bb)
+;	BLEQU		1B	if {C or Z} eql 1,			e	x /bb	x	BRB
+;					PC <-- PC + sext(displ.bb)
+;	BVC		1C	if V eql 0, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BVS		1D	if V eql 1, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BGEQU, BCC	1E	if C eql 0, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;	BLSSU, BCS	1F	if C eql 1, PC <-- PC + sext(displ.bb)	e	x /bb	x	BRB
+;
+;	NOP		01	no operation				e	x /x	x	NOP
+;
+;	Entry conditions:
+;		IB contains enough data for the branch displacement.
+;		ID contains the sign extended branch displacement (byte or word).
+;
+;	Exit conditions:
+;		The PC and VIBA have been updated (if branch taken).
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	Branch operation:
+;
+;		if branch condition satisfied then PC <-- PC + sext(displ.bx)
+
+BRB..:					; opcode = 11
+;BRW:					; opcode = 31
+
+;BCC:					; opcode = 1E
+;BCS:					; opcode = 1F
+;BEQL:					; opcode = 13
+;BGEQ:					; opcode = 18
+;BGTR:					; opcode = 14
+;BGTRU:					; opcode = 1A
+;BLEQ:					; opcode = 15
+;BLEQU:					; opcode = 1B
+;BLSS:					; opcode = 19
+;BNEQ:					; opcode = 12
+;BVC:					; opcode = 1C
+;BVS:					; opcode = 1D
+	;********** Hardware dispatch **********;
+	WBUS<--G[PC]+M[ID],			; Wbus <-- PC + SEXT(displ.bx)
+	IF.BCOND.MET.LOAD.V&P.ELSE.IID		; if no branch, then just IID
+						; else modify PC and VIBA with Wbus
+
+;	NOP operation:
+;
+;		no operation
+
+NOP..:						; opcode = 01
+
+;	This location is also used by BRB, BRW, BSBB, BSBW, and the conditional
+;	branches following the update of the PC.
+
+BRANCH.EXIT:
+	;********** Hardware dispatch **********;
+	EXECUTE.IID				; decode next instruction
+
+.nobin
+.TOC	"	BSBB, BSBW"
+
+;	These instructions call local subroutines via branch displacements.
+;	The condition codes are not affected.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	BSBB		10	-(SP) <-- PC, PC <-- PC + sext(displ.bb) e	x /ll	x	BSBB
+;	BSBW		30	-(SP) <-- PC, PC <-- PC + sext(displ.bw) e	x /ll	x	BSBB
+;
+;	Entry conditions:
+;		IB contains enough data for the branch displacement.
+;		ID contains the sign extended branch displacement (byte or word).
+;
+;	Exit conditions:
+;		The PC has been pushed on the stack.
+;		The PC and VIBA have been updated.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BSBB, BSBW operation:
+;
+;		-(SP) <-- PC, PC <-- PC + sext(displ.bx)
+
+;	BSBB and BSBW can use the same execution dispatch because the I Box
+;	logic loads the ID register with the proper length displacement.
+
+BSBB..:						; opcode = 10
+;BSBW:						; opcode = 30
+	;********** Hardware dispatch **********;
+	VA&, WBUS<--G[SP]-M[FOUR]		; calculate addr of decremented stk ptr
+						; can't use RLOG with expl register
+
+	;---------------------------------------;
+	MEM(VA)<--G[PC], LONG			; push PC onto stack
+						; can't use subr due to alignment constraint
+						; on next instruction!
+
+	;---------------------------------------;
+	WBUS<--G[PC]+M[ID],			; VIBA & PC <-- PC + offset
+	LOAD.V&PC.GOTO[PUSH.DEC.SP..]		; go decr stk ptr and decode next instr
+
+.nobin
+.TOC	"	JSB, JMP"
+
+;	These instructions provide global branching and subroutine capability.
+;	The condition codes are not affected.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	JSB		16	-(SP) <-- PC, PC <-- src.ab		fe	ar/bl	x	JSB
+;
+;	JMP		17	PC <-- src.ab				fe	ar/bb	x	JMP
+;
+;	Entry conditions:
+;		W0	=	first (next instruction address) operand
+;		DL 	=	data type of "second" operand
+;
+;	Exit conditions:
+;		[JSB only] The PC has been pushed on the stack.
+;		The PC and VIBA have been updated.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	JSB operation:
+;
+;		-(SP) <-- PC, PC <-- src.ab
+
+JSB..:						; opcode = 16
+	;********** Hardware dispatch **********;
+	VA&, WBUS<--G[SP]-M[FOUR],		; calculate addr of decremented stk ptr
+						; can't use RLOG with expl register
+	CALL[WRITE.MEM(VA).FROM.PC..]		; push PC onto stack (DL is now LONG)
+
+	;---------------------------------------;
+	WBUS<--W[0],				; VIBA & PC <-- PC + offset
+	LOAD.V&PC.GOTO[PUSH.DEC.SP..]		; go decr stk ptr and decode next instr
+
+;	JMP operation:
+;
+;		PC <-- src.ab
+
+JMP..: 						; opcode = 17
+	;********** Hardware dispatch **********;
+	WBUS<--W[0],				; put new PC on WBUS
+	LOAD.V&PC				; load new PC and VIBA
+
+	;---------------------------------------;
+	EXECUTE.IID				; decode next instruction
+
+.nobin
+.TOC	"	RSB"
+
+;	This instruction returns control from a subroutine called by BSBB, BSBW, or JSB.
+;	The condition codes are not affected.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	RSB		05	PC <-- (SP)+				e	x /x	x	RSB
+;
+;	Entry conditions:
+;		Reached from IID.
+;
+;	Exit conditions:
+;		The PC has been popped from the stack.
+;		The PC and VIBA have been updated.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	RSB operation:
+;
+;		PC <-- (SP)+
+
+RSB..:						; opcode = 05
+	;********** Hardware dispatch **********;
+	VA&, WBUS<--G[SP]			; copy SP to VA
+
+	;---------------------------------------;
+	W[1]<--MEM(VA), LONG			; read top longword from stack
+
+	;---------------------------------------;
+	WBUS<--W[1],				; put new PC onto Wbus
+	LOAD.V&PC				; copy to VIBA and PC
+
+	;---------------------------------------;
+	G[SP]<--G[SP]+M[FOUR],			; pop stack,
+	EXECUTE.IID				; decode next instruction
+
+.nobin
+.TOC	"	CASEx"
+
+;	These instructions implement multiway case branching on an input selector.
+;	The condition codes are set from the selector-base computation.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	CASEB		8F	(see below)				fse	rr/bb	jizj	CASEB
+;	CASEW		AF	(see below)				fse	rr/ww	jizj	CASEB
+;	CASEL		CF	(see below)				fse	rr/ll	jizj	CASEB
+;
+;	The case operation is as follows:
+;		tmp <-- selector.rx - base.rx
+;		PC <-- PC + if (tmp LEQU limit.rx) then {sext(displ.bw[tmp])} else {2 + 2*zext(limit.rx))
+;
+;	Entry conditions:
+;		W0	=	first (selector) operand
+;		W2	=	second (base) operand
+;		DL	=	data type of second operand (same as third)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The PC and VIBA have been updated.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- selector - base LSS limit
+;		Z <-- selector - base EQL limit
+;		V <-- 0
+;		C <-- selector - base LSSU limit
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	CASEx overwrites the PSL CC's before proving the readability
+;		of the selected offset.
+;
+.bin
+
+;	CASEx operation:
+;
+;		tmp <-- selector.rx - base.rx
+;		PC <-- PC + if (tmp LEQU limit.rx) then {sext(displ.bw[tmp])}
+;						   else {2 + 2*zext(limit.rx))
+
+CASEB..:					; opcode = 8F
+;CASEW:						; opcode = AF
+;CASEL:						; opcode = CF
+	;---------------------------------------;
+	W[2]<--W[0]-W[2], 			; compute selector - base
+	CALL.CASE.SPEC[GSD..]			; go get limit
+
+;	At this point,
+;		W0	=	limit
+;		W2	=	selector - base
+
+	;---------------------------------------;
+	WBUS<--W[2]-W[0], SET.PSLCC, LEN(DL)	; compare (selector - base) to limit
+
+	;---------------------------------------;
+	W[2]<--ZEXT.W[2],			; zero unused bits of W2 (zext is implicitly len(dl))
+	IF[ALU.C]_[CASE.TEST.ALU.Z]		; if (selector - base) GEQU limit, branch
+
+CASE.READ.BRANCH.OFF:
+	;---------------------------------------;
+	W[4]<--W[2].SHFL.[1],			; LEQU limit, compute (selector - base) * 2
+	DL<--WORD				; force dl to WORD for offset mreq
+
+	;---------------------------------------;
+	VA&, WBUS<--G[PC]+W[4]			; compute PC + (selector - base) * 2
+
+	;---------------------------------------;
+	W[3]<--MEM(VA), LEN(DL)			; read new PC offset
+
+	;---------------------------------------;
+	W[3]<--W[3].SHFL.[16.], SET.ALUCC	; sign extend PC offset to 32-bits
+
+	;---------------------------------------;
+	W[3]<--SEXT.W[3].SHFR.[16.]		; the hard way...
+
+	;---------------------------------------;
+	WBUS<--G[PC]+W[3],			; add PC offset into PC
+	LOAD.V&PC.GOTO[BRANCH.EXIT]		; copy Wbus to PC and VIBA, go decode
+
+CASE.TEST.ALU.Z:
+	;---------------------------------------;
+	W[0]<--W[0]+W[0]+1,			; GEQU limit, compute (limit * 2) + 1
+	IF[ALU.Z]_[CASE.READ.BRANCH.OFF]	; if (selector - base) EQL limit, branch
+
+	;---------------------------------------;
+	WBUS<--G[PC]+W[0]+1,			; GTRU limit, compute PC + (limit * 2) + 1 + 1
+	LOAD.V&PC.GOTO[BRANCH.EXIT]		; load into PC and VIBA, go decode next
+
+.nobin
+.TOC	"	SOBGTR, SOBGEQ"
+
+;	These instructions decrement an index and test it against zero.
+;	The condition codes are set according to the result.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	SOBGEQ		F4	index.ml <-- index.ml - 1		fe	mr/lb	aaap	SOBGEQ
+;					if (index geq 0) then PC <-- PC + sext(displ.bb)
+;	SOBGTR		F5	index.ml <-- index.ml - 1		fe	mr/lb	aaap	SOBGEQ
+;					if (index gtr 0) then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions:
+;		W0	=	first (index) operand
+;		VA	=	address of first (index) operand, if not register mode
+;		RN	=	register number of first specifier
+;		DL	=	data type of displacement operand (byte)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- {integer overflow}
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	SOBGEQ, SOBGTR operation:
+;
+;		index.ml <-- index.ml - 1
+;		if (index geq, gtr 0) then PC <-- PC + sext(displ.bb)
+
+SOBGEQ..:					; opcode = F4
+;SOBGTR:					; opcode = F5
+	;********** Hardware dispatch **********;
+	W[0]<--W[0]-1, SET.ALUCC, LONG,		; decrement index, set alu cc's
+	ID<--IB.LEN(DL).CASE,			; get displ from IB, case on stall, halt
+	IF[RMODE]_[SOB.RMODE.IB.GOT.DATA]	; branch (case) out if register mode
+
+;= ALIGNLIST 00*	(SOB.IB.GOT.DATA,		,
+;=			 SOB.IB.STALL,		SOB.IB.HALTED)
+
+SOB.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	MEM(VA)<--W[0], LONG, DL<--LONG,	; write index to memory, force DL to long
+	CASE4[ALU.NZVC].AT.[SOB.ALU.GEQ.00**]	; case on condition codes from subtract
+
+SOB.IB.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[SOB.IB.GOT.DATA]	; loop until IB data available
+
+SOB.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, returns to [-3] (IB.STALL)
+
+;= ALIGNLIST 00*	(SOB.RMODE.IB.GOT.DATA,		,
+;=			 SOB.RMODE.IB.STALL,	SOB.RMODE.IB.HALTED)
+
+SOB.RMODE.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	G(RN)<--W[0], LONG, DL<--LONG,		; write index to reg, force DL to long
+	CASE4[ALU.NZVC].AT.[SOB.ALU.GEQ.00**]	; case on condition codes from subtract
+
+SOB.RMODE.IB.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[SOB.RMODE.IB.GOT.DATA]	; loop until IB data available
+
+SOB.RMODE.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, returns to [-3] (IB.STALL)
+
+;	SOBGTR, SOBGEQ continued.
+;	Branch table.
+
+;	At this point,
+;		alu cc's =	set from decrement
+;		DL	=	longword
+
+;= ALIGNLIST 0011*	(SOB.ALU.GEQ.00**,	SOB.ALU.GEQ.01**,
+;=			 SOB.ALU.GEQ.10**,			)
+;  ALU.NZVC combination 11xx impossible!
+
+SOB.ALU.GEQ.00**:
+	;---------------------------------------; alu.nzvc = 00??:
+	WBUS<--G[PC]+M[ID],			; result > 0, calculate new PC
+	LOAD.V&PC.GOTO[SOB.ALU.GEQ.10**]	; do branch, go load psl cc's
+
+SOB.ALU.GEQ.01**:
+	;---------------------------------------; alu.nzvc = 01??:
+	SET.PSLCC, LEN(DL),			; result = 0, copy alu cc's to psl cc's
+	CASE2[OPCODE3-0].AT.[SOB.ZERO.GEQ]	; case on SOBGEQ (F4) vs SOBGTR (F5)
+
+SOB.ALU.GEQ.10**:
+	;---------------------------------------; alu.nzvc = 10??:
+	SET.PSLCC, LEN(DL),			; result < 0, copy alu cc's to psl cc's
+	EXECUTE.IID				; decode next instruction
+
+.nobin
+.TOC	"	AOBLSS, AOBGEQ"
+
+;	These instructions increment an index and test it against a limit.
+;	The condition codes are set according to the result of the increment.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	AOBLSS		F2	index.ml <-- index.ml + 1		fre	rm/ll	iiip	AOBLSS
+;					if (index lss limit) then PC <-- PC + sext(displ.bb)
+;	AOBLEQ		F3	index.ml <-- index.ml + 1		fre	rm/ll	iiip	AOBLSS
+;					if (index leq limit) then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions:
+;		W0	=	first (limit) operand
+;		W2	=	second (index) operand, if not register mode
+;		VA	=	address of second (index) operand, if not register mode
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (longword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- {integer overflow}
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+;	Note:	AOBLSS, AOBLEQ overwrite the PSL CC's before the accessibility of the branch
+;		offset is known.
+;
+.bin
+
+;	AOBLSS, AOBLEQ operation:
+;		index.ml <-- index.ml + 1
+;		if (index lss, leq limit) then PC <-- PC + sext(displ.bb)
+
+;***	AOBLSS, AOBLEQ not RMODE ***
+
+AOBLSS..:					; opcode = F2
+;AOBLEQ:					; opcode = F3
+	;********** Hardware dispatch **********;
+	W[2]<--W[2]+1, SET.PSLCC, LEN(DL),	; increment index, set psl cc's
+	DL<--BYTE,				; force DL to byte for branch displacement
+	GOTO[AOB.IB.STALL]			; go case on displacement availability
+
+;= ALIGNLIST 00*	(AOB.IB.GOT.DATA,		,
+;=			 AOB.IB.STALL,		AOB.IB.HALTED)
+
+AOB.IB.STALL:
+	;---------------------------------------; IB stall:
+	WBUS<--W[2]-W[0], SET.ALUCC, LONG,	; compare index to limit, set alu cc's
+	ID<--IB.LEN(DL).CASE.AT.[AOB.IB.GOT.DATA]	; loop until IB data available
+
+AOB.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA,
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, return to [-3] (IB.STALL)
+
+AOB.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	MEM(VA)<--W[2], LONG,			; write index to memory,
+	CASE8[ALU.NZVC].AT.[AXB.ALU.LEQ.000*]	; case on condition codes from compare
+
+;	AOBLSS, AOBLEQ register mode.
+
+;***	AOBLSS, AOBLEQ RMODE ***
+
+AOBLSS.OP..:
+	;********** Hardware dispatch **********;
+	W[2]<--G(RN)+1, SET.PSLCC, LEN(DL),	; increment index, set psl cc's
+	DL<--BYTE,				; force DL to byte for branch displacement
+	GOTO[AOB.RMODE.IB.STALL]		; go case on displacement availability
+
+;= ALIGNLIST 00*	(AOB.RMODE.IB.GOT.DATA,		,
+;=			 AOB.RMODE.IB.STALL,	AOB.RMODE.IB.HALTED)
+
+AOB.RMODE.IB.STALL:
+	;---------------------------------------; IB stall:
+	WBUS<--W[2]-W[0], SET.ALUCC, LONG,	; compare index to limit, set alu cc's
+	ID<--IB.LEN(DL).CASE.AT.[AOB.RMODE.IB.GOT.DATA]	; loop until IB data available
+
+AOB.RMODE.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA,
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, return to [-3] (IB.STALL)
+
+AOB.RMODE.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	G(RN)<--W[2], LONG,			; write index to register
+	CASE8[ALU.NZVC].AT.[AXB.ALU.LEQ.000*]	; case on condition codes from compare
+
+.nobin
+.TOC	"	ACBx"
+
+;	These instructions add a value to an index and test the result against a limit.
+;	The condition codes are set according to the result of the add.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	ACBB		9D	index.mb <-- index.mb + add.rb		fse	rr/bb	iiip	ACBB
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;	ACBW		3D	index.mw <-- index.mw + add.rw		fse	rr/ww	iiip	ACBW
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;	ACBL		F1	index.ml <-- index.ml + add.rl		fse	rr/ll	iiip	ACBL
+;					if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;					if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+;
+;	Entry conditions:
+;		W0	=	first (limit) operand
+;		W2	=	second (add) operand
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (same as third)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The modified index has been stored in the destination memory location or register.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- index LSS 0
+;		Z <-- index EQL 0
+;		V <-- {integer overflow}
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		An ID<--IB.WORD.CASE function would save several cycles.
+;
+.bin
+
+;	ACBx operation:
+;
+;		index.mx <-- index.mx + add.rx
+;			if (add geq 0 and index leq limit) then PC <-- PC + sext(displ.bw)
+;			if (add lss 0 and index geq limit) then PC <-- PC + sext(displ.bw)
+
+ACBB..:						; opcode = 9D
+	;********** Hardware dispatch **********;
+	W[6]<--P[ATDL], GOTO[ACB.COMMON]	; save data length, join common code
+
+ACBW..:						; opcode = 3D
+	;********** Hardware dispatch **********;
+	W[6]<--P[ATDL], GOTO[ACB.COMMON]	; save data length, join common code
+
+ACBL..:						; opcode = F1
+	;********** Hardware dispatch **********;
+	W[6]<--P[ATDL], GOTO[ACB.COMMON]	; save data length, join common code
+
+ACB.COMMON:
+	;---------------------------------------;
+	P[ATDL]<--P[ATDL].OR.K[ATDL.MB],	; change AT/DL from .rx to .mx for index
+	CALL[COPY.W0.TO.W3.GSD..]		; save limit in W3, parse index operand
+
+	;---------------------------------------;
+	WBUS<--W[2], SET.ALUCC, LEN(DL),	; test add operand for positive or negative
+	DL<--WORD				; force dl to WORD for branch displacement
+
+ACB.IB.TEST:
+	;---------------------------------------;
+	P[ATDL]<--W[6],				; assume IB ok, restore AT/DL
+	ID<--IB.LEN(DL).CASE.AT.[ACB.IB.GOT.DATA]	; get displacement from ib, case on stall, halt
+
+;= ALIGNLIST 00*	(ACB.IB.GOT.DATA,		,
+;=			 ACB.IB.STALL,		ACB.IB.HALTED)
+
+ACB.IB.STALL:
+	;---------------------------------------; IB stall:
+	DL<--WORD, GOTO[ACB.IB.TEST]		; force DL to WORD for displ, go retest IB
+
+ACB.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, return to [-3] (IB.STALL)
+
+;	ACBx continued.
+;	Branch displacement obtained.
+
+;	At this point,
+;		W0	=	index
+;		W2	=	adder
+;		W3	=	limit
+;		ATDL	=	saved data length
+;		alu cc's =	set from W2
+
+ACB.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	W[2]<--W[2]+W[0], SET.PSLCC, LEN(DL),	; perform add operation
+	IF[ALU.N]_[ACB.GEQ]			; if add operand < 0, go set up geq limit test
+
+	;---------------------------------------;
+	WBUS<--W[2]-W[3], SET.ALUCC, LEN(DL),	; compare index to limit (test will be leq)
+	IF[RMODE]_[ACB.RMODE]			; branch out on rmode
+
+	;---------------------------------------;
+	MEM(VA)<--W[2], LEN(DL),		; write index to memory
+	CASE8[ALU.NZVC].AT.[AXB.ALU.LEQ.000*]	; case on alu cc's to test for leq
+
+ACB.GEQ:
+	;---------------------------------------;
+	WBUS<--W[3]-W[2], SET.ALUCC, LEN(DL),	; compare limit to index (test will be leq)
+	IF[RMODE]_[ACB.RMODE]			; branch out on rmode
+
+	;---------------------------------------;
+	MEM(VA)<--W[2], LEN(DL),		; write index to memory
+	CASE8[ALU.NZVC].AT.[AXB.ALU.LEQ.000*]	; case on alu cc's to test for leq
+
+ACB.RMODE:
+	;---------------------------------------;
+	G(RN)<--W[2], SET.ALUCC, LEN(DL),	; write index to register (cc's for len(dl))
+	CASE8[ALU.NZVC].AT.[AXB.ALU.LEQ.000*]	; case on alu cc's to test for leq
+
+.nobin
+.TOC	"	BBx, BBxS, BBxC, BBxxI"
+
+;	These instructions test, or test and alter, a one bit field.
+;	The condition codes are not affected.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	BBS		E0	if bit(pos.rl, base.vb) eql 1		fre	rv/lb	x	BBS
+;					then PC <-- PC + sext(displ.bb)
+;	BBC		E1	if bit(pos.rl, base.vb) eql 0		fre	rv/lb	x	BBC
+;					then PC <-- PC + sext(displ.bb)
+;
+;	BBSS		E2	if bit(pos.rl, base.vb) eql 1		fre	rv/lb	x	BBS
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1
+;	BBCS		E3	if bit(pos.rl, base.vb) eql 0		fre	rv/lb	x	BBC
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1
+;
+;	BBSC		E4	if bit(pos.rl, base.vb) eql 1		fre	rv/lb	x	BBS
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0
+;	BBCC		E5	if bit(pos.rl, base.vb) eql 0		fre	rv/lb	x	BBC
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0
+;
+;	BBSSI		E6	if bit(pos.rl, base.vb) eql 1		fre	rv/lb	x	BBS
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 1 INTERLOCKED
+;	BBCCI		E7	if bit(pos.rl, base.vb) eql 0		fre	rv/lb	x	BBC
+;					then PC <-- PC + sext(displ.bb)
+;					bit(pos.rl, base.vb) <-- 0 INTERLOCKED
+;
+;	Entry conditions:
+;		W0	=	first (position) operand
+;		SC	=	first (position) operand duplicate
+;		VA	=	address of second (base) operand, if not a register
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand (byte)
+;
+;	Exit conditions:
+;		The PC has been updated.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BBx operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+
+;	BBxS operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- 1
+
+;	BBxC operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- 0
+
+;	BBxxI operation:
+;
+;		if bit(pos.rl, base.vb) eql x then PC <-- PC + sext(displ.bb)
+;		bit(pos.rl, base.vb) <-- x INTERLOCKED
+
+;***	BBS, BBSS, BBSC, BBSSI not RMODE ***
+
+BBS..:						; opcode = E0
+;BBSS:						; opcode = E2
+;BBSC:						; opcode = E4
+;BBSSI:						; opcode = E6
+	;********** Hardware dispatch **********;
+	SC<--W[0].ANDNOT.K[0F8], SET.ALUCC,	; bit position within byte to SC, set cc's
+	GOTO[BB.MEM.COMMON]			; goto common routine
+
+;***	BBC, BBCS, BBCC, BBCCI not RMODE ***
+
+BBC..:						; opcode = E1
+;BBCS:						; opcode = E3
+;BBCC:						; opcode = E5
+;BBCCI:						; opcode = E7
+	;********** Hardware dispatch **********;
+	SC<--W[0].ANDNOT.K[0F8], SET.ALUCC,	; bit position within byte to SC, set cc's
+	GOTO[BB.MEM.COMMON]			; goto common routine
+
+;	BB memory, continued.
+
+;	At this point,
+;		W0	=	position
+;		VA	=	base address of field
+;		SC	=	position mod 8
+;		DL	=	byte
+;		alu cc's =	set from W0
+
+BB.MEM.COMMON:
+	;---------------------------------------;
+	W[0]<--SEXT.W[0].SHFR.[3],		; compute sign extended field offset
+	STATE.FLAGS<--0,			; clear state<3:0>
+	GOTO[BB.MEM.IB.STALL]			; enter ib stall loop
+
+;= ALIGNLIST 00*	(BB.MEM.IB.GOT.DATA,			,
+;=			 BB.MEM.IB.STALL,	BB.MEM.IB.HALTED)
+
+BB.MEM.IB.STALL:
+	;---------------------------------------; IB stall:
+	W[4]<--P[ONE].SHFL.(SC),		; compute test mask for bit within byte
+	ID<--IB.LEN(DL).CASE.AT.[BB.MEM.IB.STALL]	; get displ from IB, case on stall, halt
+
+BB.MEM.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA,
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, returns to [-3] (IB.STALL)
+
+BB.MEM.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	VA<--VA+W[0],				; add offset onto base address
+	CASE4[OPCODE3-0].AT.[BB.MEM.READ.BBX]	; case on nomod/set/clear/interlock
+
+;	BBx memory, continued.
+
+;	At this point,
+;		W4	=	bit mask for test
+;		VA	=	address of selected byte
+;		DL	=	byte
+
+;= ALIGNLIST *001*	(BB.MEM.READ.BBX,	BB.MEM.READ.BBXS,
+;=			 BB.MEM.READ.BBXC,	BB.MEM.READ.BBXXI)
+;  Opcodes = E0..E7 --> opcode<3:0> = 0???
+
+BB.MEM.READ.BBX:
+	;---------------------------------------; BBx:
+	W[1]<--MEM(VA), LEN(DL),		; read byte containing bit from memory
+	GOTO[BB.MEM.TEST]			; go test bit
+
+BB.MEM.READ.BBXS:
+	;---------------------------------------; BBxS:
+	W[1]<--MEM(VA), LEN(DL),		; read byte containing bit from memory
+	STATE0<--1,				; flag BBxy
+	GOTO[BB.MEM.SET]			; go set bit
+
+BB.MEM.READ.BBXC:
+	;---------------------------------------; BBxC:
+	W[1]<--MEM(VA), LEN(DL),		; read byte containing bit from memory
+	STATE0<--1,				; flag BBxy
+	GOTO[BB.MEM.CLR]			; go clear bit
+
+BB.MEM.READ.BBXXI:
+	;---------------------------------------; BBxxI:
+	W[1]<--MEM(VA).LOCK, LEN(DL),		; read byte and interlock bus
+	DISABLE.IB.PREFETCH,			; disable prefetching while bus locked
+	CASE2[OPCODE3-0].AT.[BB.MEM.SET]	; case on BBSSI vs BBCCI
+
+;= ALIGNLIST *110*	(BB.MEM.SET,	BB.MEM.CLR)
+;  Opcodes = E6, E7 --> opcode<3:0> = 011?
+
+BB.MEM.SET:
+	;---------------------------------------; BBxS, BBSSI:
+	W(6)&, WBUS<--W[1].OR.W[4],		; set bit, copy result to W6
+	CASE2[STATE3-0].AT.[BB.MEM.WRITE.BBXXI]	; case on interlocked vs non-interlocked
+
+BB.MEM.CLR:
+	;---------------------------------------; BBxC, BBCCI:
+	W(6)&, WBUS<--W[1].ANDNOT.W[4],		; clear bit, copy result to W6
+	CASE2[STATE3-0].AT.[BB.MEM.WRITE.BBXXI]	; case on interlocked vs non-interlocked
+
+;	BBx memory, continued.
+
+;	At this point,
+;		W1	=	unmodified byte
+;		W4	=	bit mask for test
+;		W6	=	modified byte
+;		VA	=	address of selected byte
+;		DL	=	byte
+
+;= ALIGNLIST ***0*	(BB.MEM.WRITE.BBXXI,	BB.MEM.TEST.BBXY)
+;  STATE<3:1> = 000 --> STATE<3:0> = 000?
+
+BB.MEM.WRITE.BBXXI:
+	;---------------------------------------; STATE<0> = 0:
+	MEM(VA).UNLOCK<--W[6], LEN(DL),		; go write modified byte to memory, unlock
+	ENABLE.IB.PREFETCH			; re-enable prefetching following bus unlock
+
+BB.MEM.TEST:
+	;---------------------------------------; BBx, BBxxI:
+	WBUS<--W[1].AND.W[4], SET.ALUCC, LONG,	; test specified bit in byte
+	CASE2[OPCODE3-0].AT.[BBS.GROUP]		; split BBSy from BBCy
+
+;= ALIGNLIST *110*	(BBS.GROUP,	BBC.GROUP)
+;  Opcodes = E0,E1,E6,E7 --> opcode<3:0> = 0???
+
+BBS.GROUP:
+	;---------------------------------------; BBS or BBSSI:
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z for branch/no branch
+
+BBC.GROUP:
+	;---------------------------------------; BBC or BBCCI:
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z for no branch/branch
+
+BB.MEM.TEST.BBXY:
+	;---------------------------------------; STATE<0> = 1:
+	WBUS<--W[1].AND.W[4], SET.ALUCC, LONG,	; test specified bit in byte
+	CASE2[OPCODE3-0].AT.[BBSY.GROUP]	; split BBSy from BBCy
+
+;= ALIGNLIST *110*	(BBSY.GROUP,	BBCY.GROUP)
+;  Opcodes = E2..E5 --> opcode<3:0> = 0???
+
+BBSY.GROUP:
+	;---------------------------------------; BBSS or BBSC:
+	MEM(VA)<--W[6], LEN(DL),		; write modified byte to memory
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z for branch/no branch
+
+BBCY.GROUP:
+	;---------------------------------------; BBCS or BBCC:
+	MEM(VA)<--W[6], LEN(DL),		; write modified byte to memory
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z for no branch/branch
+
+;	BBx register mode.
+
+;***	BBS, BBSS, BBSC, BBSSI RMODE ***
+
+BBS.OP..:
+	;********** Hardware dispatch **********;
+	WBUS<--ZEXT.W[SC].SHFR.[5], SET.ALUCC,	; test pos.rl for < 32, set alu.z if valid
+	ID<--IB.LEN(DL).CASE.AT.[BB.RMODE.IB.GOT.DATA]	; loop until branch disp available
+
+;***	BBC, BBCS, BBCC, BBCCI RMODE ***
+
+BBC.OP..:
+	;********** Hardware dispatch **********;
+	WBUS<--ZEXT.W[SC].SHFR.[5], SET.ALUCC,	; test pos.rl for < 32, set alu.z if valid
+	ID<--IB.LEN(DL).CASE.AT.[BB.RMODE.IB.GOT.DATA]	; loop until branch disp available
+
+;= ALIGNLIST 00*	(BB.RMODE.IB.GOT.DATA,			,
+;=			 BB.RMODE.IB.STALL,	BB.RMODE.IB.HALTED)
+
+BB.RMODE.IB.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[BB.RMODE.IB.GOT.DATA]	; loop until branch disp available
+
+BB.RMODE.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA,
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, returns to [-3] (IB.STALL)
+
+BB.RMODE.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	W[4]<--P[ONE].SHFL.(SC),		; create mask to test bit in register,
+	IF[NOT.ALU.Z]_[RSRV.OPER.FLT..]		; if position > 31, fault
+
+	;---------------------------------------;
+	WBUS<--G(RN).AND.W[4], SET.ALUCC, LONG,	; test specified bit in register
+	CASE8[OPCODE3-0].AT.[BB.RMODE.BBS]	; case on opcode<2:0>
+
+;	BBx register mode, continued.
+
+;	At this point,
+;		W4	=	bit mask for test
+;		RN	=	register number
+;		alu.z	=	set if branch to be taken
+
+;= ALIGNLIST *000*	(BB.RMODE.BBS,	BB.RMODE.BBC,	BB.RMODE.BBSS,	BB.RMODE.BBCS,
+;=			 BB.RMODE.BBSC,	BB.RMODE.BBCC,	BB.RMODE.BBSSI,	BB.RMODE.BBCCI)
+;  Opcodes = E0..E7 --> opcode<3:0> = 0???
+
+BB.RMODE.BBS:
+	;---------------------------------------; BBS:
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z to determine branch/no branch
+
+BB.RMODE.BBC:
+	;---------------------------------------; BBC:
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z to determine no branch/branch
+
+BB.RMODE.BBSS:
+	;---------------------------------------; BBSS:
+	G(RN)<--G(RN).OR.W[4],			; set bit in general register
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z to determine branch/no branch
+
+BB.RMODE.BBCS:
+	;---------------------------------------; BBCS:
+	G(RN)<--G(RN).OR.W[4],			; set bit in general register
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z to determine no branch/branch
+
+BB.RMODE.BBSC:
+	;---------------------------------------; BBSC:
+	G(RN)<--G(RN).ANDNOT.W[4],		; clear bit in general register
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z to determine branch/no branch
+
+BB.RMODE.BBCC:
+	;---------------------------------------; BBCC:
+	G(RN)<--G(RN).ANDNOT.W[4],		; clear bit in general register
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z to determine no branch/branch
+
+BB.RMODE.BBSSI:
+	;---------------------------------------; BBSSI:
+	G(RN)<--G(RN).OR.W[4],			; set bit in general register
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z to determine branch/no branch
+
+BB.RMODE.BBCCI:
+	;---------------------------------------; BBCCI:
+	G(RN)<--G(RN).ANDNOT.W[4],		; clear bit in general register
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z to determine no branch/branch
+
+.nobin
+.TOC	"	BLBx"
+
+;	These instructions test the low order bit of the source operand.
+;	The condition codes are not affected.
+;
+;	Mnemonic      Opcode	Operation				Fork	AT/DL	CC	Dispatch
+;	--------      ------	---------				----	-----	--	--------
+;	BLBS		E8	if src.rl<0> eql 1			fe	rr/lb	x	BLBS
+;					then PC <-- PC + sext(displ.bb)
+;	BLBC		E9	if src.rl<0> eql 0			fe	rr/lb	x	BLBC
+;					then PC <-- PC + sext(displ.bb)
+;
+;	Entry conditions:
+;		W0	=	first (source) operand
+;		DL	=	data type of displacement operand (byte)
+;
+;	Exit conditions:
+;		The PC has been updated.
+;		The next microstate is IID.
+;
+;	Condition codes:
+;		N <-- N
+;		Z <-- Z
+;		V <-- V
+;		C <-- C
+;
+;	Size/performance tradeoffs:
+;		None.
+;
+.bin
+
+;	BLBx operation:
+;
+;		if (src.rl<0> eql x) then PC <-- PC + sext(displ.bb)
+
+BLBS..:						; opcode = E8
+	;********** Hardware dispatch **********;
+	WBUS<--W[0].SHFL.[31.],			; test low order bit of source operand
+	SET.ALUCC,				; set alu cc's
+	ID<--IB.LEN(DL).CASE.AT.[BLBS.IB.GOT.DATA]	; get displ from IB, case on stall, halt
+
+;= ALIGNLIST 00*	(BLBS.IB.GOT.DATA,	,
+;=			 BLBS.IB.STALL,	BLBS.IB.HALTED)
+
+BLBS.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	CASE2[ALU.NZVC].AT.[BB.ALU.NEQ.*0**]	; case on alu.z to determine branch/no branch
+
+BLBS.IB.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[BLBS.IB.GOT.DATA]	; loop until data available
+
+BLBS.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA,
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, returns to [-3] (IB.STALL)
+
+BLBC..:						; opcode = E9
+	;********** Hardware dispatch **********;
+	WBUS<--W[0].SHFL.[31.],			; test low order bit of source operand
+	SET.ALUCC,				; set alu cc's
+	ID<--IB.LEN(DL).CASE.AT.[BLBC.IB.GOT.DATA]	; get displ from IB, case on stall, halt
+
+;= ALIGNLIST 00*	(BLBC.IB.GOT.DATA,	,
+;=			 BLBC.IB.STALL,	BLBC.IB.HALTED)
+
+BLBC.IB.GOT.DATA:
+	;---------------------------------------; IB ok:
+	CASE2[ALU.NZVC].AT.[BB.ALU.EQL.*0**]	; case on alu.z to determine no branch/branch
+
+BLBC.IB.STALL:
+	;---------------------------------------; IB stall:
+	ID<--IB.LEN(DL).CASE.AT.[BLBC.IB.GOT.DATA]	; loop until data available
+
+BLBC.IB.HALTED:
+	;---------------------------------------; IB halted:
+	T[SPEC]<--VA,				; save VA,
+	CALL.NO.RETURN+1[SPEC.FORCE.IB.READ..]	; restart prefetch, returns to [-3] (IB.STALL)
+
+;	And now the conditional branch table that makes all this magic work.
+;	This set of interlocked tables is allocated across a contiguous
+;	series of 16 addresses.  It includes the following:
+;
+;		Opcode test for SOBGEQ or SOBGTR.
+;		AOB, ACB test for LSS or LEQ.
+;		Opcode test for AOBLSS or AOBLEQ, ACBx.
+;		BB test for EQL.
+;		BB test for NEQ.
+
+;	First, here are all the alignment constraints.
+
+;= ALIGNLIST *1*0*	(SOB.ZERO.GEQ,	SOB.ZERO.GTR)
+;  Opcodes = F4, F5 --> opcode<3:0> = 010?
+
+;= ALIGNLIST 0001*	(AXB.ALU.LEQ.000*,	AXB.ALU.LEQ.001*,
+;=			 AXB.ALU.LEQ.010*,			,
+;=			 AXB.ALU.LEQ.100*,	AXB.ALU.LEQ.101*,
+;=					,			)
+;  ALU.NZVC combinations 011x, 110x, 111x impossible!
+
+;= ALIGNLIST 1110*	(AXB.ZERO.LSS,	AXB.ZERO.LEQ)
+
+;= ALIGNLIST 10***	(BB.ALU.EQL.*0**,	BB.ALU.EQL.*1**)
+;  ALU.NZVC set by AND or SHIFT --> V = C = 0
+
+;= ALIGNLIST 10***	(BB.ALU.NEQ.*0**,	BB.ALU.NEQ.*1**)
+;  ALU.NZVC set by AND or SHIFT --> V = C = 0
+
+;	Now, here is the table of microinstructions, with allocation notes:
+
+;						; allocation contraint	casing on
+
+;	Not used.				; 0000
+
+AXB.ALU.LEQ.000*:
+	;---------------------------------------; 0001			alu.nzvc = 000?:
+	EXECUTE.IID				; (AxB) result > 0, no branch
+
+;	Not used.				; 0010
+
+AXB.ALU.LEQ.001*:
+	;---------------------------------------; 0011			alu.nzvc = 001?:
+	WBUS<--G[PC]+M[ID],			; (AxB) result < 0
+	LOAD.V&PC.GOTO[AXB.ALU.LEQ.000*]	; do branch
+
+;	Not used.				; 0100
+
+AXB.ALU.LEQ.010*:
+	;---------------------------------------; 0101			alu.nzvc = 010?:
+	CASE2[OPCODE3-0].AT.[AXB.ZERO.LSS]	; (AxB) result = 0, case on AOBLSS (F2)
+						;     vs AOBLEQ (F3), ACBx (9D, 3D, F1)
+						; opcode<0> = 0 for AOBLSS, 1 for others
+
+;	Not used.				; 0110
+
+;	Not used.				; 0111
+
+;	Not used.				; 1000
+
+BB.ALU.NEQ.*0**:				; 10**			alu.nzvc = ?0xx:
+AXB.ALU.LEQ.100*:
+	;---------------------------------------; 1001			alu.nzvc = 100?:
+	WBUS<--G[PC]+M[ID],			; (BBSx) result # 0, (AxB) result < 0
+	LOAD.V&PC.GOTO[AXB.ALU.LEQ.000*]	; do branch
+
+;	Not used.				; 1010
+
+BB.ALU.EQL.*0**:				; 10**			alu.nzvc = ?0xx:
+AXB.ALU.LEQ.101*:
+	;---------------------------------------; 1011			alu.nzvc = 101?:
+	EXECUTE.IID				; (BBCx) result # 0, (AxB) result > 0
+						; no branch
+
+SOB.ZERO.GEQ:
+	;---------------------------------------; *1*0			opcode<3:0> = x1x0:
+	WBUS<--G[PC]+M[ID],			; (SOBGEQ) zero result
+	LOAD.V&PC.GOTO[SOB.ZERO.GTR]		; do branch
+
+BB.ALU.NEQ.*1**:				; 11**			alu.nzvc = ?1xx:
+SOB.ZERO.GTR:
+	;---------------------------------------; *1*1			opcode<3:0> = x1x1:
+	EXECUTE.IID				; (BBSx) result = 0, (SOBGTR) zero result,
+						; no branch
+
+AXB.ZERO.LSS:
+	;---------------------------------------; 1110			opcode<3:0> = ???0:
+	EXECUTE.IID				; (AOBLSS) zero result, no branch
+
+BB.ALU.EQL.*1**:				; 11**			alu.nzvc = ?1xx:
+AXB.ZERO.LEQ:
+	;---------------------------------------; 1111			opcode<3:0> = ???1:
+	WBUS<--G[PC]+M[ID],			; (BBCx) result = 0, (AOBLEQ, ACBx) zero result
+	LOAD.V&PC.GOTO[AXB.ZERO.LSS]		; do branch
+
+;= END CTRL

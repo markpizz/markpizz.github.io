@@ -1,0 +1,812 @@
+.TOC	"MULDIV.MIC -- Multiply and Divide Instructions"
+.TOC	"Revision 2.0"
+
+;	Bob Supnik
+
+.nobin
+;****************************************************************************
+;*									    *
+;*  COPYRIGHT (c) 1988, 1989 BY				    		    *
+;*  DIGITAL EQUIPMENT CORPORATION, MAYNARD, MASSACHUSETTS.		    *
+;*  ALL RIGHTS RESERVED.						    *
+;* 									    *
+;*  THIS SOFTWARE IS FURNISHED UNDER A LICENSE AND MAY BE USED AND COPIED   *
+;*  ONLY IN  ACCORDANCE WITH  THE  TERMS  OF  SUCH  LICENSE  AND WITH THE   *
+;*  INCLUSION OF THE ABOVE COPYRIGHT NOTICE.  THIS SOFTWARE OR ANY  OTHER   *
+;*  COPIES THEREOF MAY NOT BE PROVIDED OR OTHERWISE MADE AVAILABLE TO ANY   *
+;*  OTHER PERSON.  NO TITLE TO AND OWNERSHIP OF  THE  SOFTWARE IS  HEREBY   *
+;*  TRANSFERRED.							    *
+;* 									    *
+;*  THE INFORMATION IN THIS SOFTWARE IS  SUBJECT TO CHANGE WITHOUT NOTICE   *
+;*  AND  SHOULD  NOT  BE  CONSTRUED AS  A COMMITMENT BY DIGITAL EQUIPMENT   *
+;*  CORPORATION.							    *
+;* 									    *
+;*  DIGITAL ASSUMES NO RESPONSIBILITY FOR THE USE  OR  RELIABILITY OF ITS   *
+;*  SOFTWARE ON EQUIPMENT WHICH IS NOT SUPPLIED BY DIGITAL.		    *
+;*									    *
+;****************************************************************************
+.TOC	"	Revision History"
+
+; Edit	  Date	 Who	     Description
+; ---- --------- ---	---------------------
+; (2)0 16-Nov-89 RMS	Revised for simplified decoder.
+;    4 13-Oct-89 RMS	Documented ADR forwarding restriction.
+;    3 07-Oct-89 RMS	Revised EDIV to set remainder sign.
+;    2 17-Jul-89 RMS	Revised to pad result reads with nops.
+;    1 02-Jul-89 RMS	Editorial changes.
+; (1)0 11-Jun-89 RMS	Revised for release to CMS.
+;    3 30-Apr-89 RMS	Revised EMUL, EDIV, DIVix.
+;    2 02-Feb-89 RMS	Revised for new microbranch latencies.
+;    1 10-Jan-89 RMS	Revised for new microarchitecture.
+; (0)0 02-Nov-88 RMS	First edit for Raven.
+
+.bin
+;= BEGIN MULDIV
+.nobin
+
+;	This module implements integer multiply and divide.
+;	The instructions implemented here are:
+;
+;	Opcode	 Instruction							N Z V C		Exceptions
+;	------	 -----------							-------		----------
+;
+;	86	 DIVB2 divr.rb, quo.mb						* * * 0		iov, idvz
+;	C6	 DIVL2 divr.rl, quo.ml						* * * 0		iov, idvz
+;	A6	 DIVW2 divr.rw, quo.mw						* * * 0		iov, idvz
+;
+;	87	 DIVB3 divr.rb, divd.rb, quo.wb					* * * 0		iov, idvz
+;	C7	 DIVL3 divr.rl, divd.rl, quo.wl					* * * 0		iov, idvz
+;	A7	 DIVW3 divr.rw, divd.rw, quo.ww					* * * 0		iov, idvz
+;
+;	7B	 EDIV divr.rl, divd.rq, quo.wl, rem.wl				* * * 0		iov, idvz
+;
+;	7A	 EMUL mulr.rl, muld.rl, add.rl, prod.wq				* * 0 0
+;
+;	84	 MULB2 mulr.rb, prod.mb						* * * 0		iov
+;	C4	 MULL2 mulr.rl, prod.ml						* * * 0		iov
+;	A4	 MULW2 mulr.rw, prod.mw						* * * 0		iov
+;
+;	85	 MULB3 mulr.rb, muld.rb, prod.wb				* * * 0		iov
+;	C5	 MULL3 mulr.rl, muld.rl, prod.wl				* * * 0		iov
+;	A5	 MULW3 mulr.rw, muld.rw, prod.ww				* * * 0		iov
+;
+.TOC	"	MULx2, MULx3"
+
+;	These instructions multiply two integers.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	MULB2		84	prod.mb <-- mulr.rb * prod.mb		2	rm/bb	iiii	MULBW2		--
+;	MULW2		A4	prod.mw <-- mulr.rw * prod.mw		2	rm/ww	iiii	MULBW2		--
+;	MULL2		C4	prod.ml <-- mulr.rl * prod.ml		2	rm/ll	iiii	MULL2		--
+;
+;	MULB3		85	prod.wb <-- mulr.rb * muld.rb		3	rrm/bbb	iiii	MULBW3		--
+;	MULW3		A5	prod.ww <-- mulr.rw * muld.rw		3	rrm/www	iiii	MULBW3		--
+;	MULL3		C5	prod.wl <-- mulr.rl * muld.rl		3	rrw/lll	iiii	MULL3		--
+;
+;	Entry conditions from specifier flows (two operands):
+;		W0	=	first (multiplicand) operand
+;		W2	=	second (multiplier/product) operand
+;		VA	=	address of second (multiplier/product) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand
+;
+;	Entry conditions from specifier flows (three operands):
+;		W0	=	first (multiplicand) operand
+;		W2	=	second (multiplier) operand
+;		W4	=	third (destination) operand, if byte or word, if memory
+;		VA	=	address of third (product) operand, if memory
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow			[Integer overflow trap enabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Fbox instructions are not optimized for trailing register specifiers.
+;
+.bin
+
+;	MULx2 operation:
+;
+;		dst.mx <-- src.rx * dst.mx
+
+MULBW2:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP]				; go read result, write to memory
+
+MULBW2.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP.R]				; go read result, write to register
+
+MULL2:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP]				; go read result, write to memory
+
+MULL2.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP.R]				; go read result, write to register
+
+
+;	MULx3 operation:
+;
+;		dst.wx <-- src1.rx * src2.rx
+
+MULBW3:
+	;********** Hardware dispatch **********;
+	[W2] <-- [W4], LONG,			; move destination surround to W2
+	GOTO [FP]				; go read result, write to memory
+
+MULBW3.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP.R]				; go read result, write to register
+
+MULL3:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP]				; go read result, write to memory
+
+MULL3.R:
+	;********** Hardware dispatch **********;
+	NOP,					; insert a nop
+	GOTO [FP.R]				; go read result, write to register
+
+.nobin
+.TOC	"	EMUL"
+
+;	This instruction multiplies two integers to produce a quadword result.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	EMUL		7A	prod.wq <-- mulr.rl * muld.rl +		4     rrrw/lllq	iiii	EMUL		--
+;					    sext(add.rl)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (multiplicand) operand
+;		W2	=	second (multiplier) operand
+;		W4	=	third (add) operand
+;		VA	=	address of fourth (product) operand, if memory
+;		RN	=	register number of fourth specifier
+;		DL	=	data type of fourth operand (quadword)
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- 0				[Integer overflow disabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Fbox instructions are not optimized for trailing register specifiers.
+;
+.bin
+
+;	EMUL operation:
+;
+;		prod.wq <-- mulr.rl * muld.rl + sext(add.rl)
+
+EMUL:
+	;********** Hardware dispatch **********;
+	[W0] <-- FPU RESULT 1, LONG,		; read first fpu result
+	SET PSL CC (IIII)			; clear psl.c, psl map is iiii
+
+	;---------------------------------------;
+	MEM (VA)&, [WDR] <-- [W0] + [W4],	; compute low result, write to memory
+	LEN(DL),				;
+	SET PSL CC (IIIP),			; set psl cc's, psl map is iiip
+	SET NORETRY,				; set disable retry flag
+	CALL [EMUL.HIGH.RESULT]			; compute high result, in W1
+
+WRITE.MEM.QW.SET.PSLCC:
+	;---------------------------------------;
+	VA <-- [VA] + 4,			; point at second longword
+	MEM (VA)&, [WDR] <-- B [W1], LONG,	; write second longword to memory
+	SET PSL CC (IIIP.QUAD),			; set psl cc's, psl map is iiip (quad)
+	LAST CYCLE				; decode next instruction
+
+EMUL.R:
+	;********** Hardware dispatch **********;
+	[W0] <-- FPU RESULT 1, LONG,		; read first fpu result
+	SET PSL CC (IIII)			; clear psl.c, psl map is iiii
+
+	;---------------------------------------;
+	[Rrn] <-- [W0] + [W4], LONG,		; compute low result, write to register
+	SET PSL CC (IIIP),			; set psl cc's, psl map is iiip
+	SET NORETRY,				; set disable retry flag
+	CALL [EMUL.HIGH.RESULT]			; compute high result, in W1
+
+WRITE.REG.QW.SET.PSLCC:
+	;---------------------------------------;
+	[Rrn+1] <-- [W1], LONG,			; write second longword to register
+	SET PSL CC (IIIP.QUAD),			; set psl cc's, psl map is iiip (quad)
+	LAST CYCLE				; decode next instruction
+
+;	EMUL, continued.
+;	Subroutine to compute second result.
+
+;	Entry conditions:
+;		W4	=	add operand
+;		Wbus.c	=	carry from low result calculation
+;
+;	Exit conditions:
+;		W1	=	high result
+;		W5	=	sext (W4)
+
+EMUL.HIGH.RESULT:
+	;---------------------------------------;
+	[W5] <-- SEXT [W4], LONG,		; calculate sext (add operand)
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- FPU RESULT 2, LONG,		; get second fpu result
+	CASE AT [EMUL.HIGH.C.CLEAR]		; case on Wbus cc's from call
+
+;= ALIGNLIST 1110*	(EMUL.HIGH.C.CLEAR,	EMUL.HIGH.C.SET)
+
+EMUL.HIGH.C.CLEAR:
+	;---------------------------------------; wbus.c = 0:
+	[W1] <-- [W1] + [W5], LONG,		; compute high result
+	RETURN					; return to caller
+
+EMUL.HIGH.C.SET:
+	;---------------------------------------; wbus.c = 1:
+	[W1] <-- [W1] + [W5] + 1, LONG,		; compute high result with carry in
+	RETURN					; return to caller
+
+.nobin
+.TOC	"	DIVx2, DIVx3"
+
+;	These instructions divide two integers and return the quotient.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL	CC	Dispatch	BCOND
+;	--------      ------	---------				----	-----	--	--------	-----
+;	DIVB2		86	quo.mb <-- quo.mb / divr.rb		2	rm/bb	iiii	DIVBW2		--
+;	DIVW2		A6	quo.mw <-- quo.mw / divr.rw		2	rm/ww	iiii	DIVBW2		--
+;	DIVL2		C6	quo.ml <-- quo.ml / divr.rl		2	rm/ll	iiii	DIVL2		--
+;
+;	DIVB3		87	quo.wb <-- divd.rb / divr.rb		3	rrm/bbb	iiii	DIVBW3		--
+;	DIVW3		A7	quo.ww <-- divd.rw / divr.rw		3	rrm/www	iiii	DIVBW3		--
+;	DIVL3		C7	quo.wl <-- divd.rl / divr.rl		3	rrw/lll	iiii	DIVL3		--
+;
+;	Entry conditions from specifier flows (two operands):
+;		W0	=	first (divisor) operand
+;		W2	=	second (dividend/quotient) operand
+;		VA	=	address of second (dividend/quotient) operand, if memory
+;		RN	=	register number of second specifier
+;		DL	=	data type of second operand 
+;
+;	Entry conditions from specifier flows (three operands):
+;		W0	=	first (divisor) operand
+;		W2	=	second (dividend) operand
+;		W4	=	third (quotient) operand, if byte or word, if memory
+;		VA	=	address of third (quotient) operand, if memory
+;		RN	=	register number of third specifier
+;		DL	=	data type of third operand 
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory location or register.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow or divide by zero	[Integer overflow trap enabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Fbox instructions are not optimized for trailing register specifiers.
+;		2) The Fbox does not return the proper result on divide by zero.
+;
+.bin
+
+;	DIVx2 operation:
+;
+;		quo.mx <-- quo.mx / divr.rx
+
+DIVBW2:
+	;********** Hardware dispatch **********;
+	[W4] <-- [W2], LONG,			; for byte/word insert, move dst
+	GOTO [DIVBW3]				; join three operand flows
+
+DIVBW2.R:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LEN(DL),		; test divisor
+	GOTO [DIVIX.R]				; join common divide register flows
+
+DIVL2:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LONG,			; test divisor
+	GOTO [DIVLX]				; join common divide long flows
+
+DIVL2.R:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LONG,			; test divisor
+	GOTO [DIVIX.R]				; join common divide register flows
+
+;	DIVx3 operation:
+;
+;		quo.wx <-- divd.rx / divr.rx
+
+DIVBW3:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LEN(DL)		; test divisor
+
+	;---------------------------------------;
+	[W4] <-- [W2], LEN(DL),			; insert dividend for overflow path
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- 000000[ARITH.TRAP.INTDIV],	; set up trap parameter
+	LONG,					;
+	SET PSL CC (PPJP),			; set psl.v, psl map is ppjp
+	CASE AT [DIVBW3.RESULT]			; case on divisor = 0
+
+;= ALIGNLIST 10***	(DIVBW3.RESULT,	DIVBW3.BY.ZERO)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+DIVBW3.RESULT:
+	;---------------------------------------; wbus.z = 0:
+	[W4] <-- FPU RESULT 1, LEN(DL),		; get fpu result, insert in longword
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	GOTO [WRITE.MEM.W4]			; go write result to memory
+
+DIVBW3.BY.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	MEM (VA)&, [WDR] <-- [W4] LROT (VA),	; divide by zero, result is dividend
+	LEN(DL),				;
+	SET NORETRY,				; set disable retry flag
+	GOTO [IE.ARITH.TRAP.WAIT]		; go take exception
+
+DIVBW3.R:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LEN(DL),		; test divisor
+	GOTO [DIVIX.R]				; join common divide register flows
+
+;	DIVx3, continued.
+
+DIVL3:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LONG			; test divisor
+
+DIVLX:
+	;---------------------------------------;
+	[WBUS] <-- [W2], LONG,			; test dividend
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- 000000[ARITH.TRAP.INTDIV],	; set up trap parameter
+	LONG,					;
+	SET PSL CC (PPJP),			; set psl.v, psl map is ppjp
+	CASE AT [DIVLX.RESULT]			; case on divisor = 0
+
+;= ALIGNLIST 10***	(DIVLX.RESULT,	DIVLX.BY.ZERO)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+DIVLX.RESULT:
+	;---------------------------------------; wbus.z = 0:
+	MEM (VA)&, [WDR] <-- FPU RESULT 1, LONG,; get fpu result, write to memory
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE ENABLE OVERFLOW		; decode next, enable overflow
+
+DIVLX.BY.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	MEM (VA)&, [WDR] <-- [W2], LONG,	; divide by zero, result is dividend
+	SET NORETRY,				; set disable retry flag
+	GOTO [IE.ARITH.TRAP.WAIT]		; go take exception
+
+;	DIVx3, continued.
+
+DIVL3.R:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LONG			; test divisor
+
+DIVIX.R:
+	;---------------------------------------;
+	[WBUS] <-- [W2], LEN(DL),		; test dividend
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W3] <-- 000000[ARITH.TRAP.INTDIV],	; set up trap parameter
+	LONG,					;
+	SET PSL CC (PPJP),			; set psl.v, psl map is ppjp
+	CASE AT [DIVIX.R.RESULT]		; case on divisor = 0
+
+;= ALIGNLIST 10***	(DIVIX.R.RESULT,	DIVIX.R.BY.ZERO)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+DIVIX.R.RESULT:
+	;---------------------------------------; wbus.z = 0:
+	[Rrn] <-- FPU RESULT 1, LEN(DL),	; get fpu result, insert/write to register
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SET NORETRY,				; set disable retry flag
+	LAST CYCLE ENABLE OVERFLOW		; decode next, enable overflow
+
+DIVIX.R.BY.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	[Rrn] <-- [W2], LEN(DL),		; divide by zero, result is dividend
+	SET NORETRY,				; set disable retry flag
+	GOTO [IE.ARITH.TRAP.WAIT]		; go take exception
+
+.nobin
+.TOC	"	EDIV"
+
+;	This instruction divides two integers and returns both the quotient
+;	and the remainder.
+;
+;	Mnemonic      Opcode	Operation				Spec	AT/DL		CC	Dispatch       BCOND
+;	--------      ------	---------				----	-----		--	--------       -----
+;	EDIV		7B	quo.wl <-- divd.rq / divr.rl		4	rrvw/lqll	iiii	EDIV	       --
+;				rem.wl <-- rem(divd.rq,divr.rl)
+;
+;	Entry conditions from specifier flows:
+;		W0	=	first (divisor) operand
+;		W3'W2	=	second (dividend) operand
+;		W4	=	address of third (quotient) operand, if memory
+;		W5	=	register number of third (quotient) specifier, if register
+;		W6 = VA	=	address of fourth (remainder) operand, if memory
+;		RN	=	register number of fourth specifier
+;		DL	=	data type of fourth operand (longword)
+;		STATE<2> =	1 if third specifier is register mode, 0 otherwise
+;
+;	Exit conditions:
+;		The PSL condition codes are set.
+;		The result has been written to the destination memory locations or registers.
+;
+;	Condition codes:
+;		N <-- product LSS 0
+;		Z <-- product EQL 0
+;		V <-- overflow or divide by zero		[Integer overflow trap enabled.]
+;		C <-- 0
+;
+;	Tradeoffs:
+;		None.
+;
+;	Notes:
+;		1) Because the .vl specifier for this instruction follows a specifier whose
+;		   DL is quadword, the SPEC.VF.REG flow correctly stores the register number
+;		   into W5.  This operation depends on the fact that the SPEC.VF.REG case is
+;		   on dl<1>, which groups dl = long and dl = quad together.
+;		2) EDIV has two destination operands and must assure the accessibility of both
+;		   before writing either.
+;		3) Fbox instructions are not optimized for trailing register specifiers.
+;		4) The Fbox does not return the proper result on divide by zero or integer overflow,
+;		   and it does always returns the remainder as a positive number.
+;
+.bin
+
+;	EDIV operation:
+;
+;		quo.wl <-- divd.rq / divr.rl
+;		rem.wl <-- rem (divd.rq, divr.rl)
+
+EDIV:
+	;********** Hardware dispatch **********;
+	[WDR] <-- MEM.WCHK (VA), LONG,		; check accessibility of second dest
+	STATE.0 <-- 1				; flag second destination is memory
+
+EDIV.R:
+	;********** Hardware dispatch **********;
+	[WBUS] <-- [W0], LONG,			; [1] test divisor
+	SET PSL CC (IIII)			; clear psl.c, psl map is iiii
+
+	;---------------------------------------;
+	[TSPEC] <-- 000000[ARITH.TRAP.INTOVF],	; [2] assume error will be integer overflow
+	LONG,					;
+	SET PSL CC (PPJP),			; set psl.v, psl map is ppjp
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[WBUS] <-- [W3], LONG,			; [3] test sign of high dividend
+	CASE AT [EDIV.RESULT]			; case on divisor = 0 from [1]
+
+;= ALIGNLIST 10***	(EDIV.RESULT,	EDIV.DIVR.ZERO)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+EDIV.RESULT:
+	;---------------------------------------; wbus.z = 0:
+	[W0] <-- FPU RESULT 1, LONG,		; [4] if no overflow, 1st result = quotient
+	SET PSL CC (IIII),			; set psl cc's from fpu
+	SELECT [WBUS.NZVC]			; prepare to case on Wbus cc's
+
+	;---------------------------------------;
+	[W1] <-- FPU RESULT 2, LONG,		; [5] if no overflow, 2nd result = remainder
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [EDIV.TEST.REG]			; case on sign of dividend from [3]
+
+EDIV.DIVR.ZERO:
+	;---------------------------------------; wbus.z = 1:
+	[TSPEC] <-- 000000[ARITH.TRAP.INTDIV],	; ["5"] error is divide by zero, psl.v is set
+	LONG,					; psl cc's now set as though by FPU
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	GOTO [EDIV.TEST.REG]			; go test register number
+
+;	EDIV, continued.
+
+;	At this point,
+;		W0	=	first result (not set if divr = 0)
+;		W1	=	second result (not set if divr = 0)
+;		W4	=	address of first result, if memory
+;		W5	=	register number of first result, if register
+;		W6	=	address of second result, if memory
+;		TSPEC	=	trap parameter if error
+;		RN	=	register number of second result specifier
+;		PSL CC's =	set from result (??10 if divide by zero)
+;		STATE<0> =	2nd result is memory
+
+;= ALIGNLIST 01***	(EDIV.TEST.REG,	EDIV.DIVD.NEG)
+;  WBUS.NZVC set by MOVE --> V = C = 0
+
+EDIV.DIVD.NEG:
+	;---------------------------------------; wbus.n = 1:
+	[W1] <-- [K0] - [W1], LONG,		; [5a] dividend negative, negate remainder
+	SELECT [STATE.3-0]			; prepare to case on state flags
+
+EDIV.TEST.REG:
+	;---------------------------------------;
+	[WBUS] <-- [W5], LONG,			; [6] test register number of first result
+	SELECT [PSL.3-0],			; prepare to case on psl cc's
+	CASE AT [EDIV.1ST.MEM]			; case on 1st result memory vs register
+
+;= ALIGNLIST *0*1*	(EDIV.1ST.MEM,	EDIV.1ST.REG)
+;  STATE<3,1> = 00 --> STATE<3:0> = 0?0?
+
+EDIV.1ST.REG:
+	;---------------------------------------; state<2> = 1:
+	[WBUS] <-- [W5], LONG,			; [7] retest register number of first result
+	SELECT [WBUS.3-0],			; prepare to case on register number
+	CASE AT [EDIV.1ST.REG.V.CLEAR]		; case on psl cc's from [4]
+
+;= ALIGNLIST 110**	(EDIV.1ST.REG.V.CLEAR,	EDIV.1ST.REG.V.SET)
+;  PSL<c> = 0 --> PSL<nzvc> = ???0
+
+EDIV.1ST.REG.V.CLEAR:
+	;---------------------------------------; psl.v = 0:
+	[W3] <-- [TSPEC], LONG,			; [8,9] copy trap code to correct register
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [EDIV.REG.0]			; case on register number from [6,7]
+
+EDIV.1ST.REG.V.SET:
+	;---------------------------------------; wbus.n = 0:
+	[W0] <-- [W2], LONG,			; [8] overflow, 1st result = low divd
+	STATE.1 <-- 1,				; flag error
+	SELECT [WBUS.3-0],			; prepare to case on Wbus<3:0>
+	GOTO [EDIV.1ST.REG.V.CLEAR]		; go case and store register
+
+;	EDIV, continued.
+;	First destination is register, continued.
+;	Register breakouts.
+
+;	At this point,
+;		W0	=	first result
+;		W1	=	second result
+;		W3	=	trap parameter if error
+;		W6	=	address of second result, if memory
+;		RN	=	register number of second result specifier
+;		STATE<1:0> =	<error><2nd result is memory>
+
+;= ALIGNLIST 0000*	(EDIV.REG.0,	EDIV.REG.1,	EDIV.REG.2,	EDIV.REG.3,
+;=			 EDIV.REG.4,	EDIV.REG.5,	EDIV.REG.6,	EDIV.REG.7,
+;=			 EDIV.REG.8,	EDIV.REG.9,	EDIV.REG.10,	EDIV.REG.11,
+;=			 EDIV.REG.12,	EDIV.REG.13,	EDIV.REG.14,	EDIV.REG.15)
+
+EDIV.REG.0:
+	;---------------------------------------; wbus<3:0> = 0000:
+	[R0] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.1:
+	;---------------------------------------; wbus<3:0> = 0001:
+	[R1] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.2:
+	;---------------------------------------; wbus<3:0> = 0010:
+	[R2] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.3:
+	;---------------------------------------; wbus<3:0> = 0011:
+	[R3] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.4:
+	;---------------------------------------; wbus<3:0> = 0100:
+	[R4] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.5:
+	;---------------------------------------; wbus<3:0> = 0101:
+	[R5] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.6:
+	;---------------------------------------; wbus<3:0> = 0110:
+	[R6] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.7:
+	;---------------------------------------; wbus<3:0> = 111:
+	[R7] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.8:
+	;---------------------------------------; wbus<3:0> = 1000:
+	[R9] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.9:
+	;---------------------------------------; wbus<3:0> = 1001:
+	[R9] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.10:
+	;---------------------------------------; wbus<3:0> = 1010:
+	[R10] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.11:
+	;---------------------------------------; wbus<3:0> = 1011:
+	[R11] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.12:
+	;---------------------------------------; wbus<3:0> = 1100:
+	[R12] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.13:
+	;---------------------------------------; wbus<3:0> = 1101:
+	[R13] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.14:
+	;---------------------------------------; wbus<3:0> = 1110:
+	[SP] <-- [W0], LONG,			; [9] store first result
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags
+
+EDIV.REG.15:
+	;---------------------------------------; wbus<3:0> = 1111:
+	RESERVED ADDRESSING MODE		; [9] write to PC, fault
+
+;	EDIV, continued.
+;	First destination is register.
+
+;	At this point,
+;		W0	=	first result (not set if divr = 0)
+;		W1	=	second result (not set if divr = 0)
+;		W4	=	address of first result, if memory
+;		W5	=	register number of first result, if register
+;		W6	=	address of second result, if memory
+;		TSPEC	=	trap parameter if error
+;		RN	=	register number of second result specifier
+;		STATE<0> =	2nd result is memory
+
+EDIV.1ST.MEM:
+	;---------------------------------------; state<2> = 0:
+	[W3] <-- [TSPEC], LONG,			; [7] copy error code to correct register
+	SELECT [STATE.3-0],			; prepare to case on state flags
+	CASE AT [EDIV.1ST.MEM.V.CLEAR]		; case on psl cc's from [4]
+
+;= ALIGNLIST 110**	(EDIV.1ST.MEM.V.CLEAR,	EDIV.1ST.MEM.V.SET)
+;  PSL<c> = 0 --> PSL<nzvc> = ???0
+
+EDIV.1ST.MEM.V.CLEAR:
+	;---------------------------------------; psl.v = 0:
+	VA <-- [W4],				; [8] get address of 1st result
+						; >> W4 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W0], LONG,	; write quotient to memory
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.REM.REG]		; case on state flags for remainder
+
+EDIV.1ST.MEM.V.SET:
+	;---------------------------------------; psl.v = 1:
+	VA <-- [W4],				; [8] get address of 1st result
+						; >> W4 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W2], LONG,	; write low dividend to memory
+	SET PSL CC (IIII),			; set psl cc's, psl map is iiii
+	SET NORETRY,				; set disable retry flag
+	CASE AT [EDIV.WRITE.ERR.REG]		; case on state flags for remainder
+
+;	EDIV, continued.
+;	Write second result.  NORETRY is already set.
+
+;	At this point,
+;		W1	=	second result
+;		W3	=	trap parameter if error
+;		W6	=	address of second result, if memory
+;		RN	=	register number of second result specifier
+;		STATE<1:0> =	<error><2nd result is memory>
+
+;= ALIGNLIST *100*	(EDIV.WRITE.REM.REG,	EDIV.WRITE.REM.MEM,
+;=			 EDIV.WRITE.ERR.REG,	EDIV.WRITE.ERR.MEM)
+;  STATE<3> = 0 --> STATE<3:0> = 0???
+
+EDIV.WRITE.REM.REG:
+	;---------------------------------------; state<1:0> = 00:
+	[Rrn] <-- [W1], LONG,			; write second result to register
+	LAST CYCLE				; decode next instruction
+
+EDIV.WRITE.REM.MEM:
+	;---------------------------------------; state<1:0> = 01:
+	VA <-- [W6],				; point at second destination
+						; >> W6 not written in prev cycle
+	MEM (VA)&, [WDR] <-- B [W1], LONG,	; write second result to memory
+	LAST CYCLE				; decode next instruction
+
+EDIV.WRITE.ERR.REG:
+	;---------------------------------------; state<1:0> = 10:
+	[Rrn] <-- 000000[00], LONG,		; error, second result is zero
+	GOTO [EDIV.ERROR]			; go set psl.v
+
+EDIV.WRITE.ERR.MEM:
+	;---------------------------------------; state<1:0> = 11:
+	VA <-- [W6],				; point at second destination
+						; >> W6 not written in prev cycle
+	MEM (VA)&, [WDR] <-- 000000[00], LONG,	; error, second result is zero
+	GOTO [EDIV.ERROR]			; go set psl.v
+
+EDIV.ERROR:
+	;---------------------------------------;
+	SET PSL(V),				; set psl.v
+	GOTO [IE.ARITH.TRAP.WAIT]		; go to exception flows
+
+;= END MULDIV
